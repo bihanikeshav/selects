@@ -11,6 +11,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
 )
@@ -106,4 +107,34 @@ class PipelineState(Base):
 
     __table_args__ = (
         Index("ix_pipeline_states_work", "classical_done", "embedding_done"),
+    )
+
+
+class Embedding(Base):
+    """SigLIP image embedding + IQA score for a photo."""
+
+    __tablename__ = "embeddings"
+
+    photo_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("photos.id", ondelete="CASCADE"), primary_key=True
+    )
+    siglip: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)  # 1152 * 2 bytes (fp16) = 2304 bytes
+    aesthetic_iqa: Mapped[Optional[float]] = mapped_column(Float, default=None)
+
+    photo: Mapped["Photo"] = relationship("Photo")
+
+
+class PhotoTag(Base):
+    """Zero-shot tag assigned to a photo via SigLIP similarity."""
+
+    __tablename__ = "photo_tags"
+
+    photo_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("photos.id", ondelete="CASCADE"), primary_key=True
+    )
+    tag: Mapped[str] = mapped_column(String(64), primary_key=True)
+    score: Mapped[float] = mapped_column(Float, nullable=False)
+
+    __table_args__ = (
+        Index("ix_photo_tags_tag", "tag"),
     )
