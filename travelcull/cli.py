@@ -19,7 +19,11 @@ def main():
 
 @main.command()
 @click.argument("folder", type=click.Path(exists=True, file_okay=False, path_type=Path))
-@click.option("--pass", "pass_", type=click.Choice(["all", "index", "classical"]), default="all")
+@click.option(
+    "--pass", "pass_",
+    type=click.Choice(["all", "index", "classical", "embed", "tag"]),
+    default="all",
+)
 def index(folder: Path, pass_: str):
     """Index a folder and run available pipeline stages."""
     cfg = get_folder_config(folder)
@@ -38,6 +42,22 @@ def index(folder: Path, pass_: str):
             on_progress=lambda i, t, name: click.echo(f"[{i}/{t}] classical: {name}", err=True),
         )
         click.echo(f"classical: {processed} processed")
+
+    if pass_ == "embed":
+        from travelcull.ml.embed import run_embedding_stage
+        n = run_embedding_stage(
+            cfg,
+            on_progress=lambda i, t, name: click.echo(f"[{i}/{t}] embed: {name}", err=True),
+        )
+        click.echo(f"embed: {n} processed")
+
+    if pass_ == "tag":
+        from travelcull.ml.tags import run_tag_stage
+        n = run_tag_stage(
+            cfg,
+            on_progress=lambda i, t, name: click.echo(f"[{i}/{t}] tag: {name}", err=True),
+        )
+        click.echo(f"tag: {n} photos tagged")
 
 
 @main.command()

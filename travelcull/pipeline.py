@@ -14,6 +14,19 @@ from travelcull.config import FolderConfig
 from travelcull.db import init_db, session_scope
 from travelcull.db.models import ClassicalScore, PipelineState, Photo
 
+# Re-export ML stages — lazy so torch is not imported at module load time.
+# Callers can do: from travelcull.pipeline import run_embedding_stage
+def run_embedding_stage(cfg, on_progress=None, batch_size=16):  # noqa: F811
+    """Lazy proxy: imports travelcull.ml.embed.run_embedding_stage on first call."""
+    from travelcull.ml.embed import run_embedding_stage as _fn
+    return _fn(cfg, on_progress=on_progress, batch_size=batch_size)
+
+
+def run_tag_stage(cfg, on_progress=None, top_k=3, min_score=0.15, tag_prompts=None):  # noqa: F811
+    """Lazy proxy: imports travelcull.ml.tags.run_tag_stage on first call."""
+    from travelcull.ml.tags import run_tag_stage as _fn
+    return _fn(cfg, on_progress=on_progress, top_k=top_k, min_score=min_score, tag_prompts=tag_prompts)
+
 log = logging.getLogger(__name__)
 ProgressCb = Callable[[int, int, str], None] | None
 
