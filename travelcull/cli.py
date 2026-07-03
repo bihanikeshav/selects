@@ -21,7 +21,8 @@ def main():
 @click.argument("folder", type=click.Path(exists=True, file_okay=False, path_type=Path))
 @click.option(
     "--pass", "pass_",
-    type=click.Choice(["all", "index", "classical", "embed", "tag", "smart_tag", "story"]),
+    type=click.Choice(["all", "index", "classical", "embed", "tag", "smart_tag", "story",
+                       "face_embed", "moment"]),
     default="all",
 )
 def index(folder: Path, pass_: str):
@@ -74,6 +75,22 @@ def index(folder: Path, pass_: str):
             on_progress=lambda i, t, name: click.echo(f"[{i}/{t}] story: {name}", err=True),
         )
         click.echo(f"story: {n} stories built")
+
+    if pass_ == "face_embed":
+        from travelcull.ml.faces import run_face_embedding_stage
+        n = run_face_embedding_stage(
+            cfg,
+            on_progress=lambda i, t, name: click.echo(f"[{i}/{t}] face_embed: {name}", err=True),
+        )
+        click.echo(f"face_embed: {n} photos processed")
+
+    if pass_ == "moment":
+        from travelcull.ml.moments import run_moment_stage
+        n = run_moment_stage(
+            cfg,
+            on_progress=lambda i, t, name: click.echo(f"[{i}/{t}] moment: {name}", err=True),
+        )
+        click.echo(f"moment: {n} moments built")
 
 
 @main.command()

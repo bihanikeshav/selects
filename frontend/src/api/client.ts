@@ -1,13 +1,14 @@
-import type { ClusterList, PhotoList, StoryList } from "./types";
+import type { ClusterList, Moment, MomentList, PhotoList, StoryList, TagList } from "./types";
 
 const BASE = "/api";
 
-export async function listPhotos(opts: { offset?: number; limit?: number; rejected?: boolean; tag?: string } = {}): Promise<PhotoList> {
+export async function listPhotos(opts: { offset?: number; limit?: number; rejected?: boolean; tag?: string; collapse?: "moments" | "none" } = {}): Promise<PhotoList> {
   const params = new URLSearchParams();
   if (opts.offset !== undefined) params.set("offset", String(opts.offset));
   if (opts.limit !== undefined) params.set("limit", String(opts.limit));
   if (opts.rejected !== undefined) params.set("rejected", String(opts.rejected));
   if (opts.tag !== undefined) params.set("tag", opts.tag);
+  if (opts.collapse !== undefined) params.set("collapse", opts.collapse);
   const res = await fetch(`${BASE}/photos?${params}`);
   if (!res.ok) throw new Error(`listPhotos ${res.status}`);
   return res.json();
@@ -19,9 +20,35 @@ export async function listClusters(): Promise<ClusterList> {
   return res.json();
 }
 
-export async function listStories(): Promise<StoryList> {
-  const res = await fetch(`${BASE}/stories`);
+export async function listTags(): Promise<TagList> {
+  const res = await fetch(`${BASE}/tags`);
+  if (!res.ok) throw new Error(`listTags ${res.status}`);
+  return res.json();
+}
+
+export async function listStories(opts: { includeTags?: string[]; excludeTags?: string[] } = {}): Promise<StoryList> {
+  const params = new URLSearchParams();
+  if (opts.includeTags && opts.includeTags.length > 0) {
+    params.set("include_tags", opts.includeTags.join(","));
+  }
+  if (opts.excludeTags && opts.excludeTags.length > 0) {
+    params.set("exclude_tags", opts.excludeTags.join(","));
+  }
+  const qs = params.toString();
+  const res = await fetch(`${BASE}/stories${qs ? `?${qs}` : ""}`);
   if (!res.ok) throw new Error(`listStories ${res.status}`);
+  return res.json();
+}
+
+export async function listMoments(): Promise<MomentList> {
+  const res = await fetch(`${BASE}/moments`);
+  if (!res.ok) throw new Error(`listMoments ${res.status}`);
+  return res.json();
+}
+
+export async function getPhotoMoment(sha256: string): Promise<Moment | null> {
+  const res = await fetch(`${BASE}/photos/${sha256}/moment`);
+  if (!res.ok) throw new Error(`getPhotoMoment ${res.status}`);
   return res.json();
 }
 

@@ -154,6 +154,9 @@ class Story(Base):
     items: Mapped[list["StoryItem"]] = relationship(
         "StoryItem", back_populates="story", cascade="all, delete-orphan", order_by="StoryItem.rank"
     )
+    visits: Mapped[list["Visit"]] = relationship(
+        "Visit", back_populates="story", cascade="all, delete-orphan", order_by="Visit.rank"
+    )
 
 
 class StoryItem(Base):
@@ -173,3 +176,100 @@ class StoryItem(Base):
 
     story: Mapped["Story"] = relationship("Story", back_populates="items")
     photo: Mapped["Photo"] = relationship("Photo")
+
+
+class FaceEmbedding(Base):
+    """Per-face ArcFace embedding extracted by insightface buffalo_l."""
+
+    __tablename__ = "face_embeddings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    photo_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("photos.id", ondelete="CASCADE"), index=True
+    )
+    face_index: Mapped[int] = mapped_column(Integer, nullable=False)   # 0-based within photo
+    embedding: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)  # 512 * 2 bytes (fp16)
+    bbox_x: Mapped[int] = mapped_column(Integer, nullable=False)
+    bbox_y: Mapped[int] = mapped_column(Integer, nullable=False)
+    bbox_w: Mapped[int] = mapped_column(Integer, nullable=False)
+    bbox_h: Mapped[int] = mapped_column(Integer, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+
+    photo: Mapped["Photo"] = relationship("Photo")
+
+
+class Moment(Base):
+    """A group of photos: same person(s) at the same place in a short time window."""
+
+    __tablename__ = "moments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    primary_photo_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("photos.id"), index=True
+    )
+    started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    ended_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    size: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    members: Mapped[list["MomentMember"]] = relationship(
+        "MomentMember", back_populates="moment", cascade="all, delete-orphan",
+        order_by="MomentMember.rank",
+    )
+
+
+class MomentMember(Base):
+    """Membership link between a Moment and a Photo, with rank (0 = primary)."""
+
+    __tablename__ = "moment_members"
+
+    moment_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("moments.id", ondelete="CASCADE"), primary_key=True
+    )
+    photo_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("photos.id", ondelete="CASCADE"), primary_key=True
+    )
+    rank: Mapped[int] = mapped_column(Integer, nullable=False)  # 0 = primary
+
+    moment: Mapped["Moment"] = relationship("Moment", back_populates="members")
+
+
+class GeocodeCache(Base):
+    """Cache for Nominatim reverse geocode results, keyed on ~110m grid."""
+
+    __tablename__ = "geocode_cache"
+
+    lat_round: Mapped[float] = mapped_column(Float, primary_key=True)
+    lon_round: Mapped[float] = mapped_column(Float, primary_key=True)
+    payload: Mapped[Optional[str]] = mapped_column(Text, default=None)          # JSON from Nominatim
+    display_name: Mapped[Optional[str]] = mapped_column(Text, default=None)     # resolved human name
+    wikipedia_summary: Mapped[Optional[str]] = mapped_column(Text, default=None)  # Wikipedia blurb
+
+
+class Visit(Base):
+    """GPS-grounded location visit within a story day."""
+
+    __tablename__ = "visits"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    story_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("stories.id", ondelete="CASCADE"), index=True
+    )
+    rank: Mapped[int] = mapped_column(Integer, nullable=False)          # chronological order within story
+    name: Mapped[str] = mapped_column(Text, nullable=False)             # "Pangong Tso", "Khardung La"
+    summary: Mapped[Optional[str]] = mapped_column(Text, default=None)  # Wikipedia blurb
+    lat: Mapped[float] = mapped_column(Float, nullable=False)
+    lon: Mapped[float] = mapped_column(Float, nullable=False)
+    elevation_m: Mapped[Optional[int]] = mapped_column(Integer, default=None)
+    arrived_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    departed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    photo_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    cover_photo_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("photos.id"), default=None
+    )
+
+    story: Mapped["Story"] = relationship("Story", back_populates="visits")
+    cover_photo: Mapped[Optional["Photo"]] = relationship("Photo")
+
+    __table_args__ = (
+        Index("ix_visits_story_rank", "story_id", "rank"),
+    )
