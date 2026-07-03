@@ -363,16 +363,32 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
             )
 
     @app.get("/api/clusters", response_model=ClusterList)
-    def list_clusters(min_count: int = Query(2, ge=1)):
-        with session_scope(Session) as s:
-            # Each photo's PRIMARY tag = the highest-scoring PhotoTag row
-            primary_rows = (
-                s.query(PhotoTag.photo_id, PhotoTag.tag, PhotoTag.score)
-                .order_by(PhotoTag.photo_id, PhotoTag.score.desc())
-                .all()
-            )
+    def list_clusters(
+        min_count: int = Query(2, ge=1),
+        source: Optional[str] = Query(
+            "lookback",
+            description="Tag source to display: 'lookback' (broad themes), 'posting' (tight groups), "
+                        "or None/'' for legacy zero-shot tags",
+        ),
+    ):
+        """Return clusters grouped by tag for the given source.
 
-            # Take the first (highest-scoring) tag per photo
+        source=lookback  → broad global themes (default, ~10-20 clusters)
+        source=posting   → tight session-block groups (more granular, for carousels)
+        source=          → legacy zero-shot SigLIP tags (fallback)
+        """
+        with session_scope(Session) as s:
+            # Filter by source if specified
+            q = s.query(PhotoTag.photo_id, PhotoTag.tag, PhotoTag.score)
+            if source:
+                q = q.filter(PhotoTag.source == source)
+            else:
+                # Legacy: NULL source
+                q = q.filter(PhotoTag.source.is_(None))
+
+            primary_rows = q.order_by(PhotoTag.photo_id, PhotoTag.score.desc()).all()
+
+            # One tag per photo (first = highest score, or just first for equal scores)
             primary_by_photo: dict[int, tuple[str, float]] = {}
             for pid, tag, score in primary_rows:
                 if pid not in primary_by_photo:
@@ -383,7 +399,7 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
             tagged_photo_ids: set[int] = set(primary_by_photo.keys())
             untagged_ids = sorted(all_photo_ids - tagged_photo_ids)
 
-            # Group photo IDs by primary tag
+            # Group photo IDs by tag
             groups: dict[str, list[int]] = defaultdict(list)
             for pid, (tag, _) in primary_by_photo.items():
                 groups[tag].append(pid)
@@ -397,7 +413,7 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
                 if len(pids) < min_count:
                     continue
 
-                # Sort by aesthetic_iqa descending so the cover is the best photo
+                # Sort by aesthetic_iqa descending so cover = best photo
                 rows = (
                     s.query(Photo.sha256, Embedding.aesthetic_iqa)
                     .join(Embedding, Embedding.photo_id == Photo.id, isouter=True)
@@ -419,10 +435,36 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
 
         return ClusterList(total=sum(c.count for c in clusters_out), clusters=clusters_out)
 
-    @app.get("/api/clusters/{tag}/photos", response_model=PhotoList)
-    def list_cluster_photos(tag: str, limit: int = Query(200, le=2000)):
+    @app.get("/api/photos/{sha256}/tags")
+    def get_photo_tags(sha256: str):
+        """Return all tags for a photo across all sources."""
         with session_scope(Session) as s:
-            ids = [r[0] for r in s.query(PhotoTag.photo_id).filter(PhotoTag.tag == tag).all()]
+            photo = s.query(Photo).filter(Photo.sha256 == sha256).first()
+            if photo is None:
+                raise HTTPException(404, detail="Photo not found")
+
+            rows = (
+                s.query(PhotoTag.tag, PhotoTag.score, PhotoTag.source)
+                .filter(PhotoTag.photo_id == photo.id)
+                .order_by(PhotoTag.source, PhotoTag.score.desc())
+                .all()
+            )
+            result: dict[str, list[dict]] = defaultdict(list)
+            for tag, score, src in rows:
+                result[src or "legacy"].append({"tag": tag, "score": score})
+            return {"sha256": sha256, "tags_by_source": dict(result)}
+
+    @app.get("/api/clusters/{tag}/photos", response_model=PhotoList)
+    def list_cluster_photos(
+        tag: str,
+        limit: int = Query(200, le=2000),
+        source: Optional[str] = Query("lookback"),
+    ):
+        with session_scope(Session) as s:
+            q = s.query(PhotoTag.photo_id).filter(PhotoTag.tag == tag)
+            if source:
+                q = q.filter(PhotoTag.source == source)
+            ids = [r[0] for r in q.all()]
             if not ids:
                 return PhotoList(total=0, items=[])
 

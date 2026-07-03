@@ -112,3 +112,19 @@ export interface ProgressMsg {
   total: number;
   message?: string;
 }
+
+export interface PhotoTagEntry {
+  tag: string;
+  score: number;
+}
+
+export interface PhotoTagsResponse {
+  sha256: string;
+  tags_by_source: {
+    ram?: PhotoTagEntry[];
+    lookback?: PhotoTagEntry[];
+    posting?: PhotoTagEntry[];
+    legacy?: PhotoTagEntry[];
+    [key: string]: PhotoTagEntry[] | undefined;
+  };
+}
