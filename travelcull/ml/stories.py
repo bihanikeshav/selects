@@ -14,9 +14,11 @@ from travelcull.db.models import ClassicalScore, Embedding, Photo, Story, StoryI
 log = logging.getLogger(__name__)
 
 # Minimum photos for a day to get its own story
-MIN_DAY_PHOTOS = 10
-# Max photos per story (final cap)
-MAX_STORY_PHOTOS = 15
+MIN_DAY_PHOTOS = 8
+# Max photos per story (final cap) — bumped to let dense days breathe
+MAX_STORY_PHOTOS = 30
+# Minimum photos for a place to get its own (non-day) story
+MIN_PLACE_PHOTOS = 30
 # Time gap (seconds) that splits scenes when visual similarity is also low
 SCENE_TIME_GAP_S = 600  # 10 minutes
 # Cosine similarity threshold: above this, same scene; below + time gap, new scene
@@ -146,8 +148,66 @@ def run_story_stage(
                 ))
         n_stories += 1
 
-    log.info("story stage: built %d stories from %d eligible days", n_stories, total_days)
+    # ── Per-place stories ────────────────────────────────────────────────────
+    # For each named location with enough photos across the whole trip, build a
+    # location-only story that condenses every photo from that place into one
+    # ordered carousel. Identified by `day = "place:<NAME>"`.
+    n_stories += _build_place_stories(cfg, Session, rows, on_progress)
+
+    log.info("story stage: built %d stories total", n_stories)
     return n_stories
+
+
+def _build_place_stories(cfg, Session, rows, on_progress=None) -> int:
+    """Build one Story per named place with >= MIN_PLACE_PHOTOS photos."""
+    with session_scope(Session) as s:
+        visit_rows = s.query(Visit.name, Visit.arrived_at, Visit.departed_at).all()
+
+    # Group photos by visit name across the whole trip
+    photos_by_place: dict[str, list] = defaultdict(list)
+    for r in rows:
+        for name, arrived, departed in visit_rows:
+            if arrived and departed and arrived <= r.taken_at <= departed:
+                photos_by_place[name].append(r)
+                break
+
+    eligible = [
+        (name, photos)
+        for name, photos in photos_by_place.items()
+        if len(photos) >= MIN_PLACE_PHOTOS
+    ]
+    eligible.sort(key=lambda kv: -len(kv[1]))
+
+    n_built = 0
+    for pi, (name, photos) in enumerate(eligible):
+        if on_progress:
+            on_progress(pi + 1, len(eligible), f"place: {name}")
+        photos = sorted(photos, key=lambda r: r.taken_at)
+        scenes = _segment_scenes(photos)
+        representatives = _pick_representatives(scenes)
+        representatives.sort(key=lambda x: x["taken_at"])
+        if len(representatives) > MAX_STORY_PHOTOS:
+            representatives.sort(key=lambda x: x["score"], reverse=True)
+            representatives = representatives[:MAX_STORY_PHOTOS]
+            representatives.sort(key=lambda x: x["taken_at"])
+
+        title = f"{name} — {len(photos)} photos, {len(scenes)} scenes"
+        synthetic_day = f"place:{name}"
+        with session_scope(Session) as s:
+            story = Story(day=synthetic_day, title=title, photo_count=len(representatives))
+            s.add(story)
+            s.flush()
+            story_id = story.id
+            for rank, rep in enumerate(representatives):
+                s.add(StoryItem(
+                    story_id=story_id,
+                    rank=rank,
+                    photo_id=rep["photo_id"],
+                    scene_label=rep["scene_label"],
+                    scene_rank=rep["scene_rank"],
+                ))
+        n_built += 1
+    return n_built
 
 
 def _segment_scenes(photos: list) -> list[list[dict]]:
@@ -207,8 +267,19 @@ def _pick_representatives(scenes: list[list[dict]]) -> list[dict]:
             score = 0.5 * it["iqa"] + 0.3 * blur_norm + 0.2 * face_bonus
             scored.append((score, rank_in, it))
         scored.sort(reverse=True)
-        # Pick top-1 per scene; if scene has >= 8 photos and quality varies, pick top-2
-        top_n = 2 if len(scene) >= 8 else 1
+        # Pick top-N per scene scaled to scene size — denser scenes get more reps
+        # so a 100-photo Pangong "scene" yields ~15 picks instead of 2
+        size = len(scene)
+        if size >= 60:
+            top_n = 15
+        elif size >= 30:
+            top_n = 10
+        elif size >= 15:
+            top_n = 6
+        elif size >= 8:
+            top_n = 3
+        else:
+            top_n = max(1, size // 3)
         for s, rk, it in scored[:top_n]:
             representatives.append(
                 {
