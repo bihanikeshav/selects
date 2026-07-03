@@ -9,7 +9,7 @@ import numpy as np
 
 from travelcull.config import FolderConfig
 from travelcull.db import init_db, session_scope
-from travelcull.db.models import ClassicalScore, Embedding, Photo, Story, StoryItem
+from travelcull.db.models import ClassicalScore, Embedding, Photo, Story, StoryItem, Visit
 
 log = logging.getLogger(__name__)
 
@@ -40,6 +40,8 @@ def run_story_stage(
                 Photo.id,
                 Photo.taken_at,
                 Photo.sha256,
+                Photo.gps_lat,
+                Photo.gps_lon,
                 ClassicalScore.blur,
                 ClassicalScore.faces_count,
                 ClassicalScore.auto_reject,
@@ -62,9 +64,10 @@ def run_story_stage(
         day = r.taken_at.date().isoformat()
         by_day[day].append(r)
 
-    # Wipe old stories
+    # Wipe old stories (Visit rows cascade-delete via FK)
     with session_scope(Session) as s:
         s.query(StoryItem).delete()
+        s.query(Visit).delete()
         s.query(Story).delete()
 
     eligible_days = [
@@ -74,6 +77,9 @@ def run_story_stage(
     ]
     n_stories = 0
     total_days = len(eligible_days)
+
+    # Import here to avoid circular import at module load time
+    from travelcull.ml.locations import build_visits_for_day
 
     for di, (day, photos) in enumerate(eligible_days):
         if on_progress:
@@ -87,7 +93,23 @@ def run_story_stage(
             representatives = representatives[:MAX_STORY_PHOTOS]
             representatives.sort(key=lambda x: x["taken_at"])
 
-        title = _day_title(day, len(photos), len(scenes))
+        # Build GPS-grounded visits for this day
+        # Prepare photo dicts with GPS data (from the original DB rows)
+        photo_dicts = [
+            {
+                "photo_id": r.id,
+                "taken_at": r.taken_at,
+                "gps_lat": r.gps_lat,
+                "gps_lon": r.gps_lon,
+                "aesthetic_iqa": r.aesthetic_iqa or 0.0,
+            }
+            for r in photos
+        ]
+        visit_data_list = build_visits_for_day(0, photo_dicts, Session)  # story_id filled in loop below
+
+        # Build itinerary title from first/last visit
+        title = _day_title_with_visits(day, len(photos), len(scenes), visit_data_list)
+
         with session_scope(Session) as s:
             story = Story(
                 day=day,
@@ -96,16 +118,32 @@ def run_story_stage(
             )
             s.add(story)
             s.flush()
+            story_id = story.id
             for rank, rep in enumerate(representatives):
                 s.add(
                     StoryItem(
-                        story_id=story.id,
+                        story_id=story_id,
                         rank=rank,
                         photo_id=rep["photo_id"],
                         scene_label=rep["scene_label"],
                         scene_rank=rep["scene_rank"],
                     )
                 )
+            # Insert Visit rows
+            for vd in visit_data_list:
+                s.add(Visit(
+                    story_id=story_id,
+                    rank=vd.rank,
+                    name=vd.name,
+                    summary=vd.summary,
+                    lat=vd.lat,
+                    lon=vd.lon,
+                    elevation_m=vd.elevation_m,
+                    arrived_at=vd.arrived_at,
+                    departed_at=vd.departed_at,
+                    photo_count=vd.photo_count,
+                    cover_photo_id=vd.cover_photo_id,
+                ))
         n_stories += 1
 
     log.info("story stage: built %d stories from %d eligible days", n_stories, total_days)
@@ -185,3 +223,15 @@ def _pick_representatives(scenes: list[list[dict]]) -> list[dict]:
 
 def _day_title(day: str, n_photos: int, n_scenes: int) -> str:
     return f"{day} — {n_photos} photos, {n_scenes} scenes"
+
+
+def _day_title_with_visits(day: str, n_photos: int, n_scenes: int, visits) -> str:
+    """Build a richer title incorporating first/last visit location names."""
+    if not visits:
+        return _day_title(day, n_photos, n_scenes)
+    names = [v.name for v in visits]
+    if len(names) == 1:
+        route = names[0]
+    else:
+        route = f"{names[0]} to {names[-1]}"
+    return f"{day} — {route} · {n_photos} photos, {n_scenes} scenes"
