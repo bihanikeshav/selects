@@ -366,9 +366,9 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
     def list_clusters(
         min_count: int = Query(2, ge=1),
         source: Optional[str] = Query(
-            "lookback",
-            description="Tag source to display: 'lookback' (broad themes), 'posting' (tight groups), "
-                        "or None/'' for legacy zero-shot tags",
+            "thematic",
+            description="Tag source: 'thematic' (location-driven, default), 'lookback', 'posting', "
+                        "or empty for legacy zero-shot tags",
         ),
     ):
         """Return clusters grouped by tag for the given source.

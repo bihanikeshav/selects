@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from collections import defaultdict
 from typing import Callable
 
@@ -253,23 +254,30 @@ def _segment_scenes(photos: list) -> list[list[dict]]:
 
 
 def _pick_representatives(scenes: list[list[dict]]) -> list[dict]:
-    """Pick the best photo(s) from each scene by composite score."""
+    """Pick the best photo(s) per scene, diversified via MMR over SigLIP embeddings.
+
+    Each scene is a list of {photo_id, embedding, iqa, blur, faces_count, ...}.
+    Within a scene we score photos on (aesthetic, sharpness, faces) then greedily
+    pick by Maximum Marginal Relevance against already-picked: each new pick must
+    add visual novelty (penalized by max cosine sim to existing picks). This
+    eliminates the "15 nearly-identical Pangong shots in a row" failure mode.
+    """
     representatives = []
-    # Compute global blur normalization across all photos in all scenes
     all_blur = [it["blur"] for sc in scenes for it in sc if it["blur"] > 0]
     blur_p95 = float(np.percentile(all_blur, 95)) if all_blur else 1.0
 
+    # MMR diversity penalty — 0.0 = pure quality (duplicate-prone), 1.0 = pure
+    # spread (ignores quality). Tuned to keep enough variety without losing the
+    # best shots from a scene.
+    MMR_LAMBDA = 0.55
+    # Don't add a photo if its max similarity to any already-picked exceeds this
+    # (independent of MMR; absolute floor on duplicate avoidance).
+    DUP_HARD_CEILING = 0.94
+
     for scene_idx, scene in enumerate(scenes):
-        scored = []
-        for rank_in, it in enumerate(scene):
-            blur_norm = min(it["blur"] / blur_p95, 1.0)
-            face_bonus = 1.0 if it["faces_count"] > 0 else 0.0
-            score = 0.5 * it["iqa"] + 0.3 * blur_norm + 0.2 * face_bonus
-            scored.append((score, rank_in, it))
-        scored.sort(reverse=True)
-        # Pick top-N per scene scaled to scene size — denser scenes get more reps
-        # so a 100-photo Pangong "scene" yields ~15 picks instead of 2
         size = len(scene)
+        if size == 0:
+            continue
         if size >= 60:
             top_n = 15
         elif size >= 30:
@@ -280,13 +288,45 @@ def _pick_representatives(scenes: list[list[dict]]) -> list[dict]:
             top_n = 3
         else:
             top_n = max(1, size // 3)
-        for s, rk, it in scored[:top_n]:
+
+        # Pre-score every photo in the scene
+        scored_items = []
+        for rank_in, it in enumerate(scene):
+            blur_norm = min(it["blur"] / blur_p95, 1.0)
+            face_bonus = 1.0 if it["faces_count"] > 0 else 0.0
+            quality = 0.5 * it["iqa"] + 0.3 * blur_norm + 0.2 * face_bonus
+            scored_items.append({"quality": quality, "rank_in": rank_in, "it": it})
+
+        # Sort by quality desc; first pick is the highest-quality photo
+        scored_items.sort(key=lambda x: -x["quality"])
+        picked: list[dict] = [scored_items[0]]
+        remaining = scored_items[1:]
+
+        while len(picked) < top_n and remaining:
+            best_idx, best_mmr = -1, -math.inf
+            for ri, cand in enumerate(remaining):
+                # similarity = max cos against any already-picked
+                sim = max(
+                    float(np.dot(cand["it"]["embedding"], p["it"]["embedding"]))
+                    for p in picked
+                )
+                if sim >= DUP_HARD_CEILING:
+                    continue
+                mmr = MMR_LAMBDA * cand["quality"] - (1 - MMR_LAMBDA) * sim
+                if mmr > best_mmr:
+                    best_mmr, best_idx = mmr, ri
+            if best_idx == -1:
+                break
+            picked.append(remaining.pop(best_idx))
+
+        for entry in picked:
+            it = entry["it"]
             representatives.append(
                 {
                     **it,
-                    "score": s,
+                    "score": entry["quality"],
                     "scene_label": f"scene_{scene_idx + 1}",
-                    "scene_rank": rk,
+                    "scene_rank": entry["rank_in"],
                 }
             )
     return representatives
