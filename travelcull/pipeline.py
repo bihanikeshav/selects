@@ -22,7 +22,7 @@ def run_embedding_stage(cfg, on_progress=None, batch_size=16):  # noqa: F811
     return _fn(cfg, on_progress=on_progress, batch_size=batch_size)
 
 
-def run_tag_stage(cfg, on_progress=None, top_k=3, min_score=0.15, tag_prompts=None):  # noqa: F811
+def run_tag_stage(cfg, on_progress=None, top_k=3, min_score=0.0, tag_prompts=None):  # noqa: F811
     """Lazy proxy: imports travelcull.ml.tags.run_tag_stage on first call."""
     from travelcull.ml.tags import run_tag_stage as _fn
     return _fn(cfg, on_progress=on_progress, top_k=top_k, min_score=min_score, tag_prompts=tag_prompts)

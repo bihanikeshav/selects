@@ -40,10 +40,14 @@ def run_tag_stage(
     cfg: FolderConfig,
     on_progress: Callable[[int, int, str], None] | None = None,
     top_k: int = 3,
-    min_score: float = 0.15,
+    min_score: float = 0.0,
     tag_prompts: dict[str, list[str]] | None = None,
 ) -> int:
     """For each photo with an embedding, compute cosine-sim against tag prompts and store top-k.
+
+    Note: SigLIP-SO400M raw cosine similarities between images and text tend to be in the
+    range 0.0-0.15, which is much lower than CLIP models. min_score defaults to 0.0 to store
+    all top-k tags; downstream consumers can filter by rank rather than absolute score.
 
     Returns the number of photos tagged.
     """
