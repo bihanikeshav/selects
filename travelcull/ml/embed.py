@@ -38,12 +38,29 @@ def _load():
     return _MODEL, _PROC
 
 
+def _extract_tensor(output) -> torch.Tensor:
+    """Extract tensor from model output — handles both raw Tensor and ModelOutput objects.
+
+    In transformers 5.x, get_text_features / get_image_features return a
+    BaseModelOutputWithPooling whose pooler_output is the CLS-pooled embedding.
+    """
+    if isinstance(output, torch.Tensor):
+        return output
+    # ModelOutput / BaseModelOutputWithPooling
+    if hasattr(output, "pooler_output") and output.pooler_output is not None:
+        return output.pooler_output
+    if hasattr(output, "last_hidden_state"):
+        return output.last_hidden_state[:, 0]  # CLS token
+    raise ValueError(f"Cannot extract tensor from {type(output)}")
+
+
 def encode_text_prompts(prompts: list[str]) -> torch.Tensor:
     """Return L2-normalized [N, 1152] text embeddings on cuda."""
     model, proc = _load()
     with torch.no_grad():
         inp = proc(text=prompts, return_tensors="pt", padding=True, truncation=True).to("cuda")
-        feats = model.get_text_features(**inp)
+        raw = model.get_text_features(**inp)
+        feats = _extract_tensor(raw)
         feats = torch.nn.functional.normalize(feats.float(), dim=-1)
     return feats
 
@@ -59,7 +76,8 @@ def encode_image_batch(images: list[Image.Image]) -> tuple[torch.Tensor, np.ndar
 
     with torch.no_grad():
         inp = proc(images=images, return_tensors="pt").to("cuda", torch.float16)
-        feats = model.get_image_features(**inp)             # [B, 1152] fp16
+        raw = model.get_image_features(**inp)
+        feats = _extract_tensor(raw)                        # [B, 1152] fp16 or float32
         feats = torch.nn.functional.normalize(feats.float(), dim=-1)  # [B, 1152] float32
 
         sim = feats @ iqa_text.T                            # [B, 2]
