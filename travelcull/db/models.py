@@ -125,18 +125,34 @@ class Embedding(Base):
 
 
 class PhotoTag(Base):
-    """Zero-shot tag assigned to a photo via SigLIP similarity."""
+    """Tag assigned to a photo; source distinguishes origin.
+
+    source values:
+      'ram'      — RAM++ multi-label tag (per-photo object tags)
+      'posting'  — tight HDBSCAN cluster within a session block (carousel groups)
+      'lookback' — broad HDBSCAN cluster globally (theme browsing)
+      NULL       — legacy zero-shot SigLIP tags (backward compat)
+
+    Primary key: (photo_id, tag, source) — supports same tag from different sources.
+    For backward compat with existing tables that have PK (photo_id, tag), the
+    _migrate_add_source_column() function in ram_tags.py handles the schema upgrade.
+    """
 
     __tablename__ = "photo_tags"
 
     photo_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("photos.id", ondelete="CASCADE"), primary_key=True
     )
-    tag: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tag: Mapped[str] = mapped_column(String(128), primary_key=True)
     score: Mapped[float] = mapped_column(Float, nullable=False)
+    # source is part of the PK — allows same tag name from different sources.
+    # Migration (_migrate_add_source_column) recreates the table with this PK
+    # on first run against an existing database.
+    source: Mapped[Optional[str]] = mapped_column(String(16), nullable=True, primary_key=True)
 
     __table_args__ = (
         Index("ix_photo_tags_tag", "tag"),
+        Index("ix_photo_tags_source", "source"),
     )
 
 

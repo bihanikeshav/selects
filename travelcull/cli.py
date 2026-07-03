@@ -21,8 +21,8 @@ def main():
 @click.argument("folder", type=click.Path(exists=True, file_okay=False, path_type=Path))
 @click.option(
     "--pass", "pass_",
-    type=click.Choice(["all", "index", "classical", "embed", "tag", "smart_tag", "story",
-                       "face_embed", "moment"]),
+    type=click.Choice(["all", "index", "classical", "embed", "tag", "smart_tag", "ram_tag",
+                       "story", "face_embed", "moment"]),
     default="all",
 )
 def index(folder: Path, pass_: str):
@@ -67,6 +67,14 @@ def index(folder: Path, pass_: str):
             on_progress=lambda i, t, name: click.echo(f"[{i}/{t}] smart_tag: {name}", err=True),
         )
         click.echo(f"smart_tag: {n} photos clustered")
+
+    if pass_ == "ram_tag":
+        from travelcull.ml.ram_tags import run_ram_tagging_stage
+        n = run_ram_tagging_stage(
+            cfg,
+            on_progress=lambda i, t, name: click.echo(f"[{i}/{t}] ram_tag: {name}", err=True),
+        )
+        click.echo(f"ram_tag: {n} photos tagged")
 
     if pass_ in ("all", "story"):
         from travelcull.ml.stories import run_story_stage

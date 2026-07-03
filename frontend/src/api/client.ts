@@ -1,4 +1,4 @@
-import type { ClusterList, Moment, MomentList, PhotoList, StoryList, TagList } from "./types";
+import type { ClusterList, Moment, MomentList, PhotoList, PhotoTagsResponse, StoryList, TagList } from "./types";
 
 const BASE = "/api";
 
@@ -14,9 +14,18 @@ export async function listPhotos(opts: { offset?: number; limit?: number; reject
   return res.json();
 }
 
-export async function listClusters(): Promise<ClusterList> {
-  const res = await fetch(`${BASE}/clusters`);
+export async function listClusters(opts: { source?: "lookback" | "posting" | "" } = {}): Promise<ClusterList> {
+  const params = new URLSearchParams();
+  if (opts.source !== undefined) params.set("source", opts.source);
+  const qs = params.toString();
+  const res = await fetch(`${BASE}/clusters${qs ? `?${qs}` : ""}`);
   if (!res.ok) throw new Error(`listClusters ${res.status}`);
+  return res.json();
+}
+
+export async function getPhotoTags(sha256: string): Promise<PhotoTagsResponse> {
+  const res = await fetch(`${BASE}/photos/${sha256}/tags`);
+  if (!res.ok) throw new Error(`getPhotoTags ${res.status}`);
   return res.json();
 }
 

@@ -195,14 +195,70 @@ function ClusterCard({ cluster }: { cluster: ClusterEntry }) {
   );
 }
 
+type ClusterSource = "lookback" | "posting";
+
+const SOURCE_LABELS: Record<ClusterSource, { label: string; sub: string }> = {
+  lookback: {
+    label: "Lookback themes",
+    sub: "Broad visual themes across the whole trip · HDBSCAN global · ranked by count",
+  },
+  posting: {
+    label: "Posting groups",
+    sub: "Tight visual groups within each shooting session · ideal for carousels",
+  },
+};
+
+function SourceToggle({
+  value,
+  onChange,
+}: {
+  value: ClusterSource;
+  onChange: (v: ClusterSource) => void;
+}) {
+  return (
+    <div
+      style={{
+        display: "inline-flex",
+        border: "1px solid var(--md-outline-var)",
+        borderRadius: 20,
+        overflow: "hidden",
+        fontSize: 13,
+        fontFamily: "var(--font-display)",
+      }}
+    >
+      {(["lookback", "posting"] as ClusterSource[]).map(src => (
+        <button
+          key={src}
+          onClick={() => onChange(src)}
+          style={{
+            padding: "5px 16px",
+            cursor: "pointer",
+            border: "none",
+            background: value === src ? "var(--md-primary)" : "transparent",
+            color: value === src ? "var(--md-on-primary)" : "var(--md-on-surface-var)",
+            fontFamily: "inherit",
+            fontSize: "inherit",
+            transition: "background 0.15s, color 0.15s",
+          }}
+        >
+          {SOURCE_LABELS[src].label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export default function Clusters() {
+  const [source, setSource] = useState<ClusterSource>("lookback");
   const [clusters, setClusters] = useState<ClusterEntry[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    listClusters()
+    setLoading(true);
+    setError(null);
+    listClusters({ source })
       .then(data => {
         setClusters(data.clusters);
         setTotal(data.total);
@@ -212,7 +268,9 @@ export default function Clusters() {
         setError(String(err));
         setLoading(false);
       });
-  }, []);
+  }, [source]);
+
+  const sourceInfo = SOURCE_LABELS[source];
 
   return (
     <div className="app">
@@ -220,7 +278,7 @@ export default function Clusters() {
       <div className="workspace">
         <Topbar folder="travelcull" context="clusters by theme" />
         <StatusRow
-          details={loading ? "loading…" : error ? "error loading clusters" : `${clusters.length} themes · ${total} photos`}
+          details={loading ? "loading…" : error ? "error loading clusters" : `${clusters.length} ${source === "lookback" ? "themes" : "groups"} · ${total} photos`}
         />
 
         <div className="clusters-wrap" style={{ gridRow: "3 / span 3" }}>
@@ -237,7 +295,7 @@ export default function Clusters() {
               </div>
               <div style={{ color: "var(--md-on-surface-var)", fontSize: 13 }}>
                 Run <code style={{ fontFamily: "var(--font-mono)", background: "var(--md-surface-c)", padding: "2px 6px", borderRadius: 4 }}>travelcull index &lt;folder&gt; --pass embed</code> then{" "}
-                <code style={{ fontFamily: "var(--font-mono)", background: "var(--md-surface-c)", padding: "2px 6px", borderRadius: 4 }}>--pass tag</code>
+                <code style={{ fontFamily: "var(--font-mono)", background: "var(--md-surface-c)", padding: "2px 6px", borderRadius: 4 }}>--pass smart_tag</code>
               </div>
             </div>
           )}
@@ -248,7 +306,7 @@ export default function Clusters() {
                 No clusters yet
               </div>
               <div style={{ color: "var(--md-on-surface-var)", fontSize: 13 }}>
-                Embedding and tagging stages have not run, or no photos have tags assigned.
+                Embedding and smart-tag stages have not run, or no photos have tags assigned.
               </div>
             </div>
           )}
@@ -256,9 +314,12 @@ export default function Clusters() {
           {!loading && !error && clusters.length > 0 && (
             <>
               <div className="clusters-header">
-                <h1>Clusters by theme</h1>
-                <div className="sub">
-                  Tags assigned by SigLIP zero-shot · ranked by <strong>count</strong>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+                  <h1 style={{ margin: 0 }}>Clusters by theme</h1>
+                  <SourceToggle value={source} onChange={setSource} />
+                </div>
+                <div className="sub" style={{ marginTop: 6 }}>
+                  {sourceInfo.sub}
                 </div>
               </div>
               <div className="cluster-grid">
