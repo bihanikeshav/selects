@@ -34,6 +34,18 @@ def run_story_stage(cfg, on_progress=None):  # noqa: F811
     return _fn(cfg, on_progress=on_progress)
 
 
+def run_face_embedding_stage(cfg, on_progress=None):  # noqa: F811
+    """Lazy proxy: imports travelcull.ml.faces.run_face_embedding_stage on first call."""
+    from travelcull.ml.faces import run_face_embedding_stage as _fn
+    return _fn(cfg, on_progress=on_progress)
+
+
+def run_moment_stage(cfg, on_progress=None):  # noqa: F811
+    """Lazy proxy: imports travelcull.ml.moments.run_moment_stage on first call."""
+    from travelcull.ml.moments import run_moment_stage as _fn
+    return _fn(cfg, on_progress=on_progress)
+
+
 def run_smart_cluster_stage(cfg, on_progress=None, vlm_model="Qwen/Qwen3-VL-2B-Instruct"):  # noqa: F811
     """Lazy proxy: imports travelcull.ml.smart_clusters.run_smart_cluster_stage on first call."""
     from travelcull.ml.smart_clusters import run_smart_cluster_stage as _fn
