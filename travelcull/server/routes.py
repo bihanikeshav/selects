@@ -10,7 +10,7 @@ from sqlalchemy import select
 
 from travelcull.config import FolderConfig
 from travelcull.db import init_db, session_scope
-from travelcull.db.models import ClassicalScore, Embedding, Photo, PhotoTag
+from travelcull.db.models import ClassicalScore, Embedding, Photo, PhotoTag, Story, StoryItem
 
 
 class PhotoOut(BaseModel):
@@ -47,6 +47,30 @@ class ClusterEntry(BaseModel):
 class ClusterList(BaseModel):
     total: int
     clusters: list[ClusterEntry]
+
+
+class StoryItemOut(BaseModel):
+    rank: int
+    photo_id: int
+    sha256: str
+    thumb_url: str
+    preview_url: str
+    scene_label: Optional[str]
+    taken_at: Optional[str]
+
+
+class StoryOut(BaseModel):
+    id: int
+    day: str
+    title: str
+    photo_count: int
+    items: list[StoryItemOut]
+    cover_url: str
+
+
+class StoryList(BaseModel):
+    total: int
+    stories: list[StoryOut]
 
 
 def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
@@ -119,10 +143,19 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
                 if pid not in primary_by_photo:
                     primary_by_photo[pid] = (tag, score)
 
+            # Find ALL photo IDs so we can surface uncategorized photos
+            all_photo_ids: set[int] = {r[0] for r in s.query(Photo.id).all()}
+            tagged_photo_ids: set[int] = set(primary_by_photo.keys())
+            untagged_ids = sorted(all_photo_ids - tagged_photo_ids)
+
             # Group photo IDs by primary tag
             groups: dict[str, list[int]] = defaultdict(list)
             for pid, (tag, _) in primary_by_photo.items():
                 groups[tag].append(pid)
+
+            # Add synthetic "uncategorized" cluster for photos with no tags
+            if untagged_ids:
+                groups["uncategorized"] = list(untagged_ids)
 
             clusters_out: list[ClusterEntry] = []
             for tag, pids in groups.items():
@@ -189,6 +222,44 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
                     )
                 )
         return PhotoList(total=len(items), items=items)
+
+    @app.get("/api/stories", response_model=StoryList)
+    def list_stories():
+        with session_scope(Session) as s:
+            stories = s.query(Story).order_by(Story.day).all()
+            result = []
+            for st in stories:
+                items_rows = (
+                    s.query(StoryItem, Photo)
+                    .join(Photo, StoryItem.photo_id == Photo.id)
+                    .filter(StoryItem.story_id == st.id)
+                    .order_by(StoryItem.rank)
+                    .all()
+                )
+                items = [
+                    StoryItemOut(
+                        rank=it.rank,
+                        photo_id=it.photo_id,
+                        sha256=p.sha256,
+                        thumb_url=f"/api/thumb/{p.sha256}",
+                        preview_url=f"/api/preview/{p.sha256}",
+                        scene_label=it.scene_label,
+                        taken_at=p.taken_at.isoformat() if p.taken_at else None,
+                    )
+                    for it, p in items_rows
+                ]
+                cover_url = items[0].thumb_url if items else "/api/thumb/missing"
+                result.append(
+                    StoryOut(
+                        id=st.id,
+                        day=st.day,
+                        title=st.title,
+                        photo_count=st.photo_count,
+                        items=items,
+                        cover_url=cover_url,
+                    )
+                )
+        return StoryList(total=len(result), stories=result)
 
     @app.get("/api/thumb/{sha256}")
     def thumb(sha256: str):

@@ -1,4 +1,4 @@
-import type { ClusterList, PhotoList } from "./types";
+import type { ClusterList, PhotoList, StoryList } from "./types";
 
 const BASE = "/api";
 
@@ -16,6 +16,12 @@ export async function listPhotos(opts: { offset?: number; limit?: number; reject
 export async function listClusters(): Promise<ClusterList> {
   const res = await fetch(`${BASE}/clusters`);
   if (!res.ok) throw new Error(`listClusters ${res.status}`);
+  return res.json();
+}
+
+export async function listStories(): Promise<StoryList> {
+  const res = await fetch(`${BASE}/stories`);
+  if (!res.ok) throw new Error(`listStories ${res.status}`);
   return res.json();
 }
 

@@ -31,8 +31,32 @@ export interface ClusterList {
   clusters: ClusterEntry[];
 }
 
+export interface StoryItem {
+  rank: number;
+  photo_id: number;
+  sha256: string;
+  thumb_url: string;
+  preview_url: string;
+  scene_label: string | null;
+  taken_at: string | null;
+}
+
+export interface StoryEntry {
+  id: number;
+  day: string;
+  title: string;
+  photo_count: number;
+  items: StoryItem[];
+  cover_url: string;
+}
+
+export interface StoryList {
+  total: number;
+  stories: StoryEntry[];
+}
+
 export interface ProgressMsg {
-  stage: "index" | "classical" | "embed" | "tag" | "vl" | "done";
+  stage: "index" | "classical" | "embed" | "tag" | "story" | "vl" | "done";
   current: number;
   total: number;
   message?: string;

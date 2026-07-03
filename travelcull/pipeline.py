@@ -27,6 +27,12 @@ def run_tag_stage(cfg, on_progress=None, top_k=3, min_score=0.0, tag_prompts=Non
     from travelcull.ml.tags import run_tag_stage as _fn
     return _fn(cfg, on_progress=on_progress, top_k=top_k, min_score=min_score, tag_prompts=tag_prompts)
 
+
+def run_story_stage(cfg, on_progress=None):  # noqa: F811
+    """Lazy proxy: imports travelcull.ml.stories.run_story_stage on first call."""
+    from travelcull.ml.stories import run_story_stage as _fn
+    return _fn(cfg, on_progress=on_progress)
+
 log = logging.getLogger(__name__)
 ProgressCb = Callable[[int, int, str], None] | None
 

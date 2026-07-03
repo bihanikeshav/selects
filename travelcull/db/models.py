@@ -138,3 +138,38 @@ class PhotoTag(Base):
     __table_args__ = (
         Index("ix_photo_tags_tag", "tag"),
     )
+
+
+class Story(Base):
+    """One per-day narrative story — a curated sequence of representative photos."""
+
+    __tablename__ = "stories"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    day: Mapped[str] = mapped_column(String(10), unique=True, index=True)  # YYYY-MM-DD
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    photo_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    items: Mapped[list["StoryItem"]] = relationship(
+        "StoryItem", back_populates="story", cascade="all, delete-orphan", order_by="StoryItem.rank"
+    )
+
+
+class StoryItem(Base):
+    """One photo slot within a Story, in rank order."""
+
+    __tablename__ = "story_items"
+
+    story_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("stories.id", ondelete="CASCADE"), primary_key=True
+    )
+    rank: Mapped[int] = mapped_column(Integer, primary_key=True)
+    photo_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("photos.id", ondelete="CASCADE"), nullable=False
+    )
+    scene_label: Mapped[Optional[str]] = mapped_column(String(64), default=None)
+    scene_rank: Mapped[Optional[int]] = mapped_column(Integer, default=None)
+
+    story: Mapped["Story"] = relationship("Story", back_populates="items")
+    photo: Mapped["Photo"] = relationship("Photo")

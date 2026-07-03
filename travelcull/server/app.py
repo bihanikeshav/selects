@@ -48,13 +48,21 @@ def build_app(cfg: FolderConfig, run_background: bool = True) -> FastAPI:
                 loop,
             )
 
+        def story_progress(i, total, name):
+            asyncio.run_coroutine_threadsafe(
+                bus.publish({"stage": "story", "current": i, "total": total, "message": name}),
+                loop,
+            )
+
         async def background():
             await asyncio.to_thread(index_folder, cfg, index_progress)
             await asyncio.to_thread(run_classical_stage, cfg, classical_progress)
             from travelcull.ml.embed import run_embedding_stage
             from travelcull.ml.tags import run_tag_stage
+            from travelcull.ml.stories import run_story_stage
             await asyncio.to_thread(run_embedding_stage, cfg, embed_progress)
             await asyncio.to_thread(run_tag_stage, cfg, tag_progress)
+            await asyncio.to_thread(run_story_stage, cfg, story_progress)
             await bus.publish({"stage": "done", "current": 1, "total": 1})
 
         task = asyncio.create_task(background())
