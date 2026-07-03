@@ -21,7 +21,7 @@ def main():
 @click.argument("folder", type=click.Path(exists=True, file_okay=False, path_type=Path))
 @click.option(
     "--pass", "pass_",
-    type=click.Choice(["all", "index", "classical", "embed", "tag", "story"]),
+    type=click.Choice(["all", "index", "classical", "embed", "tag", "smart_tag", "story"]),
     default="all",
 )
 def index(folder: Path, pass_: str):
@@ -58,6 +58,14 @@ def index(folder: Path, pass_: str):
             on_progress=lambda i, t, name: click.echo(f"[{i}/{t}] tag: {name}", err=True),
         )
         click.echo(f"tag: {n} photos tagged")
+
+    if pass_ == "smart_tag":
+        from travelcull.ml.smart_clusters import run_smart_cluster_stage
+        n = run_smart_cluster_stage(
+            cfg,
+            on_progress=lambda i, t, name: click.echo(f"[{i}/{t}] smart_tag: {name}", err=True),
+        )
+        click.echo(f"smart_tag: {n} photos clustered")
 
     if pass_ in ("all", "story"):
         from travelcull.ml.stories import run_story_stage
