@@ -289,3 +289,29 @@ class Visit(Base):
     __table_args__ = (
         Index("ix_visits_story_rank", "story_id", "rank"),
     )
+
+
+class Person(Base):
+    """A clustered face identity. User-labelable after detection."""
+
+    __tablename__ = "persons"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    label: Mapped[Optional[str]] = mapped_column(Text, default=None)
+    cover_face_embedding_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("face_embeddings.id"), default=None
+    )
+    photo_count: Mapped[int] = mapped_column(Integer, default=0)
+    centroid: Mapped[Optional[bytes]] = mapped_column(LargeBinary, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class PhotoPerson(Base):
+    """Association: which Persons appear in which Photo."""
+
+    __tablename__ = "photo_persons"
+
+    photo_id: Mapped[int] = mapped_column(Integer, ForeignKey("photos.id"), primary_key=True)
+    person_id: Mapped[int] = mapped_column(Integer, ForeignKey("persons.id"), primary_key=True)
+    face_embedding_id: Mapped[int] = mapped_column(Integer, ForeignKey("face_embeddings.id"))
+    confidence: Mapped[float] = mapped_column(Float)
