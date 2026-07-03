@@ -195,9 +195,13 @@ function ClusterCard({ cluster }: { cluster: ClusterEntry }) {
   );
 }
 
-type ClusterSource = "lookback" | "posting";
+type ClusterSource = "thematic" | "lookback" | "posting";
 
 const SOURCE_LABELS: Record<ClusterSource, { label: string; sub: string }> = {
+  thematic: {
+    label: "Locations",
+    sub: "Grouped by named places visited on the trip",
+  },
   lookback: {
     label: "Lookback themes",
     sub: "Broad visual themes across the whole trip · HDBSCAN global · ranked by count",
@@ -226,7 +230,7 @@ function SourceToggle({
         fontFamily: "var(--font-display)",
       }}
     >
-      {(["lookback", "posting"] as ClusterSource[]).map(src => (
+      {(["thematic", "lookback", "posting"] as ClusterSource[]).map(src => (
         <button
           key={src}
           onClick={() => onChange(src)}
@@ -249,7 +253,7 @@ function SourceToggle({
 }
 
 export default function Clusters() {
-  const [source, setSource] = useState<ClusterSource>("lookback");
+  const [source, setSource] = useState<ClusterSource>("thematic");
   const [clusters, setClusters] = useState<ClusterEntry[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
