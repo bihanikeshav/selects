@@ -21,7 +21,7 @@ def main():
 @click.argument("folder", type=click.Path(exists=True, file_okay=False, path_type=Path))
 @click.option(
     "--pass", "pass_",
-    type=click.Choice(["all", "index", "classical", "embed", "tag"]),
+    type=click.Choice(["all", "index", "classical", "embed", "tag", "story"]),
     default="all",
 )
 def index(folder: Path, pass_: str):
@@ -58,6 +58,14 @@ def index(folder: Path, pass_: str):
             on_progress=lambda i, t, name: click.echo(f"[{i}/{t}] tag: {name}", err=True),
         )
         click.echo(f"tag: {n} photos tagged")
+
+    if pass_ in ("all", "story"):
+        from travelcull.ml.stories import run_story_stage
+        n = run_story_stage(
+            cfg,
+            on_progress=lambda i, t, name: click.echo(f"[{i}/{t}] story: {name}", err=True),
+        )
+        click.echo(f"story: {n} stories built")
 
 
 @main.command()
