@@ -33,6 +33,12 @@ def run_story_stage(cfg, on_progress=None):  # noqa: F811
     from travelcull.ml.stories import run_story_stage as _fn
     return _fn(cfg, on_progress=on_progress)
 
+
+def run_smart_cluster_stage(cfg, on_progress=None, vlm_model="Qwen/Qwen3-VL-2B-Instruct"):  # noqa: F811
+    """Lazy proxy: imports travelcull.ml.smart_clusters.run_smart_cluster_stage on first call."""
+    from travelcull.ml.smart_clusters import run_smart_cluster_stage as _fn
+    return _fn(cfg, on_progress=on_progress, vlm_model=vlm_model)
+
 log = logging.getLogger(__name__)
 ProgressCb = Callable[[int, int, str], None] | None
 
