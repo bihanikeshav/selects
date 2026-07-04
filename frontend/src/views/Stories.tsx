@@ -182,6 +182,36 @@ function StoryCard({ story }: { story: StoryEntry }) {
   const accent = accentFor(story.day);
   const dayLabel = formatDayLabel(story.day);
   const [lightboxSha, setLightboxSha] = useState<string | null>(null);
+  const [playerOpen, setPlayerOpen] = useState(false);
+  const [caption, setCaption] = useState<{ caption: string; hashtags: string[] } | null>(null);
+  const [captionLoading, setCaptionLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  async function genCaption() {
+    setCaptionLoading(true);
+    setCaption(null);
+    try {
+      const res = await fetch(`/api/stories/${story.id}/caption`, { method: "POST" });
+      if (!res.ok) throw new Error(`caption ${res.status}`);
+      const j = await res.json();
+      setCaption({ caption: j.caption, hashtags: j.hashtags || [] });
+    } catch (e) {
+      setCaption({ caption: String(e), hashtags: [] });
+    } finally {
+      setCaptionLoading(false);
+    }
+  }
+
+  function copyCaption() {
+    if (!caption) return;
+    const text = caption.caption + (caption.hashtags.length
+      ? "\n\n" + caption.hashtags.map(h => "#" + h).join(" ")
+      : "");
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
   // Parse scene count from title: "... · N photos, M scenes"
   const scenesMatch = story.title.match(/(\d+)\s+scenes/);
   const scenesCount = scenesMatch ? scenesMatch[1] : "";
@@ -208,12 +238,56 @@ function StoryCard({ story }: { story: StoryEntry }) {
         )}
 
         <div className="story-actions">
-          <button className="btn btn-filled">
-            {ExportIcon}
-            Export carousel
+          <button
+            className="btn btn-filled"
+            onClick={() => setPlayerOpen(true)}
+            disabled={story.items.length === 0}
+            title="Fullscreen slideshow"
+          >
+            ▶ Play
           </button>
-          <button className="btn btn-tonal">Refine</button>
+          <button className="btn btn-tonal">
+            {ExportIcon}
+            Export
+          </button>
+          <button
+            className="btn btn-text"
+            onClick={genCaption}
+            disabled={captionLoading || story.items.length === 0}
+            title="Generate Instagram-ready caption + hashtags"
+          >
+            {captionLoading ? "Writing…" : "✨ Caption"}
+          </button>
         </div>
+
+        {caption && (
+          <div
+            style={{
+              marginTop: 12,
+              padding: "12px 14px",
+              border: "1px solid var(--md-outline-var)",
+              borderRadius: 12,
+              background: "var(--md-surface-c-low)",
+            }}
+          >
+            <div style={{ fontFamily: "var(--font-body)", fontSize: 14, lineHeight: 1.45, color: "var(--md-on-surface)" }}>
+              {caption.caption}
+            </div>
+            {caption.hashtags.length > 0 && (
+              <div style={{ marginTop: 8, fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--md-primary)", lineHeight: 1.5 }}>
+                {caption.hashtags.map(h => "#" + h).join(" ")}
+              </div>
+            )}
+            <div style={{ marginTop: 8, display: "flex", gap: 8, alignItems: "center" }}>
+              <button className="btn btn-text" onClick={copyCaption} style={{ fontSize: 12 }}>
+                {copied ? "Copied!" : "Copy"}
+              </button>
+              <button className="btn btn-text" onClick={genCaption} disabled={captionLoading} style={{ fontSize: 12 }}>
+                Regenerate
+              </button>
+            </div>
+          </div>
+        )}
 
         <ItinerarySection visits={story.visits || []} />
       </div>
@@ -247,7 +321,128 @@ function StoryCard({ story }: { story: StoryEntry }) {
       {lightboxSha && (
         <Lightbox sha256={lightboxSha} onClose={() => setLightboxSha(null)} />
       )}
+      {playerOpen && (
+        <StoryPlayer story={story} onClose={() => setPlayerOpen(false)} />
+      )}
     </article>
+  );
+}
+
+function StoryPlayer({ story, onClose }: { story: StoryEntry; onClose: () => void }) {
+  const [index, setIndex] = useState(0);
+  const [playing, setPlaying] = useState(true);
+  const SLIDE_MS = 4000;
+
+  // Autoplay
+  useEffect(() => {
+    if (!playing) return;
+    const t = setTimeout(() => {
+      setIndex(i => (i + 1) % story.items.length);
+    }, SLIDE_MS);
+    return () => clearTimeout(t);
+  }, [index, playing, story.items.length]);
+
+  // Keyboard
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+      else if (e.key === "ArrowRight" || e.key === " ") {
+        setIndex(i => (i + 1) % story.items.length);
+      } else if (e.key === "ArrowLeft") {
+        setIndex(i => (i - 1 + story.items.length) % story.items.length);
+      } else if (e.key.toLowerCase() === "p") {
+        setPlaying(p => !p);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose, story.items.length]);
+
+  const item = story.items[index];
+  if (!item) return null;
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 100,
+      background: "#000",
+      display: "grid",
+      gridTemplateRows: "auto 1fr auto",
+    }}>
+      {/* top bar */}
+      <div style={{
+        display: "flex", alignItems: "center", gap: 12,
+        padding: "10px 20px", color: "#fff",
+        background: "rgba(0,0,0,0.5)",
+      }}>
+        <button onClick={onClose} className="btn btn-text" style={{ color: "#fff" }}>← Close</button>
+        <div style={{ flex: 1, fontFamily: "var(--font-display)", fontSize: 16 }}>
+          {story.title}
+        </div>
+        <span style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>
+          {index + 1} / {story.items.length}
+        </span>
+      </div>
+
+      {/* image */}
+      <div style={{ display: "grid", placeItems: "center", overflow: "hidden", padding: 16 }}>
+        <img
+          src={item.preview_url}
+          alt=""
+          style={{
+            maxWidth: "100%", maxHeight: "100%", objectFit: "contain",
+            transition: "opacity 200ms",
+            boxShadow: "0 20px 60px rgba(0,0,0,0.7)",
+          }}
+        />
+      </div>
+
+      {/* progress + controls */}
+      <div style={{ background: "rgba(0,0,0,0.6)", color: "#fff" }}>
+        <div style={{
+          height: 3, background: "rgba(255,255,255,0.15)",
+        }}>
+          <div
+            key={index}
+            style={{
+              width: "100%", height: "100%",
+              background: "var(--md-primary)",
+              transform: playing ? "scaleX(1)" : "scaleX(0)",
+              transformOrigin: "left",
+              transition: playing ? `transform ${SLIDE_MS}ms linear` : "none",
+            }}
+          />
+        </div>
+        <div style={{
+          display: "flex", alignItems: "center", gap: 14,
+          padding: "10px 20px",
+          justifyContent: "center",
+        }}>
+          <button
+            onClick={() => setIndex(i => (i - 1 + story.items.length) % story.items.length)}
+            className="btn btn-text"
+            style={{ color: "#fff" }}
+          >
+            ← Prev
+          </button>
+          <button
+            onClick={() => setPlaying(p => !p)}
+            className="btn btn-filled"
+          >
+            {playing ? "❚❚ Pause" : "▶ Play"}
+          </button>
+          <button
+            onClick={() => setIndex(i => (i + 1) % story.items.length)}
+            className="btn btn-text"
+            style={{ color: "#fff" }}
+          >
+            Next →
+          </button>
+          <span style={{ marginLeft: 16, fontFamily: "var(--font-mono)", fontSize: 11, opacity: 0.6 }}>
+            ←/→ navigate · Space next · P play/pause · Esc close
+          </span>
+        </div>
+      </div>
+    </div>
   );
 }
 
