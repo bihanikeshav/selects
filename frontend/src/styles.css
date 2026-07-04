@@ -1261,6 +1261,17 @@ img { display: block; max-width: 100%; }
   background: color-mix(in srgb, var(--md-secondary-container) 90%, var(--md-on-surface) 10%);
 }
 
+.filter-chip--more {
+  background: transparent;
+  border: 1px dashed var(--md-outline);
+  color: var(--md-primary);
+  font-weight: 500;
+}
+
+.filter-chip--more:hover {
+  background: color-mix(in srgb, var(--md-primary) 6%, transparent);
+}
+
 .filter-chip-count {
   font-family: var(--font-mono);
   font-size: 11px;
