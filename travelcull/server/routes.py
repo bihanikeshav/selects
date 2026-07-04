@@ -4,7 +4,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Query, Response
+from fastapi import Body, FastAPI, HTTPException, Query, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -802,6 +802,41 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
                     reject_reason=classical.reject_reason if classical else None,
                 ))
         return PhotoList(total=len(items), items=items)
+
+    # ── Cull swipes (J/K/L persistence) ──────────────────────────────────────
+    @app.post("/api/swipes/{sha256}")
+    def record_swipe(sha256: str, decision: str = Body(..., embed=True)):
+        from travelcull.db.models import Swipe
+
+        with session_scope(Session) as s:
+            photo = s.query(Photo).filter(Photo.sha256 == sha256).first()
+            if not photo:
+                raise HTTPException(404, detail="photo not found")
+            existing = s.get(Swipe, photo.id)
+            if existing:
+                existing.decision = decision
+                s.add(existing)
+            else:
+                s.add(Swipe(photo_id=photo.id, decision=decision))
+        return {"ok": True, "decision": decision}
+
+    @app.get("/api/swipes/summary")
+    def swipes_summary():
+        from sqlalchemy import func
+
+        from travelcull.db.models import Swipe
+
+        with session_scope(Session) as s:
+            rows = s.query(Swipe.decision, func.count(Swipe.photo_id)).group_by(Swipe.decision).all()
+            counts = {d: c for d, c in rows}
+            total_photos = s.query(Photo).count()
+        return {
+            "total_photos": total_photos,
+            "kept": counts.get("keep", 0) + counts.get("silver", 0),
+            "rejected": counts.get("reject", 0),
+            "skipped": counts.get("skip", 0),
+            "undecided": total_photos - sum(counts.values()),
+        }
 
     @app.get("/api/map/markers")
     def map_markers(grid_deg: float = Query(0.01, gt=0, lt=1)):

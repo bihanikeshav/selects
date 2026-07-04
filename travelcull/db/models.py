@@ -315,3 +315,13 @@ class PhotoPerson(Base):
     person_id: Mapped[int] = mapped_column(Integer, ForeignKey("persons.id"), primary_key=True)
     face_embedding_id: Mapped[int] = mapped_column(Integer, ForeignKey("face_embeddings.id"))
     confidence: Mapped[float] = mapped_column(Float)
+
+
+class Swipe(Base):
+    """User keep/reject decision during cull."""
+
+    __tablename__ = "swipes"
+
+    photo_id: Mapped[int] = mapped_column(Integer, ForeignKey("photos.id"), primary_key=True)
+    decision: Mapped[str] = mapped_column(Text)  # "keep" | "reject" | "silver" | "skip"
+    swiped_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
