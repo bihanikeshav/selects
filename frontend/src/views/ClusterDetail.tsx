@@ -7,6 +7,7 @@ import KbdFooter from "../components/KbdFooter";
 import Rail from "../components/Rail";
 import StatusRow from "../components/StatusRow";
 import Topbar from "../components/Topbar";
+import PhotoEditor from "./PhotoEditor";
 
 export default function ClusterDetail() {
   const { tag = "" } = useParams<{ tag: string }>();
@@ -17,9 +18,10 @@ export default function ClusterDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [editor, setEditor] = useState<"darktable" | "rawtherapee" | "gimp">("darktable");
+  const [editor, setEditor] = useState<"in-app" | "darktable" | "rawtherapee" | "gimp">("in-app");
   const [opening, setOpening] = useState(false);
   const [openResult, setOpenResult] = useState<string | null>(null);
+  const [editingSha, setEditingSha] = useState<string | null>(null);
 
   const decoded = decodeURIComponent(tag);
 
@@ -53,6 +55,12 @@ export default function ClusterDetail() {
 
   async function openSelected() {
     if (selected.size === 0) return;
+    if (editor === "in-app") {
+      // For the in-app editor, open one photo at a time. Pick the first.
+      const first = Array.from(selected)[0];
+      setEditingSha(first);
+      return;
+    }
     setOpening(true);
     setOpenResult(null);
     try {
@@ -99,6 +107,7 @@ export default function ClusterDetail() {
               className="editor-picker"
               aria-label="Editor"
             >
+              <option value="in-app">In-app editor</option>
               <option value="darktable">darktable</option>
               <option value="rawtherapee">RawTherapee</option>
               <option value="gimp">GIMP</option>
@@ -108,7 +117,7 @@ export default function ClusterDetail() {
               onClick={openSelected}
               disabled={selected.size === 0 || opening}
             >
-              {opening ? "Opening…" : `Open ${selected.size} in editor`}
+              {opening ? "Opening…" : editor === "in-app" ? `Edit first selected` : `Open ${selected.size} in editor`}
             </button>
           </div>
 
@@ -142,6 +151,9 @@ export default function ClusterDetail() {
 
         <KbdFooter />
       </div>
+      {editingSha && (
+        <PhotoEditor sha256={editingSha} onClose={() => setEditingSha(null)} />
+      )}
     </div>
   );
 }

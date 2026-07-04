@@ -504,17 +504,6 @@ export default function Stories() {
                 <StoryGroupTabs value={groupBy} onChange={setGroupBy} />
               </div>
 
-              {groupBy === "people" && (
-                <div className="cluster-detail-toast" style={{ background: "var(--md-secondary-container)", color: "var(--md-on-secondary-container)" }}>
-                  Stories grouped by people identity — coming next pass. Currently shows all stories.
-                </div>
-              )}
-              {groupBy === "pattern" && (
-                <div className="cluster-detail-toast" style={{ background: "var(--md-secondary-container)", color: "var(--md-on-secondary-container)" }}>
-                  Travel-pattern stories (solo days vs together days, indoor vs outdoor) — coming next pass.
-                </div>
-              )}
-
               {allTags.length > 0 && (
                 <FilterChipBar
                   tags={tagsExcludingDates(allTags)}
@@ -526,8 +515,11 @@ export default function Stories() {
               {stories
                 .filter(story => {
                   if (groupBy === "place") return story.day.startsWith("place:");
-                  if (groupBy === "day") return !story.day.startsWith("place:");
-                  return true; // people & pattern modes show everything for now
+                  if (groupBy === "people") return story.day.startsWith("people:");
+                  if (groupBy === "pattern") return story.day.startsWith("pattern:");
+                  return !story.day.startsWith("place:")
+                      && !story.day.startsWith("people:")
+                      && !story.day.startsWith("pattern:");
                 })
                 .map(story => (
                   <StoryCard key={story.id} story={story} />

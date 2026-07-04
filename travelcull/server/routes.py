@@ -461,10 +461,19 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
         source: Optional[str] = Query("thematic"),
     ):
         with session_scope(Session) as s:
-            q = s.query(PhotoTag.photo_id).filter(PhotoTag.tag == tag)
-            if source:
-                q = q.filter(PhotoTag.source == source)
-            ids = [r[0] for r in q.all()]
+            # Synthetic "uncategorized" cluster: photos with NO tag in this source
+            if tag.lower() == "uncategorized":
+                tagged_subq = s.query(PhotoTag.photo_id)
+                if source:
+                    tagged_subq = tagged_subq.filter(PhotoTag.source == source)
+                tagged_ids = {r[0] for r in tagged_subq.all()}
+                all_ids = {r[0] for r in s.query(Photo.id).all()}
+                ids = list(all_ids - tagged_ids)
+            else:
+                q = s.query(PhotoTag.photo_id).filter(PhotoTag.tag == tag)
+                if source:
+                    q = q.filter(PhotoTag.source == source)
+                ids = [r[0] for r in q.all()]
             if not ids:
                 return PhotoList(total=0, items=[])
 
@@ -662,6 +671,38 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
     class OpenInEditorReq(BaseModel):
         sha256s: list[str]
         editor: str = "darktable"   # "darktable" | "rawtherapee" | "gimp"
+
+    class SaveEditReq(BaseModel):
+        data_url: str           # "data:image/jpeg;base64,..."
+        mime: str = "image/jpeg"
+
+    @app.post("/api/edits/{sha256}")
+    def save_edit(sha256: str, req: SaveEditReq):
+        """Persist a Filerobot-edited image as a sidecar JPEG at
+        .travelcull/edits/{sha256}.jpg.
+        """
+        import base64
+
+        prefix = "base64,"
+        idx = req.data_url.find(prefix)
+        b64 = req.data_url[idx + len(prefix):] if idx >= 0 else req.data_url
+        try:
+            blob = base64.b64decode(b64)
+        except Exception as exc:
+            raise HTTPException(400, detail=f"bad data url: {exc}")
+
+        edits_dir = cfg.state_dir / "edits"
+        edits_dir.mkdir(parents=True, exist_ok=True)
+        out_path = edits_dir / f"{sha256}.jpg"
+        out_path.write_bytes(blob)
+        return {"path": str(out_path), "bytes_written": len(blob)}
+
+    @app.get("/api/edits/{sha256}")
+    def get_edit(sha256: str):
+        edit_path = cfg.state_dir / "edits" / f"{sha256}.jpg"
+        if not edit_path.exists():
+            raise HTTPException(404, detail="no edit")
+        return FileResponse(edit_path, media_type="image/jpeg")
 
     @app.post("/api/edit/open")
     def open_in_editor(req: OpenInEditorReq):
