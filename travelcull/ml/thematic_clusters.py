@@ -56,6 +56,7 @@ log = logging.getLogger(__name__)
 MIN_LOCATION_PHOTOS = 10        # only surface visits with ≥ this many photos
 TOP_LOCATIONS = 12               # cap how many location clusters we surface
 MAX_PHOTOS_PER_CLUSTER = 120     # don't blow out cluster cards
+MERGE_KM = 5.0                   # collapse named visits within this radius into one cluster
 GOLDEN_HOUR = (time(16, 30), time(19, 30))
 NIGHT = (time(20, 0), time(23, 59))
 COUPLE_BOTH_DOMINANT_THRESHOLD = 0.05   # 5% of photos => "dominant"
@@ -151,6 +152,53 @@ def run_thematic_stage(
             .all()
         ]
 
+    # ── Merge near-duplicate visit names within MERGE_KM ─────────────────────
+    # Get visit coords from the visits table
+    import math
+    from travelcull.db.models import Visit as VisitTable
+    with session_scope(Session) as s:
+        visit_coords_raw = s.query(VisitTable.name, VisitTable.lat, VisitTable.lon).all()
+    # Take first centroid per name
+    visit_centroid: dict[str, tuple[float, float]] = {}
+    for name, lat, lon in visit_coords_raw:
+        if name not in visit_centroid and lat is not None and lon is not None:
+            visit_centroid[name] = (lat, lon)
+
+    def km_between(a: tuple[float, float], b: tuple[float, float]) -> float:
+        # equirectangular approx
+        dx = (a[1] - b[1]) * math.cos(math.radians((a[0] + b[0]) / 2))
+        dy = a[0] - b[0]
+        return math.sqrt(dx * dx + dy * dy) * 111.0
+
+    # Canonical name selection: for any pair of visits within MERGE_KM,
+    # collapse to the better-named one. Better = (in this priority):
+    #   1. Has a landmark keyword (Monastery / Stupa / Tso / Pass / Dunes / Valley)
+    #   2. Has the higher photo_count in visits (more prominent on the trip)
+    #   3. Is the longer name (more specific)
+    visit_photo_counts: dict[str, int] = defaultdict(int)
+    with session_scope(Session) as s:
+        for name, n in s.query(VisitTable.name, VisitTable.photo_count).all():
+            visit_photo_counts[name] += n or 0
+
+    LANDMARK_KWS = ("Monastery", "Stupa", "Tso", "Pass", "Dunes", "Valley")
+
+    def name_score(n: str) -> tuple[int, int, int]:
+        # Higher tuple = better. (landmark, photo_count, name_length)
+        has_landmark = 1 if any(k in n for k in LANDMARK_KWS) else 0
+        return (has_landmark, visit_photo_counts.get(n, 0), len(n))
+
+    names_sorted = sorted(visit_centroid.keys())
+    canonical: dict[str, str] = {n: n for n in names_sorted}
+    for i, n1 in enumerate(names_sorted):
+        for n2 in names_sorted[i + 1:]:
+            if canonical[n2] != n2 or canonical[n1] != n1:
+                continue
+            if km_between(visit_centroid[n1], visit_centroid[n2]) <= MERGE_KM:
+                # Loser gets remapped to the better-scoring name
+                winner = n1 if name_score(n1) >= name_score(n2) else n2
+                loser = n2 if winner == n1 else n1
+                canonical[loser] = winner
+
     # ── Index visits by name and aggregate per-photo location ────────────────
     photo_location: dict[int, str] = {}
     visit_counts: dict[str, int] = defaultdict(int)
@@ -160,8 +208,9 @@ def run_thematic_stage(
             continue
         for name, arrived, departed in sorted_visits:
             if arrived and departed and arrived <= p.taken_at <= departed:
-                photo_location[p.id] = name
-                visit_counts[name] += 1
+                merged = canonical.get(name, name)
+                photo_location[p.id] = merged
+                visit_counts[merged] += 1
                 break  # first containing visit wins
 
     # Top location buckets

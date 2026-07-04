@@ -14,12 +14,14 @@ from travelcull.db.models import ClassicalScore, Embedding, Photo, Story, StoryI
 
 log = logging.getLogger(__name__)
 
-# Minimum photos for a day to get its own story
-MIN_DAY_PHOTOS = 8
+# Minimum photos for a day to get its own story (drops "I just took 3 sunset shots" days)
+MIN_DAY_PHOTOS = 15
 # Max photos per story (final cap) — bumped to let dense days breathe
 MAX_STORY_PHOTOS = 30
 # Minimum photos for a place to get its own (non-day) story
 MIN_PLACE_PHOTOS = 30
+# Minimum representative photos AFTER dedup/MMR — drops anemic stories
+MIN_STORY_REPS = 6
 # Time gap (seconds) that splits scenes when visual similarity is also low
 SCENE_TIME_GAP_S = 600  # 10 minutes
 # Cosine similarity threshold: above this, same scene; below + time gap, new scene
@@ -123,6 +125,9 @@ def run_story_stage(
         ]
         visit_data_list = build_visits_for_day(0, photo_dicts, Session)  # story_id filled in loop below
 
+        if len(representatives) < MIN_STORY_REPS:
+            continue  # drop anemic day stories
+
         # Build itinerary title from first/last visit
         title = _day_title_with_visits(day, len(photos), len(scenes), visit_data_list)
 
@@ -164,10 +169,31 @@ def run_story_stage(
 
     # ── Per-place stories ────────────────────────────────────────────────────
     n_stories += _build_place_stories(cfg, Session, rows, on_progress)
-    # ── Per-people stories ───────────────────────────────────────────────────
-    n_stories += _build_people_stories(cfg, Session, rows, on_progress)
     # ── Per-pattern stories ──────────────────────────────────────────────────
     n_stories += _build_pattern_stories(cfg, Session, rows, on_progress)
+    # ── Per-people stories — use UN-deduped rows so couple shots survive ────
+    with session_scope(Session) as s:
+        all_rows = (
+            s.query(
+                Photo.id,
+                Photo.taken_at,
+                Photo.sha256,
+                Photo.gps_lat,
+                Photo.gps_lon,
+                ClassicalScore.blur,
+                ClassicalScore.faces_count,
+                ClassicalScore.auto_reject,
+                Embedding.siglip,
+                Embedding.aesthetic_iqa,
+            )
+            .join(Embedding, Embedding.photo_id == Photo.id)
+            .outerjoin(ClassicalScore, ClassicalScore.photo_id == Photo.id)
+            .filter(Photo.taken_at.is_not(None))
+            .order_by(Photo.taken_at)
+            .all()
+        )
+    all_rows = [r for r in all_rows if not (r.auto_reject or False)]
+    n_stories += _build_people_stories(cfg, Session, all_rows, on_progress)
 
     log.info("story stage: built %d stories total", n_stories)
     return n_stories
@@ -209,16 +235,15 @@ def _build_people_stories(cfg, Session, rows, on_progress=None) -> int:
             continue
         has_p1 = p1_id in ppl
         has_p2 = p2_id is not None and p2_id in ppl
-        if has_p1 and has_p2 and len(ppl) == 2:
+        if has_p1 and has_p2:
+            # Both of you in the same frame — the rare-but-precious "together" shot
             buckets["Just us"].append(r)
-        elif has_p1 and not has_p2 and len(ppl) == 1:
+        elif has_p1:
             buckets[f"Solo of {p1_name}"].append(r)
-        elif has_p2 and not has_p1 and len(ppl) == 1:
+        elif has_p2:
             buckets[f"Solo of {p2_name}"].append(r)
-        elif (has_p1 or has_p2) and len(ppl) >= 3:
-            buckets["With others"].append(r)
 
-    return _persist_themed_stories(cfg, Session, buckets, prefix="people:")
+    return _persist_themed_stories(cfg, Session, buckets, prefix="people:", min_photos=3, skip_scene_dedup=True)
 
 
 def _build_pattern_stories(cfg, Session, rows, on_progress=None) -> int:
@@ -250,29 +275,59 @@ def _build_pattern_stories(cfg, Session, rows, on_progress=None) -> int:
     return _persist_themed_stories(cfg, Session, buckets, prefix="pattern:")
 
 
-def _persist_themed_stories(cfg, Session, buckets, prefix: str, min_photos: int = 8) -> int:
-    """Build a Story per non-empty bucket (with enough photos), reusing the
-    scene-clustering + MMR-diversified representatives selection.
+def _persist_themed_stories(
+    cfg,
+    Session,
+    buckets,
+    prefix: str,
+    min_photos: int = 5,
+    skip_scene_dedup: bool = False,
+) -> int:
+    """Build a Story per non-empty bucket.
+
+    skip_scene_dedup=True: include EVERY photo in the bucket chronologically.
+    Use this for people stories where we want every couple-shot preserved.
     """
     n_built = 0
     for name, members in buckets.items():
         if len(members) < min_photos:
             continue
         members = sorted(members, key=lambda r: r.taken_at)
-        scenes = _segment_scenes(members)
-        representatives = _pick_representatives(scenes)
-        representatives.sort(key=lambda x: x["taken_at"])
-        if len(representatives) > MAX_STORY_PHOTOS:
-            representatives.sort(key=lambda x: x["score"], reverse=True)
-            representatives = representatives[:MAX_STORY_PHOTOS]
+
+        if skip_scene_dedup:
+            # Just take every photo, capped at MAX_STORY_PHOTOS * 2 for these
+            cap = MAX_STORY_PHOTOS * 2
+            chosen = members[:cap] if len(members) > cap else members
+            reps_data = [
+                {"photo_id": r.id, "scene_label": None, "scene_rank": i}
+                for i, r in enumerate(chosen)
+            ]
+            n_scenes_for_title = 0
+        else:
+            scenes = _segment_scenes(members)
+            representatives = _pick_representatives(scenes)
             representatives.sort(key=lambda x: x["taken_at"])
+            if len(representatives) > MAX_STORY_PHOTOS:
+                representatives.sort(key=lambda x: x["score"], reverse=True)
+                representatives = representatives[:MAX_STORY_PHOTOS]
+                representatives.sort(key=lambda x: x["taken_at"])
+            # Drop pathologically thin themed stories
+            if len(representatives) < MIN_STORY_REPS:
+                continue
+            reps_data = [
+                {"photo_id": r["photo_id"], "scene_label": r["scene_label"], "scene_rank": r["scene_rank"]}
+                for r in representatives
+            ]
+            n_scenes_for_title = len(scenes)
+
         synthetic_day = f"{prefix}{name}"
-        title = f"{name} · {len(members)} photos, {len(scenes)} scenes"
+        suffix = f", {n_scenes_for_title} scenes" if n_scenes_for_title else ""
+        title = f"{name} · {len(members)} photos{suffix}"
         with session_scope(Session) as s:
-            story = Story(day=synthetic_day, title=title, photo_count=len(representatives))
+            story = Story(day=synthetic_day, title=title, photo_count=len(reps_data))
             s.add(story)
             s.flush()
-            for rank, rep in enumerate(representatives):
+            for rank, rep in enumerate(reps_data):
                 s.add(StoryItem(
                     story_id=story.id,
                     rank=rank,

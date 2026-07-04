@@ -1,13 +1,17 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams, useSearchParams, Link } from "react-router-dom";
 
-import { listClusterPhotos, openInEditor } from "../api/client";
+import { listClusterPhotos } from "../api/client";
 import type { Photo } from "../api/types";
 import KbdFooter from "../components/KbdFooter";
 import Rail from "../components/Rail";
 import StatusRow from "../components/StatusRow";
 import Topbar from "../components/Topbar";
-import PhotoEditor from "./PhotoEditor";
+
+interface EditStatus {
+  edited: boolean;
+  mtime: number | null;
+}
 
 export default function ClusterDetail() {
   const { tag = "" } = useParams<{ tag: string }>();
@@ -18,25 +22,47 @@ export default function ClusterDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [editor, setEditor] = useState<"in-app" | "darktable" | "rawtherapee" | "gimp">("in-app");
-  const [opening, setOpening] = useState(false);
-  const [openResult, setOpenResult] = useState<string | null>(null);
-  const [editingSha, setEditingSha] = useState<string | null>(null);
+  const [editStatus, setEditStatus] = useState<Record<string, EditStatus>>({});
+  const [lightbox, setLightbox] = useState<string | null>(null);
+
+  const [launching, setLaunching] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
 
   const decoded = decodeURIComponent(tag);
 
   useEffect(() => {
     setLoading(true);
     listClusterPhotos(decoded, source, 500)
-      .then(r => {
+      .then((r) => {
         setPhotos(r.items);
         setLoading(false);
       })
-      .catch(e => {
+      .catch((e) => {
         setError(String(e));
         setLoading(false);
       });
   }, [decoded, source]);
+
+  const refreshEditStatus = useCallback(async () => {
+    if (photos.length === 0) return;
+    const shas = photos.map((p) => p.sha256).join(",");
+    try {
+      const res = await fetch(`/api/edits/status?shas=${shas}`);
+      if (!res.ok) return;
+      const data = (await res.json()) as Record<string, EditStatus>;
+      setEditStatus(data);
+    } catch {
+      // non-fatal
+    }
+  }, [photos]);
+
+  // Poll every 4 seconds while darktable might be writing — cheap.
+  useEffect(() => {
+    refreshEditStatus();
+    const t = setInterval(refreshEditStatus, 4000);
+    return () => clearInterval(t);
+  }, [refreshEditStatus]);
 
   function toggle(sha: string) {
     const next = new Set(selected);
@@ -45,31 +71,70 @@ export default function ClusterDetail() {
     setSelected(next);
   }
 
-  function selectAll() {
-    setSelected(new Set(photos.map(p => p.sha256)));
+  function selectAll() { setSelected(new Set(photos.map((p) => p.sha256))); }
+  function clearSelection() { setSelected(new Set()); }
+  function selectAllEdited() {
+    const editedShas = Object.entries(editStatus)
+      .filter(([, s]) => s.edited)
+      .map(([sha]) => sha);
+    setSelected(new Set(editedShas));
   }
 
-  function clearSelection() {
-    setSelected(new Set());
-  }
+  const editedCount = Object.values(editStatus).filter((s) => s.edited).length;
 
-  async function openSelected() {
+  async function openInDarktable() {
     if (selected.size === 0) return;
-    if (editor === "in-app") {
-      // For the in-app editor, open one photo at a time. Pick the first.
-      const first = Array.from(selected)[0];
-      setEditingSha(first);
+    setLaunching(true);
+    setToast(null);
+    try {
+      const res = await fetch("/api/edit/darktable", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sha256s: Array.from(selected) }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(err.detail || `darktable launch ${res.status}`);
+      }
+      const j = await res.json();
+      setToast(`darktable opened with ${j.opened} photos. Edit, save (Ctrl+S), close. We'll detect XMPs in real time.`);
+    } catch (e) {
+      setToast(String(e));
+    } finally {
+      setLaunching(false);
+    }
+  }
+
+  async function exportEdited() {
+    const editedShas = Object.entries(editStatus)
+      .filter(([sha, s]) => s.edited && (selected.size === 0 || selected.has(sha)))
+      .map(([sha]) => sha);
+    if (editedShas.length === 0) {
+      setToast("No edited photos to export. Make edits in darktable and Ctrl+S first.");
       return;
     }
-    setOpening(true);
-    setOpenResult(null);
+    setExporting(true);
+    setToast(null);
     try {
-      const r = await openInEditor(Array.from(selected), editor);
-      setOpenResult(`Opened ${r.opened} photos in ${r.editor}`);
+      const res = await fetch("/api/edits/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sha256s: editedShas,
+          cluster_name: decoded,
+          width: 2048,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(err.detail || `export ${res.status}`);
+      }
+      const j = await res.json();
+      setToast(`Exported ${j.exported} / ${j.total} JPEGs → ${j.out_dir}`);
     } catch (e) {
-      setOpenResult(String(e));
+      setToast(String(e));
     } finally {
-      setOpening(false);
+      setExporting(false);
     }
   }
 
@@ -80,8 +145,8 @@ export default function ClusterDetail() {
         <Topbar folder="travelcull" context={`cluster · ${decoded}`} />
         <StatusRow
           pos={`${photos.length} photos`}
-          keepersCount={selected.size}
-          details={`source: ${source} · ${selected.size} selected`}
+          keepersCount={editedCount}
+          details={`${selected.size} selected · ${editedCount} edited · source: ${source}`}
         />
 
         <div className="cluster-detail-wrap">
@@ -95,34 +160,32 @@ export default function ClusterDetail() {
 
             <div style={{ flex: 1 }} />
 
-            <button className="btn btn-text" onClick={selectAll} disabled={photos.length === 0}>
-              Select all
+            <button className="btn btn-text" onClick={selectAll} disabled={photos.length === 0}>Select all</button>
+            <button className="btn btn-text" onClick={selectAllEdited} disabled={editedCount === 0} title="Select all photos with darktable edits">
+              Select edited ({editedCount})
             </button>
-            <button className="btn btn-text" onClick={clearSelection} disabled={selected.size === 0}>
-              Clear
-            </button>
-            <select
-              value={editor}
-              onChange={e => setEditor(e.target.value as typeof editor)}
-              className="editor-picker"
-              aria-label="Editor"
+            <button className="btn btn-text" onClick={clearSelection} disabled={selected.size === 0}>Clear</button>
+
+            <button
+              className="btn btn-tonal"
+              onClick={openInDarktable}
+              disabled={selected.size === 0 || launching}
+              title="Launch darktable with the selected originals in a per-session library"
             >
-              <option value="in-app">In-app editor</option>
-              <option value="darktable">darktable</option>
-              <option value="rawtherapee">RawTherapee</option>
-              <option value="gimp">GIMP</option>
-            </select>
+              {launching ? "Launching…" : `Edit ${selected.size} in darktable`}
+            </button>
             <button
               className="btn btn-filled"
-              onClick={openSelected}
-              disabled={selected.size === 0 || opening}
+              onClick={exportEdited}
+              disabled={exporting || editedCount === 0}
+              title="Render the XMP edits to JPEGs via darktable-cli"
             >
-              {opening ? "Opening…" : editor === "in-app" ? `Edit first selected` : `Open ${selected.size} in editor`}
+              {exporting ? "Exporting…" : `Export ${selected.size > 0 ? "selected" : "all"} edited`}
             </button>
           </div>
 
-          {openResult && (
-            <div className="cluster-detail-toast">{openResult}</div>
+          {toast && (
+            <div className="cluster-detail-toast">{toast}</div>
           )}
 
           {loading && <div className="cluster-detail-empty">Loading…</div>}
@@ -132,18 +195,63 @@ export default function ClusterDetail() {
           )}
 
           <div className="cluster-detail-grid">
-            {photos.map(p => {
+            {photos.map((p) => {
               const sel = selected.has(p.sha256);
+              const isEdited = editStatus[p.sha256]?.edited;
               return (
-                <button
-                  key={p.sha256}
-                  className={`cluster-photo${sel ? " is-selected" : ""}`}
-                  onClick={() => toggle(p.sha256)}
-                  aria-pressed={sel}
-                >
-                  <img src={p.thumb_url} alt="" loading="lazy" />
+                <div key={p.sha256} className={`cluster-photo${sel ? " is-selected" : ""}`} style={{ position: "relative" }}>
+                  <button
+                    onClick={() => toggle(p.sha256)}
+                    style={{ display: "block", width: "100%", height: "100%", padding: 0, border: 0, background: "transparent", cursor: "pointer" }}
+                    aria-pressed={sel}
+                    aria-label={`select photo ${p.sha256.slice(0, 8)}`}
+                  >
+                    <img src={p.thumb_url} alt="" loading="lazy" />
+                  </button>
                   {sel && <span className="cluster-photo-check">✓</span>}
-                </button>
+                  {isEdited && (
+                    <span
+                      title={editStatus[p.sha256]?.mtime ? `Edited ${new Date(editStatus[p.sha256]!.mtime! * 1000).toLocaleString()}` : "Edited"}
+                      style={{
+                        position: "absolute",
+                        bottom: 6,
+                        left: 6,
+                        background: "var(--g-yellow)",
+                        color: "#1B1B1F",
+                        fontFamily: "var(--font-mono)",
+                        fontSize: 10,
+                        fontWeight: 700,
+                        padding: "2px 6px",
+                        borderRadius: 4,
+                        boxShadow: "0 2px 4px rgba(0,0,0,0.4)",
+                      }}
+                    >
+                      EDITED
+                    </span>
+                  )}
+                  <button
+                    onClick={() => setLightbox(p.sha256)}
+                    aria-label="enlarge"
+                    title="Enlarge"
+                    style={{
+                      position: "absolute",
+                      top: 6,
+                      right: 6,
+                      width: 24,
+                      height: 24,
+                      borderRadius: "50%",
+                      background: "rgba(0,0,0,0.55)",
+                      color: "#fff",
+                      border: 0,
+                      cursor: "zoom-in",
+                      fontSize: 14,
+                      display: "grid",
+                      placeItems: "center",
+                    }}
+                  >
+                    ↗
+                  </button>
+                </div>
               );
             })}
           </div>
@@ -151,8 +259,18 @@ export default function ClusterDetail() {
 
         <KbdFooter />
       </div>
-      {editingSha && (
-        <PhotoEditor sha256={editingSha} onClose={() => setEditingSha(null)} />
+
+      {lightbox && (
+        <div
+          onClick={() => setLightbox(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.92)", zIndex: 90, display: "grid", placeItems: "center", cursor: "zoom-out" }}
+        >
+          <img
+            src={`/api/preview/${lightbox}`}
+            alt=""
+            style={{ maxWidth: "94vw", maxHeight: "94vh", boxShadow: "0 12px 60px rgba(0,0,0,0.8)" }}
+          />
+        </div>
       )}
     </div>
   );
