@@ -186,6 +186,26 @@ function StoryCard({ story }: { story: StoryEntry }) {
   const [caption, setCaption] = useState<{ caption: string; hashtags: string[] } | null>(null);
   const [captionLoading, setCaptionLoading] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportResult, setExportResult] = useState<string | null>(null);
+
+  async function exportStory() {
+    setExporting(true);
+    setExportResult(null);
+    try {
+      const res = await fetch(`/api/stories/${story.id}/export`, { method: "POST" });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(j.detail);
+      }
+      const j = await res.json();
+      setExportResult(`Copied ${j.copied} photos → ${j.out_dir}`);
+    } catch (e) {
+      setExportResult(String(e));
+    } finally {
+      setExporting(false);
+    }
+  }
 
   async function genCaption() {
     setCaptionLoading(true);
@@ -228,7 +248,7 @@ function StoryCard({ story }: { story: StoryEntry }) {
             : story.day}
         </h2>
         <div className="count">
-          {story.photo_count} photos{scenesCount ? ` · ${scenesCount} scenes` : ""}
+          {story.items.length} photos{scenesCount ? ` · ${scenesCount} scenes` : ""}
         </div>
 
         {story.itinerary_breadcrumb && (
@@ -246,9 +266,14 @@ function StoryCard({ story }: { story: StoryEntry }) {
           >
             ▶ Play
           </button>
-          <button className="btn btn-tonal">
+          <button
+            className="btn btn-tonal"
+            onClick={exportStory}
+            disabled={exporting || story.items.length === 0}
+            title="Copy this story's photos to .travelcull/exports/stories/<title>/ in carousel order"
+          >
             {ExportIcon}
-            Export
+            {exporting ? "Exporting…" : "Export"}
           </button>
           <button
             className="btn btn-text"
@@ -259,6 +284,23 @@ function StoryCard({ story }: { story: StoryEntry }) {
             {captionLoading ? "Writing…" : "✨ Caption"}
           </button>
         </div>
+
+        {exportResult && (
+          <div
+            style={{
+              marginTop: 10,
+              padding: "8px 12px",
+              borderRadius: 10,
+              background: "color-mix(in srgb, var(--g-green) 14%, transparent)",
+              color: "color-mix(in srgb, var(--g-green) 78%, var(--md-on-surface))",
+              fontSize: 12,
+              fontFamily: "var(--font-mono)",
+              wordBreak: "break-all",
+            }}
+          >
+            {exportResult}
+          </div>
+        )}
 
         {caption && (
           <div
