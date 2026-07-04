@@ -181,6 +181,7 @@ function ItinerarySection({ visits }: { visits: VisitEntry[] }) {
 function StoryCard({ story }: { story: StoryEntry }) {
   const accent = accentFor(story.day);
   const dayLabel = formatDayLabel(story.day);
+  const [lightboxSha, setLightboxSha] = useState<string | null>(null);
   // Parse scene count from title: "... · N photos, M scenes"
   const scenesMatch = story.title.match(/(\d+)\s+scenes/);
   const scenesCount = scenesMatch ? scenesMatch[1] : "";
@@ -223,21 +224,60 @@ function StoryCard({ story }: { story: StoryEntry }) {
             <div className="story-strip-empty">No photos match current filters</div>
           ) : (
             story.items.map((item, i) => (
-              <div className="story-frame" key={item.photo_id}>
+              <button
+                className="story-frame"
+                key={item.photo_id}
+                onClick={() => setLightboxSha(item.sha256)}
+                style={{ border: 0, padding: 0, cursor: "zoom-in", background: "transparent" }}
+                title={item.taken_at ?? undefined}
+                aria-label={`Enlarge photo ${i + 1}`}
+              >
                 <img
                   src={item.thumb_url}
                   alt={`Photo ${i + 1}`}
                   loading="lazy"
-                  title={item.taken_at ?? undefined}
                 />
                 <span className="idx">{formatIndex(item.rank)}</span>
                 {item.tag && <span className="story-frame-tag">{item.tag}</span>}
-              </div>
+              </button>
             ))
           )}
         </div>
       </div>
+      {lightboxSha && (
+        <Lightbox sha256={lightboxSha} onClose={() => setLightboxSha(null)} />
+      )}
     </article>
+  );
+}
+
+function Lightbox({ sha256, onClose }: { sha256: string; onClose: () => void }) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.9)",
+        zIndex: 90,
+        display: "grid",
+        placeItems: "center",
+        cursor: "zoom-out",
+      }}
+    >
+      <img
+        src={`/api/preview/${sha256}`}
+        alt=""
+        style={{ maxWidth: "94vw", maxHeight: "94vh", boxShadow: "0 12px 60px rgba(0,0,0,0.8)" }}
+      />
+    </div>
   );
 }
 
