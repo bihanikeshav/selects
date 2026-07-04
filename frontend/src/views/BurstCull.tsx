@@ -11,17 +11,39 @@ import MemoryRing from "../components/MemoryRing";
 
 type LoadState = "loading" | "error" | "empty" | "loaded";
 
+interface SwipeSummary {
+  total_photos: number;
+  kept: number;
+  rejected: number;
+  skipped: number;
+  undecided: number;
+}
+
 export default function BurstCull() {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [total, setTotal] = useState(0);
   const [idx, setIdx] = useState(0);
   const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [swipeSummary, setSwipeSummary] = useState<SwipeSummary | null>(null);
 
   // Moment state: when a photo has a moment, we may expand it
   const [expandedMoment, setExpandedMoment] = useState<Moment | null>(null);
   const [momentLoading, setMomentLoading] = useState(false);
   // When a moment is expanded, momentIdx selects within the moment members
   const [momentIdx, setMomentIdx] = useState(0);
+
+  // Poll swipe summary
+  useEffect(() => {
+    function refresh() {
+      fetch("/api/swipes/summary")
+        .then((r) => r.json())
+        .then(setSwipeSummary)
+        .catch(() => {});
+    }
+    refresh();
+    const t = setInterval(refresh, 5000);
+    return () => clearInterval(t);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -86,13 +108,39 @@ export default function BurstCull() {
     }
   }, [expandedMoment, photos.length]);
 
+  // Swipe persistence
+  async function recordSwipe(sha: string, decision: string) {
+    try {
+      await fetch(`/api/swipes/${sha}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ decision }),
+      });
+    } catch {
+      // non-fatal
+    }
+  }
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-      if (e.key === "j" || e.key === "ArrowDown" || e.key === "ArrowRight") {
+      const sha = (expandedMoment?.members[momentIdx]?.sha256) || photos[idx]?.sha256;
+      if (e.key === "j" || e.key === "J") {
+        e.preventDefault();
+        if (sha) recordSwipe(sha, "reject");
+        next();
+      } else if (e.key === "k" || e.key === "K") {
+        e.preventDefault();
+        if (sha) recordSwipe(sha, "keep");
+        next();
+      } else if (e.key === "l" || e.key === "L") {
+        e.preventDefault();
+        if (sha) recordSwipe(sha, "silver");
+        next();
+      } else if (e.key === "ArrowDown" || e.key === "ArrowRight") {
         e.preventDefault();
         next();
-      } else if (e.key === "k" || e.key === "ArrowUp" || e.key === "ArrowLeft") {
+      } else if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
         e.preventDefault();
         prev();
       } else if (e.key === "Escape" && expandedMoment) {
@@ -102,7 +150,7 @@ export default function BurstCull() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [next, prev, expandedMoment, collapseMoment]);
+  }, [next, prev, expandedMoment, collapseMoment, idx, momentIdx, photos]);
 
   const currentPhoto = photos[idx] ?? null;
 
@@ -139,8 +187,15 @@ export default function BurstCull() {
         />
 
         <StatusRow
-          pos={loadState === "loaded" ? `${idx + 1} / ${total} photos` : undefined}
-          details={loadState === "loaded" ? `${total} photos indexed` : undefined}
+          pos={loadState === "loaded" ? `${idx + 1} / ${total}` : undefined}
+          keepersCount={swipeSummary?.kept ?? 0}
+          details={
+            loadState === "loaded"
+              ? swipeSummary
+                ? `${swipeSummary.kept} kept · ${swipeSummary.rejected} rejected · ${swipeSummary.undecided} to review`
+                : `${total} photos indexed`
+              : undefined
+          }
         />
 
         {/* Cull stage */}
