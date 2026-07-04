@@ -163,13 +163,125 @@ def run_story_stage(
         n_stories += 1
 
     # ── Per-place stories ────────────────────────────────────────────────────
-    # For each named location with enough photos across the whole trip, build a
-    # location-only story that condenses every photo from that place into one
-    # ordered carousel. Identified by `day = "place:<NAME>"`.
     n_stories += _build_place_stories(cfg, Session, rows, on_progress)
+    # ── Per-people stories ───────────────────────────────────────────────────
+    n_stories += _build_people_stories(cfg, Session, rows, on_progress)
+    # ── Per-pattern stories ──────────────────────────────────────────────────
+    n_stories += _build_pattern_stories(cfg, Session, rows, on_progress)
 
     log.info("story stage: built %d stories total", n_stories)
     return n_stories
+
+
+def _build_people_stories(cfg, Session, rows, on_progress=None) -> int:
+    """Build stories grouped by who's in the photo.
+
+    For a couple trip (top 2 persons dominate), creates:
+      - "Just us"      : photos with both dominant persons present
+      - "Solo of P1"   : photos with only the top person
+      - "Solo of P2"   : photos with only the second person
+      - "With others"  : photos with any dominant + a stranger / 3rd person
+    """
+    from travelcull.db.models import Person, PhotoPerson
+
+    with session_scope(Session) as s:
+        person_rows = (
+            s.query(Person.id, Person.label, Person.photo_count)
+            .order_by(Person.photo_count.desc())
+            .limit(2)
+            .all()
+        )
+        if len(person_rows) < 1:
+            return 0
+        person_membership: dict[int, set[int]] = defaultdict(set)
+        for ppid, photo_id in s.query(PhotoPerson.person_id, PhotoPerson.photo_id).all():
+            person_membership[photo_id].add(ppid)
+
+    p1_id, p1_label, _ = person_rows[0]
+    p2_id, p2_label, _ = (person_rows[1] if len(person_rows) > 1 else (None, None, 0))
+    p1_name = p1_label or f"P{p1_id}"
+    p2_name = p2_label or (f"P{p2_id}" if p2_id else None)
+
+    buckets: dict[str, list] = defaultdict(list)
+    for r in rows:
+        ppl = person_membership.get(r.id, set())
+        if not ppl:
+            continue
+        has_p1 = p1_id in ppl
+        has_p2 = p2_id is not None and p2_id in ppl
+        if has_p1 and has_p2 and len(ppl) == 2:
+            buckets["Just us"].append(r)
+        elif has_p1 and not has_p2 and len(ppl) == 1:
+            buckets[f"Solo of {p1_name}"].append(r)
+        elif has_p2 and not has_p1 and len(ppl) == 1:
+            buckets[f"Solo of {p2_name}"].append(r)
+        elif (has_p1 or has_p2) and len(ppl) >= 3:
+            buckets["With others"].append(r)
+
+    return _persist_themed_stories(cfg, Session, buckets, prefix="people:")
+
+
+def _build_pattern_stories(cfg, Session, rows, on_progress=None) -> int:
+    """Stories grouped by what kind of photo it is. Buckets defined by visual tag
+    keywords against the existing photo_tags content (any source).
+    """
+    KEYWORDS = {
+        "Indoor moments":       ["interior", "indoor", "inside", "room"],
+        "Mountain landscapes":  ["mountain", "snowy", "valley", "summit", "barren", "landscape"],
+        "Monastery & shrines":  ["monastery", "temple", "buddhist", "stupa", "shrine"],
+        "Food & dining":        ["food", "meal", "dish", "tea", "kitchen", "breakfast"],
+        "Wildlife & animals":   ["yak", "animal", "dog", "horse", "sheep", "wildlife"],
+        "On the road":          ["road", "transit", "drive", "vehicle", "bus", "car"],
+    }
+    from travelcull.db.models import PhotoTag
+    with session_scope(Session) as s:
+        tag_by_photo: dict[int, list[str]] = defaultdict(list)
+        for pid, tag in s.query(PhotoTag.photo_id, PhotoTag.tag).all():
+            tag_by_photo[pid].append(tag.lower())
+
+    buckets: dict[str, list] = defaultdict(list)
+    for r in rows:
+        photo_tags = tag_by_photo.get(r.id, [])
+        text = " ".join(photo_tags)
+        for label, kws in KEYWORDS.items():
+            if any(kw in text for kw in kws):
+                buckets[label].append(r)
+                break
+    return _persist_themed_stories(cfg, Session, buckets, prefix="pattern:")
+
+
+def _persist_themed_stories(cfg, Session, buckets, prefix: str, min_photos: int = 8) -> int:
+    """Build a Story per non-empty bucket (with enough photos), reusing the
+    scene-clustering + MMR-diversified representatives selection.
+    """
+    n_built = 0
+    for name, members in buckets.items():
+        if len(members) < min_photos:
+            continue
+        members = sorted(members, key=lambda r: r.taken_at)
+        scenes = _segment_scenes(members)
+        representatives = _pick_representatives(scenes)
+        representatives.sort(key=lambda x: x["taken_at"])
+        if len(representatives) > MAX_STORY_PHOTOS:
+            representatives.sort(key=lambda x: x["score"], reverse=True)
+            representatives = representatives[:MAX_STORY_PHOTOS]
+            representatives.sort(key=lambda x: x["taken_at"])
+        synthetic_day = f"{prefix}{name}"
+        title = f"{name} · {len(members)} photos, {len(scenes)} scenes"
+        with session_scope(Session) as s:
+            story = Story(day=synthetic_day, title=title, photo_count=len(representatives))
+            s.add(story)
+            s.flush()
+            for rank, rep in enumerate(representatives):
+                s.add(StoryItem(
+                    story_id=story.id,
+                    rank=rank,
+                    photo_id=rep["photo_id"],
+                    scene_label=rep["scene_label"],
+                    scene_rank=rep["scene_rank"],
+                ))
+        n_built += 1
+    return n_built
 
 
 def _build_place_stories(cfg, Session, rows, on_progress=None) -> int:
