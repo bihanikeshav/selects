@@ -96,6 +96,19 @@ export default function Rail() {
         People
       </NavLink>
 
+      <NavLink
+        to="/map"
+        className={({ isActive }) => "rail-item" + (isActive ? " is-active" : "")}
+      >
+        <span className="icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9 4l6 2 6-2v15l-6 2-6-2-6 2V6z"/>
+            <path d="M9 4v15M15 6v15"/>
+          </svg>
+        </span>
+        Map
+      </NavLink>
+
       <div className="rail-spacer"></div>
 
       <button

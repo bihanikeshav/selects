@@ -2,6 +2,7 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import BurstCull from "./views/BurstCull";
 import Clusters from "./views/Clusters";
 import ClusterDetail from "./views/ClusterDetail";
+import MapView from "./views/Map";
 import Persons from "./views/Persons";
 import PersonDetail from "./views/PersonDetail";
 import Search from "./views/Search";
@@ -18,6 +19,7 @@ export default function App() {
         <Route path="/search" element={<Search />} />
         <Route path="/persons" element={<Persons />} />
         <Route path="/persons/:id" element={<PersonDetail />} />
+        <Route path="/map" element={<MapView />} />
       </Routes>
     </BrowserRouter>
   );
