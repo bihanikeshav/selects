@@ -3,10 +3,10 @@ import { useParams, useSearchParams, Link } from "react-router-dom";
 
 import { listClusterPhotos, openInEditor } from "../api/client";
 import type { Photo } from "../api/types";
-import { KbdFooter } from "../components/KbdFooter";
-import { Rail } from "../components/Rail";
-import { StatusRow } from "../components/StatusRow";
-import { Topbar } from "../components/Topbar";
+import KbdFooter from "../components/KbdFooter";
+import Rail from "../components/Rail";
+import StatusRow from "../components/StatusRow";
+import Topbar from "../components/Topbar";
 
 export default function ClusterDetail() {
   const { tag = "" } = useParams<{ tag: string }>();
@@ -67,14 +67,13 @@ export default function ClusterDetail() {
 
   return (
     <div className="app">
-      <Rail active="clusters" />
+      <Rail />
       <div className="workspace">
         <Topbar folder="travelcull" context={`cluster · ${decoded}`} />
         <StatusRow
           pos={`${photos.length} photos`}
-          keepers={`${selected.size} selected`}
-          details={`source: ${source}`}
-          activeTab="clusters"
+          keepersCount={selected.size}
+          details={`source: ${source} · ${selected.size} selected`}
         />
 
         <div className="cluster-detail-wrap">

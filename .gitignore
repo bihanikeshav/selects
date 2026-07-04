@@ -28,6 +28,16 @@ htmlcov/
 *.swo
 *~
 
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Tooling state
+.claude/
+.playwright-mcp/
+screenshots/
+*.png
+
 # Project state
 .travelcull/
 
