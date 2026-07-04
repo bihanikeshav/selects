@@ -14,12 +14,32 @@ export async function listPhotos(opts: { offset?: number; limit?: number; reject
   return res.json();
 }
 
-export async function listClusters(opts: { source?: "lookback" | "posting" | "" } = {}): Promise<ClusterList> {
+export async function listClusters(opts: { source?: "thematic" | "date" | "lookback" | "posting" | "" } = {}): Promise<ClusterList> {
   const params = new URLSearchParams();
   if (opts.source !== undefined) params.set("source", opts.source);
   const qs = params.toString();
   const res = await fetch(`${BASE}/clusters${qs ? `?${qs}` : ""}`);
   if (!res.ok) throw new Error(`listClusters ${res.status}`);
+  return res.json();
+}
+
+export async function listClusterPhotos(tag: string, source = "thematic", limit = 500): Promise<PhotoList> {
+  const params = new URLSearchParams({ source, limit: String(limit) });
+  const res = await fetch(`${BASE}/clusters/${encodeURIComponent(tag)}/photos?${params}`);
+  if (!res.ok) throw new Error(`listClusterPhotos ${res.status}`);
+  return res.json();
+}
+
+export async function openInEditor(sha256s: string[], editor = "darktable"): Promise<{ opened: number; editor: string }> {
+  const res = await fetch(`${BASE}/edit/open`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sha256s, editor }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || `openInEditor ${res.status}`);
+  }
   return res.json();
 }
 

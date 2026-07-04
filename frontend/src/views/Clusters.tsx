@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import Rail from "../components/Rail";
 import Topbar from "../components/Topbar";
 import StatusRow from "../components/StatusRow";
@@ -167,12 +168,16 @@ function tagLabel(tag: string): string {
   return labels[tag] ?? tag.charAt(0).toUpperCase() + tag.slice(1);
 }
 
-function ClusterCard({ cluster }: { cluster: ClusterEntry }) {
+function ClusterCard({ cluster, source }: { cluster: ClusterEntry; source: string }) {
   const accent = accentFor(cluster.tag);
   const glyph = GLYPHS[cluster.tag] ?? DOT_GLYPH;
 
   return (
-    <div className="cluster-card" style={{ "--accent": accent } as React.CSSProperties}>
+    <Link
+      to={`/clusters/${encodeURIComponent(cluster.tag)}?source=${source}`}
+      className="cluster-card cluster-card-link"
+      style={{ "--accent": accent } as React.CSSProperties}
+    >
       <div className="cluster-cover">
         <img src={cluster.cover_url} alt={cluster.tag} loading="lazy" />
         {cluster.sample_thumbs.length > 0 && (
@@ -191,7 +196,7 @@ function ClusterCard({ cluster }: { cluster: ClusterEntry }) {
         </div>
         <span className="count">{cluster.count}</span>
       </div>
-    </div>
+    </Link>
   );
 }
 
