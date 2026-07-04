@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query
@@ -676,33 +677,172 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
         data_url: str           # "data:image/jpeg;base64,..."
         mime: str = "image/jpeg"
 
-    @app.post("/api/edits/{sha256}")
-    def save_edit(sha256: str, req: SaveEditReq):
-        """Persist a Filerobot-edited image as a sidecar JPEG at
-        .travelcull/edits/{sha256}.jpg.
+    @app.get("/api/search")
+    def search(q: str = Query(..., min_length=1), k: int = Query(60, le=300)):
+        """Free-text photo search via SigLIP image-text similarity."""
+        from travelcull.ml.search import search_photos
+
+        results = search_photos(cfg, q, k=k)
+        return {
+            "query": q,
+            "total": len(results),
+            "results": [
+                {
+                    "photo_id": pid,
+                    "sha256": sha,
+                    "score": score,
+                    "thumb_url": f"/api/thumb/{sha}",
+                    "preview_url": f"/api/preview/{sha}",
+                }
+                for pid, sha, score in results
+            ],
+        }
+
+    # ── darktable integration ────────────────────────────────────────────────
+    @app.get("/api/edits/status")
+    def edits_status(shas: str = Query("", description="comma-separated sha256 list")):
+        """Report which of the given photos have an XMP sidecar.
+
+        XMP next to an original = darktable (or any editor) has saved develop
+        instructions for it. The presence of a fresh XMP = "edited".
         """
-        import base64
+        sha_list = [s for s in shas.split(",") if s.strip()] if shas else None
+        out: dict[str, dict] = {}
+        with session_scope(Session) as s:
+            q = s.query(Photo.sha256, Photo.path)
+            if sha_list:
+                q = q.filter(Photo.sha256.in_(sha_list))
+            for sha, path_str in q.all():
+                p = Path(path_str)
+                xmp = p.with_suffix(p.suffix + ".xmp")
+                alt = p.with_suffix(".xmp")
+                edited = False
+                mtime = None
+                for cand in (xmp, alt):
+                    if cand.exists():
+                        edited = True
+                        mtime = cand.stat().st_mtime
+                        break
+                out[sha] = {"edited": edited, "mtime": mtime}
+        return out
 
-        prefix = "base64,"
-        idx = req.data_url.find(prefix)
-        b64 = req.data_url[idx + len(prefix):] if idx >= 0 else req.data_url
+
+    class DarktableLaunchReq(BaseModel):
+        sha256s: list[str]
+
+    @app.post("/api/edit/darktable")
+    def launch_darktable(req: DarktableLaunchReq):
+        """Launch darktable with the selected originals in a per-session library.
+
+        Per-session library avoids polluting the user's main catalog and lets
+        us round-trip XMP edits cleanly. Darktable writes XMPs next to the
+        original file when the user saves — no further coordination needed.
+        """
+        import shutil
+        import subprocess
+        import uuid
+
+        editor_cmd = shutil.which("darktable")
+        if not editor_cmd:
+            raise HTTPException(
+                400,
+                detail=(
+                    "darktable not found on PATH. Install from "
+                    "https://www.darktable.org/install/ and add the binary "
+                    "to your shell PATH."
+                ),
+            )
+
+        with session_scope(Session) as s:
+            paths = [
+                r[0]
+                for r in s.query(Photo.path).filter(Photo.sha256.in_(req.sha256s)).all()
+            ]
+        if not paths:
+            raise HTTPException(404, detail="no matching photos")
+
+        session_id = uuid.uuid4().hex[:8]
+        lib_dir = cfg.state_dir / "darktable-sessions"
+        lib_dir.mkdir(parents=True, exist_ok=True)
+        library_path = lib_dir / f"session-{session_id}.db"
+
+        cmd = [editor_cmd, "--library", str(library_path), *paths]
         try:
-            blob = base64.b64decode(b64)
+            subprocess.Popen(
+                cmd,
+                creationflags=getattr(subprocess, "DETACHED_PROCESS", 0),
+                close_fds=True,
+            )
         except Exception as exc:
-            raise HTTPException(400, detail=f"bad data url: {exc}")
+            raise HTTPException(500, detail=f"failed to launch darktable: {exc}")
 
-        edits_dir = cfg.state_dir / "edits"
-        edits_dir.mkdir(parents=True, exist_ok=True)
-        out_path = edits_dir / f"{sha256}.jpg"
-        out_path.write_bytes(blob)
-        return {"path": str(out_path), "bytes_written": len(blob)}
+        return {"opened": len(paths), "session": session_id, "library": str(library_path)}
 
-    @app.get("/api/edits/{sha256}")
-    def get_edit(sha256: str):
-        edit_path = cfg.state_dir / "edits" / f"{sha256}.jpg"
-        if not edit_path.exists():
-            raise HTTPException(404, detail="no edit")
-        return FileResponse(edit_path, media_type="image/jpeg")
+
+    class ExportEditsReq(BaseModel):
+        sha256s: list[str]
+        cluster_name: str = "untitled"
+        width: int = 2048
+        height: int = 0           # 0 = proportional
+
+    @app.post("/api/edits/export")
+    def export_edits(req: ExportEditsReq):
+        """Render XMP edits to JPEGs via darktable-cli into
+        .travelcull/exports/<cluster>/<timestamp>/.
+        """
+        import shutil
+        import subprocess
+        from datetime import datetime
+
+        dt_cli = shutil.which("darktable-cli")
+        if not dt_cli:
+            raise HTTPException(
+                400,
+                detail="darktable-cli not found. It ships with darktable; ensure the "
+                       "darktable bin directory is on PATH.",
+            )
+
+        with session_scope(Session) as s:
+            rows = s.query(Photo.sha256, Photo.path).filter(
+                Photo.sha256.in_(req.sha256s)
+            ).all()
+        if not rows:
+            raise HTTPException(404, detail="no matching photos")
+
+        ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+        clean = "".join(c if c.isalnum() or c in "-_" else "_" for c in req.cluster_name) or "untitled"
+        out_dir = cfg.state_dir / "exports" / clean / ts
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        results = []
+        for sha, path_str in rows:
+            src = Path(path_str)
+            out = out_dir / f"{src.stem}.jpg"
+            cmd = [
+                dt_cli,
+                str(src),
+                str(out),
+                "--width", str(req.width),
+                "--height", str(req.height),
+                "--core", "--conf", "plugins/imageio/format/jpeg/quality=92",
+            ]
+            try:
+                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+                ok = proc.returncode == 0 and out.exists()
+                results.append({
+                    "sha256": sha, "ok": ok,
+                    "out": str(out) if ok else None,
+                    "stderr": (proc.stderr[-300:] if proc.stderr else None) if not ok else None,
+                })
+            except subprocess.TimeoutExpired:
+                results.append({"sha256": sha, "ok": False, "out": None, "stderr": "timeout"})
+
+        return {
+            "out_dir": str(out_dir),
+            "total": len(results),
+            "exported": sum(1 for r in results if r["ok"]),
+            "results": results,
+        }
 
     @app.post("/api/edit/open")
     def open_in_editor(req: OpenInEditorReq):
