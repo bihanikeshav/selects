@@ -4,7 +4,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -676,6 +676,132 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
     class SaveEditReq(BaseModel):
         data_url: str           # "data:image/jpeg;base64,..."
         mime: str = "image/jpeg"
+
+    # ── Persons (face identity clusters) ─────────────────────────────────────
+    class PersonOut(BaseModel):
+        id: int
+        label: Optional[str]
+        photo_count: int
+        cover_url: str
+
+    class PersonList(BaseModel):
+        total: int
+        persons: list[PersonOut]
+
+    class LabelReq(BaseModel):
+        label: Optional[str]
+
+    @app.get("/api/persons", response_model=PersonList)
+    def list_persons():
+        from travelcull.db.models import FaceEmbedding, Person
+
+        with session_scope(Session) as s:
+            rows = s.query(Person, FaceEmbedding).outerjoin(
+                FaceEmbedding, Person.cover_face_embedding_id == FaceEmbedding.id
+            ).order_by(Person.photo_count.desc()).all()
+
+            persons = []
+            for p, fe in rows:
+                cover = f"/api/face_crop/{fe.id}" if fe else "/api/thumb/missing"
+                persons.append(PersonOut(
+                    id=p.id, label=p.label,
+                    photo_count=p.photo_count, cover_url=cover,
+                ))
+        return PersonList(total=len(persons), persons=persons)
+
+    @app.get("/api/face_crop/{face_id}")
+    def face_crop(face_id: int):
+        """Return the face's bounding box cropped from the 1024px preview."""
+        from io import BytesIO
+
+        from PIL import Image
+
+        from travelcull.db.models import FaceEmbedding
+
+        with session_scope(Session) as s:
+            row = s.query(FaceEmbedding, Photo).join(
+                Photo, FaceEmbedding.photo_id == Photo.id
+            ).filter(FaceEmbedding.id == face_id).first()
+            if not row:
+                raise HTTPException(404, detail="face not found")
+            fe, photo = row
+            preview_abs = cfg.state_dir / photo.preview_path
+
+        try:
+            with Image.open(preview_abs) as im:
+                margin = 20
+                x1 = max(0, fe.bbox_x - margin)
+                y1 = max(0, fe.bbox_y - margin)
+                x2 = min(im.width, fe.bbox_x + fe.bbox_w + margin)
+                y2 = min(im.height, fe.bbox_y + fe.bbox_h + margin)
+                crop = im.crop((x1, y1, x2, y2)).convert("RGB")
+                buf = BytesIO()
+                crop.save(buf, "JPEG", quality=88)
+                return Response(content=buf.getvalue(), media_type="image/jpeg")
+        except FileNotFoundError:
+            raise HTTPException(404, detail="preview missing")
+
+    @app.patch("/api/persons/{person_id}")
+    def label_person(person_id: int, req: LabelReq):
+        from travelcull.db.models import Person, Story
+
+        with session_scope(Session) as s:
+            person = s.get(Person, person_id)
+            if not person:
+                raise HTTPException(404, detail="person not found")
+            old_label = person.label
+            person.label = req.label
+            s.flush()
+
+            # Cascade rename to story titles + synthetic_day keys
+            new_name = req.label or f"P{person_id}"
+            old_name = old_label or f"P{person_id}"
+            for story in s.query(Story).filter(Story.day.like("people:%")).all():
+                if old_name in story.day or old_name in story.title:
+                    story.day = story.day.replace(old_name, new_name)
+                    story.title = story.title.replace(old_name, new_name)
+                    s.add(story)
+
+        return {"ok": True, "label": req.label}
+
+    @app.get("/api/persons/{person_id}/photos", response_model=PhotoList)
+    def person_photos(person_id: int, limit: int = Query(500, le=2000)):
+        from travelcull.db.models import PhotoPerson
+
+        with session_scope(Session) as s:
+            ids = [
+                r[0]
+                for r in s.query(PhotoPerson.photo_id)
+                .filter(PhotoPerson.person_id == person_id)
+                .all()
+            ]
+            if not ids:
+                return PhotoList(total=0, items=[])
+
+            rows = s.execute(
+                select(Photo, ClassicalScore, Embedding)
+                .join(ClassicalScore, Photo.id == ClassicalScore.photo_id, isouter=True)
+                .join(Embedding, Photo.id == Embedding.photo_id, isouter=True)
+                .where(Photo.id.in_(ids))
+                .order_by(Embedding.aesthetic_iqa.desc().nulls_last())
+                .limit(limit)
+            ).all()
+
+            items = []
+            for photo, classical, _emb in rows:
+                items.append(PhotoOut(
+                    id=photo.id, sha256=photo.sha256, path=photo.path,
+                    format=photo.format, width=photo.width, height=photo.height,
+                    taken_at=photo.taken_at.isoformat() if photo.taken_at else None,
+                    thumb_url=f"/api/thumb/{photo.sha256}",
+                    preview_url=f"/api/preview/{photo.sha256}",
+                    blur=classical.blur if classical else None,
+                    exposure=classical.exposure if classical else None,
+                    faces_count=classical.faces_count if classical else None,
+                    auto_reject=classical.auto_reject if classical else None,
+                    reject_reason=classical.reject_reason if classical else None,
+                ))
+        return PhotoList(total=len(items), items=items)
 
     @app.get("/api/search")
     def search(q: str = Query(..., min_length=1), k: int = Query(60, le=300)):
