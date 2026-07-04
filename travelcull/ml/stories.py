@@ -352,12 +352,28 @@ def _day_title(day: str, n_photos: int, n_scenes: int) -> str:
 
 
 def _day_title_with_visits(day: str, n_photos: int, n_scenes: int, visits) -> str:
-    """Build a richer title incorporating first/last visit location names."""
+    """Build a richer title from visited locations.
+
+    Single location:        "Exploring Leh"
+    Same start/end, multi:  "Around Leh via Shanti Stupa, Old Town"
+    Multi-leg:              "Leh to Pangong Tso via Chang La"
+    """
     if not visits:
-        return _day_title(day, n_photos, n_scenes)
+        return f"{day} · {n_photos} photos"
+
     names = [v.name for v in visits]
-    if len(names) == 1:
-        route = names[0]
+    # Dedupe preserving order
+    seen = set()
+    unique = [n for n in names if not (n in seen or seen.add(n))]
+
+    if len(unique) == 1:
+        route = f"Exploring {unique[0]}"
+    elif unique[0] == unique[-1]:
+        middles = ", ".join(unique[1:-1]) if len(unique) > 2 else unique[1] if len(unique) == 2 else ""
+        route = f"Around {unique[0]}" + (f" via {middles}" if middles else "")
+    elif len(unique) == 2:
+        route = f"{unique[0]} to {unique[1]}"
     else:
-        route = f"{names[0]} to {names[-1]}"
-    return f"{day} — {route} · {n_photos} photos, {n_scenes} scenes"
+        middles = ", ".join(unique[1:-1])
+        route = f"{unique[0]} to {unique[-1]} via {middles}"
+    return f"{day} · {route} · {n_photos} photos"

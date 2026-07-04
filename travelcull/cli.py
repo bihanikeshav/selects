@@ -22,7 +22,7 @@ def main():
 @click.option(
     "--pass", "pass_",
     type=click.Choice(["all", "index", "classical", "embed", "tag", "smart_tag", "ram_tag",
-                       "story", "face_embed", "moment"]),
+                       "thematic", "date", "story", "face_embed", "moment"]),
     default="all",
 )
 def index(folder: Path, pass_: str):
@@ -67,6 +67,16 @@ def index(folder: Path, pass_: str):
             on_progress=lambda i, t, name: click.echo(f"[{i}/{t}] smart_tag: {name}", err=True),
         )
         click.echo(f"smart_tag: {n} photos clustered")
+
+    if pass_ == "thematic":
+        from travelcull.ml.thematic_clusters import run_thematic_stage
+        n = run_thematic_stage(cfg, on_progress=None)
+        click.echo(f"thematic: {n} location clusters")
+
+    if pass_ == "date":
+        from travelcull.ml.thematic_clusters import run_date_stage
+        n = run_date_stage(cfg, on_progress=None)
+        click.echo(f"date: {n} day clusters")
 
     if pass_ == "ram_tag":
         from travelcull.ml.ram_tags import run_ram_tagging_stage

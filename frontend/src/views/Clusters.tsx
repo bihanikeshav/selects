@@ -195,12 +195,16 @@ function ClusterCard({ cluster }: { cluster: ClusterEntry }) {
   );
 }
 
-type ClusterSource = "thematic" | "lookback" | "posting";
+type ClusterSource = "thematic" | "date" | "lookback" | "posting";
 
 const SOURCE_LABELS: Record<ClusterSource, { label: string; sub: string }> = {
   thematic: {
     label: "Locations",
     sub: "Grouped by named places visited on the trip",
+  },
+  date: {
+    label: "By date",
+    sub: "Simplest fallback — one cluster per day, ranked by aesthetic score",
   },
   lookback: {
     label: "Lookback themes",
@@ -230,7 +234,7 @@ function SourceToggle({
         fontFamily: "var(--font-display)",
       }}
     >
-      {(["thematic", "lookback", "posting"] as ClusterSource[]).map(src => (
+      {(["thematic", "date", "lookback", "posting"] as ClusterSource[]).map(src => (
         <button
           key={src}
           onClick={() => onChange(src)}

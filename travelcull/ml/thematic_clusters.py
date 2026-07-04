@@ -66,6 +66,46 @@ INDOOR_KEYWORDS = ["interior", "indoor", "inside", "room"]
 ROAD_KEYWORDS = ["road", "transit", "drive", "vehicle", "bus", "car"]
 
 
+def run_date_stage(
+    cfg: FolderConfig,
+    on_progress: Callable[[int, int, str], None] | None = None,
+) -> int:
+    """Simplest possible clustering: one cluster per calendar date.
+
+    Fallback when smart clustering produces nonsense. Always works because
+    every photo has a taken_at timestamp.
+    """
+    Session = init_db(cfg.db_path)
+
+    with session_scope(Session) as s:
+        rows = s.execute(
+            select(Photo.id, Photo.taken_at, ClassicalScore.auto_reject, Embedding.aesthetic_iqa)
+            .outerjoin(ClassicalScore, ClassicalScore.photo_id == Photo.id)
+            .outerjoin(Embedding, Embedding.photo_id == Photo.id)
+            .where(Photo.taken_at.is_not(None))
+        ).all()
+
+    clusters: dict[str, list[tuple[int, float]]] = defaultdict(list)
+    for p in rows:
+        if p.auto_reject:
+            continue
+        day = p.taken_at.date().isoformat()
+        clusters[day].append((p.id, float(p.aesthetic_iqa or 0.0)))
+
+    # cap each day
+    for day, members in clusters.items():
+        members.sort(key=lambda kv: -kv[1])
+        clusters[day] = members[:MAX_PHOTOS_PER_CLUSTER]
+
+    with session_scope(Session) as s:
+        s.query(PhotoTag).filter(PhotoTag.source == "date").delete(synchronize_session=False)
+        s.flush()
+        for day, members in clusters.items():
+            for photo_id, score in members:
+                s.add(PhotoTag(photo_id=photo_id, tag=day, score=score, source="date"))
+    return len(clusters)
+
+
 def run_thematic_stage(
     cfg: FolderConfig,
     on_progress: Callable[[int, int, str], None] | None = None,

@@ -248,15 +248,18 @@ function FilterChipBar({ tags, selected, onChange }: {
   selected: Set<string>;
   onChange: (next: Set<string>) => void;
 }) {
+  const [expanded, setExpanded] = useState(false);
   const allSelected = selected.size === tags.length;
+  // Show ~2 lines worth of chips by default — roughly 14 chips at 1440 width
+  const COLLAPSED_LIMIT = 14;
+  const collapsed = !expanded && tags.length > COLLAPSED_LIMIT;
+  const visible = collapsed ? tags.slice(0, COLLAPSED_LIMIT) : tags;
+  const hidden = tags.length - visible.length;
 
   function toggleTag(tag: string) {
     const next = new Set(selected);
-    if (next.has(tag)) {
-      next.delete(tag);
-    } else {
-      next.add(tag);
-    }
+    if (next.has(tag)) next.delete(tag);
+    else next.add(tag);
     onChange(next);
   }
 
@@ -266,8 +269,11 @@ function FilterChipBar({ tags, selected, onChange }: {
 
   return (
     <div className="filter-chip-bar">
-      <div className="filter-chip-scroll">
-        {tags.map(t => {
+      <div
+        className="filter-chip-scroll"
+        style={collapsed ? { maxHeight: 84, overflow: "hidden" } : undefined}
+      >
+        {visible.map(t => {
           const active = selected.has(t.tag);
           return (
             <button
@@ -282,6 +288,22 @@ function FilterChipBar({ tags, selected, onChange }: {
             </button>
           );
         })}
+        {collapsed && (
+          <button
+            className="filter-chip filter-chip--more"
+            onClick={() => setExpanded(true)}
+          >
+            +{hidden} more
+          </button>
+        )}
+        {expanded && tags.length > COLLAPSED_LIMIT && (
+          <button
+            className="filter-chip filter-chip--more"
+            onClick={() => setExpanded(false)}
+          >
+            Show less
+          </button>
+        )}
       </div>
       {!allSelected && (
         <button className="btn btn-text filter-chip-clear" onClick={selectAll}>
