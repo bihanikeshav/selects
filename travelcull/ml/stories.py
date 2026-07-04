@@ -37,6 +37,7 @@ def run_story_stage(
     """
     Session = init_db(cfg.db_path)
 
+    from travelcull.db.models import Moment, MomentMember
     with session_scope(Session) as s:
         rows = (
             s.query(
@@ -57,6 +58,18 @@ def run_story_stage(
             .order_by(Photo.taken_at)
             .all()
         )
+        # Moment dedup: photos that are non-primary members of a moment get filtered.
+        # Only the moment.primary_photo_id survives — the burst's representative.
+        primary_ids = {m.primary_photo_id for m in s.query(Moment).all()}
+        sibling_ids = {
+            mm.photo_id
+            for mm in s.query(MomentMember).all()
+            if mm.photo_id not in primary_ids
+        }
+
+    before = len(rows)
+    rows = [r for r in rows if r.id not in sibling_ids]
+    log.info("story stage: dropped %d moment siblings (1002 -> %d)", before - len(rows), len(rows))
 
     # Skip auto-rejected
     rows = [r for r in rows if not (r.auto_reject or False)]
@@ -269,10 +282,12 @@ def _pick_representatives(scenes: list[list[dict]]) -> list[dict]:
     # MMR diversity penalty — 0.0 = pure quality (duplicate-prone), 1.0 = pure
     # spread (ignores quality). Tuned to keep enough variety without losing the
     # best shots from a scene.
-    MMR_LAMBDA = 0.55
+    MMR_LAMBDA = 0.45
     # Don't add a photo if its max similarity to any already-picked exceeds this
-    # (independent of MMR; absolute floor on duplicate avoidance).
-    DUP_HARD_CEILING = 0.94
+    # (independent of MMR; absolute floor on duplicate avoidance). Tightened
+    # because moment-dedup catches only same-person same-place near-bursts;
+    # we still want to filter "two different people at the same wall" pairs.
+    DUP_HARD_CEILING = 0.88
 
     for scene_idx, scene in enumerate(scenes):
         size = len(scene)
