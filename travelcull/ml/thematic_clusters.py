@@ -238,10 +238,9 @@ def run_thematic_stage(
         if loc and loc in top_locations:
             add(loc, p.id, score)
 
-    # Photos that didn't land in any of the above
-    uncategorized = [p for p in photos if p.id not in has_cluster and not p.auto_reject]
-    for p in uncategorized:
-        add("Other moments", p.id, float(p.aesthetic_iqa or 0.0))
+    # Photos that didn't land in a named location are left untagged; the
+    # /api/clusters route surfaces them as a synthetic "Uncategorized" bucket.
+    # No need to double-count as "Other moments".
 
     # Cap and order each cluster
     for label, members in clusters.items():
