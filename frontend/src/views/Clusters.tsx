@@ -337,7 +337,7 @@ export default function Clusters() {
               </div>
               <div className="cluster-grid">
                 {clusters.map(c => (
-                  <ClusterCard key={c.tag} cluster={c} />
+                  <ClusterCard key={c.tag} cluster={c} source={source} />
                 ))}
               </div>
             </>

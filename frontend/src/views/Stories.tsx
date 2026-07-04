@@ -316,6 +316,38 @@ function FilterChipBar({ tags, selected, onChange }: {
 
 // ---- Main view ----
 
+type StoryGroup = "day" | "place" | "people" | "pattern";
+
+function StoryGroupTabs({ value, onChange }: { value: StoryGroup; onChange: (g: StoryGroup) => void }) {
+  const opts: { key: StoryGroup; label: string }[] = [
+    { key: "day", label: "By day" },
+    { key: "place", label: "By place" },
+    { key: "people", label: "By people" },
+    { key: "pattern", label: "By pattern" },
+  ];
+  return (
+    <div className="story-group-tabs" role="tablist">
+      {opts.map(o => (
+        <button
+          key={o.key}
+          className={`story-group-tab${value === o.key ? " is-active" : ""}`}
+          onClick={() => onChange(o.key)}
+          role="tab"
+          aria-selected={value === o.key}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function tagsExcludingDates(tags: TagEntry[]): TagEntry[] {
+  return tags.filter(t => !DATE_RE.test(t.tag));
+}
+
 export default function Stories() {
   const [allTags, setAllTags] = useState<TagEntry[]>([]);
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
@@ -323,6 +355,7 @@ export default function Stories() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tagsLoaded, setTagsLoaded] = useState(false);
+  const [groupBy, setGroupBy] = useState<StoryGroup>("day");
 
   // Load tags once on mount
   useEffect(() => {
@@ -468,19 +501,37 @@ export default function Stories() {
                     {stories.length} suggested stories — drag to reorder · click to enlarge
                   </div>
                 </div>
+                <StoryGroupTabs value={groupBy} onChange={setGroupBy} />
               </div>
+
+              {groupBy === "people" && (
+                <div className="cluster-detail-toast" style={{ background: "var(--md-secondary-container)", color: "var(--md-on-secondary-container)" }}>
+                  Stories grouped by people identity — coming next pass. Currently shows all stories.
+                </div>
+              )}
+              {groupBy === "pattern" && (
+                <div className="cluster-detail-toast" style={{ background: "var(--md-secondary-container)", color: "var(--md-on-secondary-container)" }}>
+                  Travel-pattern stories (solo days vs together days, indoor vs outdoor) — coming next pass.
+                </div>
+              )}
 
               {allTags.length > 0 && (
                 <FilterChipBar
-                  tags={allTags}
+                  tags={tagsExcludingDates(allTags)}
                   selected={selectedTags}
                   onChange={handleTagChange}
                 />
               )}
 
-              {stories.map(story => (
-                <StoryCard key={story.id} story={story} />
-              ))}
+              {stories
+                .filter(story => {
+                  if (groupBy === "place") return story.day.startsWith("place:");
+                  if (groupBy === "day") return !story.day.startsWith("place:");
+                  return true; // people & pattern modes show everything for now
+                })
+                .map(story => (
+                  <StoryCard key={story.id} story={story} />
+                ))}
 
               <div style={{ display: "flex", justifyContent: "center", padding: "8px 0 32px" }}>
                 <button className="btn btn-tonal">
