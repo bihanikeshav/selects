@@ -457,8 +457,8 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
     @app.get("/api/clusters/{tag}/photos", response_model=PhotoList)
     def list_cluster_photos(
         tag: str,
-        limit: int = Query(200, le=2000),
-        source: Optional[str] = Query("lookback"),
+        limit: int = Query(500, le=2000),
+        source: Optional[str] = Query("thematic"),
     ):
         with session_scope(Session) as s:
             q = s.query(PhotoTag.photo_id).filter(PhotoTag.tag == tag)
@@ -657,6 +657,45 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
     @app.get("/api/preview/{sha256}")
     def preview(sha256: str):
         return _serve_image_for(cfg, sha256, kind="preview")
+
+    # ── Editor integration ───────────────────────────────────────────────────
+    class OpenInEditorReq(BaseModel):
+        sha256s: list[str]
+        editor: str = "darktable"   # "darktable" | "rawtherapee" | "gimp"
+
+    @app.post("/api/edit/open")
+    def open_in_editor(req: OpenInEditorReq):
+        """Launch the chosen OSS editor with the original photo paths for the
+        given sha256s. Editor runs detached — server returns immediately.
+        """
+        import shutil
+        import subprocess
+
+        editor_cmd = shutil.which(req.editor)
+        if not editor_cmd:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"'{req.editor}' not found on PATH. Install it or pick a different "
+                    "editor (darktable / rawtherapee / gimp)."
+                ),
+            )
+
+        with session_scope(Session) as s:
+            rows = s.query(Photo.path).filter(Photo.sha256.in_(req.sha256s)).all()
+            paths = [r[0] for r in rows]
+        if not paths:
+            raise HTTPException(404, detail="no matching photos")
+
+        try:
+            subprocess.Popen(
+                [editor_cmd, *paths],
+                creationflags=getattr(subprocess, "DETACHED_PROCESS", 0),
+                close_fds=True,
+            )
+        except Exception as exc:
+            raise HTTPException(500, detail=f"failed to launch {req.editor}: {exc}")
+        return {"opened": len(paths), "editor": req.editor}
 
 
 def _serve_image_for(cfg: FolderConfig, sha256: str, kind: str):
