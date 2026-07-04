@@ -668,6 +668,42 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
     def preview(sha256: str):
         return _serve_image_for(cfg, sha256, kind="preview")
 
+    @app.get("/api/enhance/{sha256}")
+    def enhance(sha256: str):
+        """Auto-enhance preview for cull-time before/after comparison.
+
+        Applies a simple Imagen-style boost: gentle auto-levels, +saturation,
+        +contrast, +clarity (unsharp mask). Cached per-sha in
+        .travelcull/enhanced/<sha>.jpg.
+        """
+        from io import BytesIO
+
+        from PIL import Image, ImageEnhance, ImageOps
+
+        cached = cfg.state_dir / "enhanced" / f"{sha256}.jpg"
+        cached.parent.mkdir(parents=True, exist_ok=True)
+        if cached.exists():
+            return FileResponse(cached, media_type="image/jpeg")
+
+        preview_path = cfg.previews_dir / f"{sha256}.jpg"
+        if not preview_path.exists():
+            raise HTTPException(404, detail="preview missing")
+
+        with Image.open(preview_path) as im:
+            im = im.convert("RGB")
+            # Gentle autocontrast / black-point fix
+            im = ImageOps.autocontrast(im, cutoff=1, preserve_tone=True)
+            # Color pop
+            im = ImageEnhance.Color(im).enhance(1.18)
+            # Contrast bump
+            im = ImageEnhance.Contrast(im).enhance(1.08)
+            # Mild unsharp mask via Sharpness
+            im = ImageEnhance.Sharpness(im).enhance(1.4)
+            buf = BytesIO()
+            im.save(buf, "JPEG", quality=88)
+            cached.write_bytes(buf.getvalue())
+            return Response(content=buf.getvalue(), media_type="image/jpeg")
+
     # ── Editor integration ───────────────────────────────────────────────────
     class OpenInEditorReq(BaseModel):
         sha256s: list[str]
@@ -692,20 +728,52 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
         label: Optional[str]
 
     @app.get("/api/persons", response_model=PersonList)
-    def list_persons():
-        from travelcull.db.models import FaceEmbedding, Person
+    def list_persons(
+        min_confidence: float = Query(0.55, ge=0.0, le=1.0),
+        min_face_px: int = Query(50, ge=0),
+        min_photo_count: int = Query(2, ge=1),
+    ):
+        """List Person identities. Picks each cluster's BEST face (highest
+        confidence × bbox-area) as the cover so a person's surfacing isn't
+        gated by whichever face happened to be chosen at clustering time.
+
+        Drops clusters whose best face fails the confidence/size thresholds —
+        these are typically ArcFace false positives on paintings, animals,
+        statues, etc.
+        """
+        from sqlalchemy import func
+
+        from travelcull.db.models import FaceEmbedding, Person, PhotoPerson
 
         with session_scope(Session) as s:
-            rows = s.query(Person, FaceEmbedding).outerjoin(
-                FaceEmbedding, Person.cover_face_embedding_id == FaceEmbedding.id
-            ).order_by(Person.photo_count.desc()).all()
-
+            persons_all = s.query(Person).order_by(Person.photo_count.desc()).all()
             persons = []
-            for p, fe in rows:
-                cover = f"/api/face_crop/{fe.id}" if fe else "/api/thumb/missing"
+            for p in persons_all:
+                if p.photo_count < min_photo_count:
+                    continue
+                # Pick the best face in this cluster as cover: rank by
+                # confidence * sqrt(area). Skip the cluster if no face in it
+                # clears the thresholds.
+                face_rows = (
+                    s.query(FaceEmbedding)
+                    .join(PhotoPerson, PhotoPerson.face_embedding_id == FaceEmbedding.id)
+                    .filter(PhotoPerson.person_id == p.id)
+                    .all()
+                )
+                if not face_rows:
+                    continue
+                best_face = max(
+                    face_rows,
+                    key=lambda f: (f.confidence or 0) * ((f.bbox_w * f.bbox_h) ** 0.5),
+                )
+                if best_face.confidence < min_confidence:
+                    continue
+                if max(best_face.bbox_w, best_face.bbox_h) < min_face_px:
+                    continue
                 persons.append(PersonOut(
                     id=p.id, label=p.label,
-                    photo_count=p.photo_count, cover_url=cover,
+                    photo_count=p.photo_count,
+                    cover_url=f"/api/face_crop/{best_face.id}",
                 ))
         return PersonList(total=len(persons), persons=persons)
 
@@ -902,6 +970,55 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
 
         markers.sort(key=lambda m: -m["count"])
         return {"total": sum(m["count"] for m in markers), "markers": markers}
+
+    @app.post("/api/stories/{story_id}/export")
+    def export_story(story_id: int):
+        """Copy a story's photos (in story order) to .travelcull/exports/stories/<title>/.
+
+        Each file gets a 2-digit prefix so the user can drop the whole folder
+        into Instagram and the carousel order is preserved.
+        """
+        import shutil
+
+        with session_scope(Session) as s:
+            story = s.get(Story, story_id)
+            if not story:
+                raise HTTPException(404, detail="story not found")
+            items = (
+                s.query(StoryItem, Photo)
+                .join(Photo, StoryItem.photo_id == Photo.id)
+                .filter(StoryItem.story_id == story_id)
+                .order_by(StoryItem.rank)
+                .all()
+            )
+            if not items:
+                raise HTTPException(404, detail="story has no items")
+            title = story.title
+
+        clean = "".join(c if c.isalnum() or c in "-_ " else "_" for c in title)[:80] or "story"
+        out_dir = cfg.state_dir / "exports" / "stories" / clean
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        copied = []
+        skipped = []
+        for it, photo in items:
+            src = Path(photo.path)
+            if not src.exists():
+                skipped.append({"photo_id": photo.id, "reason": "missing"})
+                continue
+            dst = out_dir / f"{it.rank:02d}_{src.name}"
+            try:
+                shutil.copy2(src, dst)
+                copied.append({"photo_id": photo.id, "out": str(dst)})
+            except Exception as exc:
+                skipped.append({"photo_id": photo.id, "reason": str(exc)})
+
+        return {
+            "out_dir": str(out_dir),
+            "copied": len(copied),
+            "skipped": len(skipped),
+            "skipped_detail": skipped,
+        }
 
     @app.post("/api/stories/{story_id}/caption")
     def generate_story_caption(story_id: int):

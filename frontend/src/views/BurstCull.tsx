@@ -143,6 +143,9 @@ export default function BurstCull() {
       } else if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
         e.preventDefault();
         prev();
+      } else if (e.key === "e" || e.key === "E") {
+        e.preventDefault();
+        setEnhancedOn((v) => !v);
       } else if (e.key === "Escape" && expandedMoment) {
         e.preventDefault();
         collapseMoment();
@@ -159,7 +162,11 @@ export default function BurstCull() {
     ? (expandedMoment.members[momentIdx] ?? null)
     : null;
 
-  const activePreviewUrl = activeMember ? activeMember.preview_url : currentPhoto?.preview_url ?? "";
+  const activeShaForUrl = activeMember ? activeMember.sha256 : currentPhoto?.sha256;
+  const [enhancedOn, setEnhancedOn] = useState(false);
+  const activePreviewUrl = activeShaForUrl
+    ? (enhancedOn ? `/api/enhance/${activeShaForUrl}` : `/api/preview/${activeShaForUrl}`)
+    : "";
   const activeFilename = activeMember
     ? activeMember.sha256.slice(0, 8)
     : currentPhoto
@@ -206,6 +213,28 @@ export default function BurstCull() {
                 src={activePreviewUrl}
                 alt={activeFilename}
               />
+              <button
+                onClick={() => setEnhancedOn((v) => !v)}
+                title="Toggle auto-enhance preview (press E)"
+                style={{
+                  position: "absolute",
+                  top: 12,
+                  right: 12,
+                  zIndex: 2,
+                  padding: "6px 12px",
+                  borderRadius: 999,
+                  border: 0,
+                  background: enhancedOn ? "var(--md-primary)" : "rgba(0,0,0,0.55)",
+                  color: enhancedOn ? "var(--md-on-primary)" : "#fff",
+                  fontFamily: "var(--font-display)",
+                  fontSize: 12,
+                  fontWeight: 500,
+                  cursor: "pointer",
+                  boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+                }}
+              >
+                {enhancedOn ? "✨ Enhanced" : "Original · press E"}
+              </button>
               <div className="gold-overlay">
                 <div>
                   <div className="filename">{activeFilename}</div>
