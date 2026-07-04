@@ -803,6 +803,18 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
                 ))
         return PhotoList(total=len(items), items=items)
 
+    @app.post("/api/stories/{story_id}/caption")
+    def generate_story_caption(story_id: int):
+        """Generate an Instagram-ready caption + hashtags for a story via VLM."""
+        from travelcull.ml.caption import generate_caption
+
+        try:
+            return generate_caption(cfg, story_id)
+        except ValueError as e:
+            raise HTTPException(404, detail=str(e))
+        except Exception as e:
+            raise HTTPException(500, detail=f"caption failed: {e}")
+
     @app.get("/api/search")
     def search(q: str = Query(..., min_length=1), k: int = Query(60, le=300)):
         """Free-text photo search via SigLIP image-text similarity."""
