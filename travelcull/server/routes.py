@@ -803,6 +803,71 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
                 ))
         return PhotoList(total=len(items), items=items)
 
+    @app.get("/api/map/markers")
+    def map_markers(grid_deg: float = Query(0.01, gt=0, lt=1)):
+        """Return GPS-binned photo clusters for the map view.
+
+        Buckets photos onto a ~1km grid (default 0.01° ≈ 1.1 km at the
+        equator, slightly less at high latitudes) and returns a cover photo
+        for each bucket so the frontend renders one pin per geographic
+        cluster instead of 1000 overlapping pins.
+        """
+        from collections import defaultdict as _dd
+
+        with session_scope(Session) as s:
+            rows = s.query(
+                Photo.id,
+                Photo.sha256,
+                Photo.gps_lat,
+                Photo.gps_lon,
+                Photo.taken_at,
+            ).filter(
+                Photo.gps_lat.is_not(None),
+                Photo.gps_lon.is_not(None),
+            ).all()
+
+            visit_rows = s.query(Visit.name, Visit.lat, Visit.lon, Visit.arrived_at, Visit.departed_at).all()
+
+        # Bin into grid cells
+        cells: dict[tuple[int, int], dict] = _dd(lambda: {"photos": [], "lat_sum": 0.0, "lon_sum": 0.0})
+        for pid, sha, lat, lon, _taken in rows:
+            key = (round(lat / grid_deg), round(lon / grid_deg))
+            cells[key]["photos"].append((pid, sha, lat, lon, _taken))
+            cells[key]["lat_sum"] += lat
+            cells[key]["lon_sum"] += lon
+
+        # Map cell → nearest named visit (if any)
+        def nearest_visit(lat: float, lon: float) -> Optional[str]:
+            best = None
+            best_d = 0.05  # ~5km cap
+            for name, vlat, vlon, *_ in visit_rows:
+                if vlat is None or vlon is None:
+                    continue
+                d = ((lat - vlat) ** 2 + (lon - vlon) ** 2) ** 0.5
+                if d < best_d:
+                    best_d = d
+                    best = name
+            return best
+
+        markers = []
+        for cell, data in cells.items():
+            n = len(data["photos"])
+            lat = data["lat_sum"] / n
+            lon = data["lon_sum"] / n
+            # Pick the latest photo as cover (most recent moment)
+            cover_pid, cover_sha, _, _, _ = max(data["photos"], key=lambda p: p[4] or "")
+            markers.append({
+                "lat": lat,
+                "lon": lon,
+                "count": n,
+                "cover_sha256": cover_sha,
+                "cover_url": f"/api/thumb/{cover_sha}",
+                "place": nearest_visit(lat, lon),
+            })
+
+        markers.sort(key=lambda m: -m["count"])
+        return {"total": sum(m["count"] for m in markers), "markers": markers}
+
     @app.post("/api/stories/{story_id}/caption")
     def generate_story_caption(story_id: int):
         """Generate an Instagram-ready caption + hashtags for a story via VLM."""
