@@ -334,10 +334,8 @@ def run_smart_cluster_stage(
 
     Returns the number of photos tagged.
     """
-    # Ensure source column exists
-    from travelcull.ml.ram_tags import _migrate_add_source_column
-    _migrate_add_source_column(cfg.db_path)
-
+    # Schema (photo_tags.source column + PK) is guaranteed by init_db() via
+    # Alembic migrations; no ad-hoc migration needed here.
     Session = init_db(cfg.db_path)
 
     # ── 1. Load all embeddings + photo metadata ─────────────────────────── #

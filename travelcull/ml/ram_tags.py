@@ -10,8 +10,6 @@ from __future__ import annotations
 
 import gc
 import logging
-import sqlite3
-from pathlib import Path
 from typing import Callable
 
 import torch
@@ -25,76 +23,6 @@ log = logging.getLogger(__name__)
 
 _RAM_MODEL = None
 _RAM_TRANSFORM = None
-
-
-# ──────────────────────────────────────────────────────────────────────────── #
-# Schema migration                                                              #
-# ──────────────────────────────────────────────────────────────────────────── #
-
-def _migrate_add_source_column(db_path: Path) -> None:
-    """Migrate photo_tags to support per-source tags.
-
-    Two phases:
-    1. If the 'source' column is missing, add it (ALTER TABLE).
-    2. If the primary key is still (photo_id, tag) — i.e. doesn't include source —
-       recreate the table with PK (photo_id, tag, source) so that the same tag
-       name can exist under different sources (e.g. 'mountain' from RAM++ and
-       'mountain' as a legacy SigLIP zero-shot tag).
-
-    Fully idempotent — safe to call on every startup.
-    """
-    conn = sqlite3.connect(str(db_path))
-    try:
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA foreign_keys=OFF")
-
-        # ── Phase 1: add source column if missing ─────────────────────────
-        cursor = conn.execute("PRAGMA table_info(photo_tags)")
-        col_info = {row[1]: row for row in cursor.fetchall()}
-        if "source" not in col_info:
-            log.info("migrating photo_tags: adding 'source' column")
-            conn.execute("ALTER TABLE photo_tags ADD COLUMN source TEXT")
-            conn.commit()
-            log.info("source column added")
-
-        # ── Phase 2: recreate table with new PK if needed ─────────────────
-        # Check whether the current PK includes 'source' by inspecting the
-        # CREATE TABLE statement (pk rank is stored in PRAGMA table_info col 5).
-        cursor = conn.execute("PRAGMA table_info(photo_tags)")
-        pk_cols = [row[1] for row in cursor.fetchall() if row[5] > 0]
-        # pk_cols will be ['photo_id', 'tag'] on old tables, or
-        # ['photo_id', 'tag', 'source'] after migration.
-
-        if "source" not in pk_cols:
-            log.info(
-                "migrating photo_tags: recreating table with PK (photo_id, tag, source). "
-                "Existing NULL-source rows will be preserved."
-            )
-            conn.executescript("""
-                BEGIN;
-                CREATE TABLE photo_tags_new (
-                    photo_id INTEGER NOT NULL,
-                    tag VARCHAR(128) NOT NULL,
-                    score FLOAT NOT NULL,
-                    source TEXT,
-                    PRIMARY KEY (photo_id, tag, source),
-                    FOREIGN KEY(photo_id) REFERENCES photos (id) ON DELETE CASCADE
-                );
-                INSERT OR IGNORE INTO photo_tags_new (photo_id, tag, score, source)
-                    SELECT photo_id, tag, score, source FROM photo_tags;
-                DROP TABLE photo_tags;
-                ALTER TABLE photo_tags_new RENAME TO photo_tags;
-                CREATE INDEX IF NOT EXISTS ix_photo_tags_tag ON photo_tags (tag);
-                CREATE INDEX IF NOT EXISTS ix_photo_tags_source ON photo_tags (source);
-                COMMIT;
-            """)
-            log.info("photo_tags table recreated with new PK")
-        else:
-            log.debug("photo_tags schema is up to date (PK includes source)")
-
-        conn.execute("PRAGMA foreign_keys=ON")
-    finally:
-        conn.close()
 
 
 # ──────────────────────────────────────────────────────────────────────────── #
@@ -200,9 +128,8 @@ def run_ram_tagging_stage(
 
     Returns number of photos processed.
     """
-    # 1. Migrate schema first (add source column if missing)
-    _migrate_add_source_column(cfg.db_path)
-
+    # Schema (including the source column + PK on photo_tags) is guaranteed by
+    # init_db() via Alembic migrations; no ad-hoc migration needed here.
     Session = init_db(cfg.db_path)
 
     # 2. Find photos that need RAM tagging
