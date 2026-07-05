@@ -35,9 +35,16 @@ npm install
 npm run dev
 ```
 
-`travelcull serve` starts the FastAPI backend, opens the web UI in your browser, and (unless
-`--no-background` is passed) kicks off indexing in the background. The frontend dev server proxies
-to the backend for a hot-reloading UI during development.
+`travelcull serve` starts the FastAPI backend, opens the web UI in your browser (pass
+`--no-browser` to skip), and (unless `--no-background` is passed) kicks off indexing in the
+background. The frontend dev server (`npm run dev`) proxies to the backend for a hot-reloading UI
+during development.
+
+For a single-process run, build the frontend once (`cd frontend && npm run build`) and the backend
+will serve the compiled UI itself at the same origin — no separate `npm run dev` needed. You can
+also run `travelcull serve` with **no folder argument**: it opens the active library from your
+registry, or, if none exists, starts on the onboarding page so you can add your first library from
+the browser.
 
 If you only need the classical (non-ML) stages — indexing, previews, blur/exposure/face
 auto-reject — you can skip the `ml` extra: `pip install -e .`.
@@ -135,12 +142,50 @@ pytest
 ruff check .
 ```
 
+Database schema is managed with Alembic. Migrations ship inside the package at
+`travelcull/db/migrations/` (there is no `alembic.ini`), and `init_db()` brings
+each library's SQLite DB up to head automatically on open — fresh DBs are created
+and stamped, pre-existing DBs are stamped at the baseline and upgraded. After
+changing `travelcull/db/models.py`, create a new revision with autogenerate by
+building an in-code `Config` pointing `script_location` at
+`travelcull/db/migrations` and `sqlalchemy.url` at a throwaway SQLite file, then
+calling `alembic.command.revision(cfg, autogenerate=True, message="...")`. Always
+review the generated script — SQLite ALTERs must go through `render_as_batch`
+(already enabled in `env.py`).
+
+## Packaging a desktop build
+
+Produce a self-contained bundle (no Python install required on the target machine) with
+PyInstaller:
+
+```bash
+pip install "pyinstaller>=6.6"
+python packaging/build.py
+```
+
+The script builds the frontend (`npm run build`), copies `frontend/dist` into
+`travelcull/server/static/` so the packaged app serves the UI same-origin, then runs PyInstaller in
+**onedir** mode using `packaging/travelcull.spec`. The result lands in `dist/travelcull/` — launch
+`dist/travelcull/travelcull.exe` (or `./travelcull` on macOS/Linux).
+
+By default the ML stack (torch, transformers, insightface, …) is **excluded** to keep the bundle
+small and the build fast — the base app still indexes, previews, and runs the classical auto-reject
+stages. To bundle the ML deps, use `python packaging/build.py --ml` (or set
+`TRAVELCULL_BUNDLE_ML=1`); any ML package that isn't installed is skipped, so the build always
+degrades gracefully.
+
+CPU-torch tip: the default CUDA torch wheels are multiple GB. For a much smaller ML bundle, install
+the CPU build first:
+
+```bash
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+python packaging/build.py --ml
+```
+
 ## Known limitations
 
 - Aesthetic and burst-detection thresholds were tuned against a single trip's photo set and may
   need adjustment for very different shooting styles or camera gear
-- No database migration system yet — schema changes to `travelcull/db/models.py` may require
-  deleting `.travelcull/index.db` and re-indexing
 - List endpoints use simple offset/limit pagination, not cursor-based
 - RAM++ tagging depends on a model with no PyPI release (installed via git URL); expect a slower,
   less reproducible install than the rest of the `ml` extra

@@ -112,24 +112,54 @@ def index(folder: Path, pass_: str):
 
 
 @main.command()
-@click.argument("folder", type=click.Path(exists=True, file_okay=False, path_type=Path))
+@click.argument(
+    "folder",
+    required=False,
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+)
 @click.option("--port", default=8000, type=int)
 @click.option("--host", default="127.0.0.1", type=str)
 @click.option("--no-browser", is_flag=True)
 @click.option("--no-background", is_flag=True, help="Don't auto-run indexer on startup")
-def serve(folder: Path, port: int, host: str, no_browser: bool, no_background: bool):
-    """Serve the web UI for an indexed folder."""
+def serve(folder: Path | None, port: int, host: str, no_browser: bool, no_background: bool):
+    """Serve the web UI + API.
+
+    With FOLDER: serve that folder as the (bootstrap) library. Without FOLDER:
+    serve the registry's active library if one exists, otherwise start with no
+    active library so the web onboarding page can create the first one.
+    """
+    import threading
+
     import uvicorn
 
-    cfg = get_folder_config(folder)
-    init_db(cfg.db_path)
-
     from travelcull.server.app import build_app
+    from travelcull.server.library_manager import LibraryManager
 
-    app = build_app(cfg, run_background=not no_background)
-    url = f"http://{host}:{port}"
+    if folder is not None:
+        cfg = get_folder_config(folder)
+        init_db(cfg.db_path)
+        app = build_app(cfg, run_background=not no_background)
+    else:
+        manager = LibraryManager()
+        _libs, active_id = manager.list_libraries()
+        if active_id is not None:
+            try:
+                manager.activate(active_id)
+            except Exception:
+                pass
+        app = build_app(manager=manager, run_background=not no_background)
+
+    url = f"http://{'127.0.0.1' if host == '0.0.0.0' else host}:{port}"
+
     if not no_browser:
-        webbrowser.open(url)
+        def _open_browser():
+            import time
+
+            time.sleep(1.5)
+            webbrowser.open(url)
+
+        threading.Thread(target=_open_browser, daemon=True).start()
+
     click.echo(f"travelcull serving at {url}")
     uvicorn.run(app, host=host, port=port, log_level="warning")
 
