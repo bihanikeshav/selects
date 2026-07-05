@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
+import ModeViewBar, { modeFromPath } from "../components/ModeViewBar";
 import Rail from "../components/Rail";
 import Topbar from "../components/Topbar";
 import StatusRow from "../components/StatusRow";
@@ -168,13 +169,21 @@ function tagLabel(tag: string): string {
   return labels[tag] ?? tag.charAt(0).toUpperCase() + tag.slice(1);
 }
 
-function ClusterCard({ cluster, source }: { cluster: ClusterEntry; source: string }) {
+function ClusterCard({
+  cluster,
+  source,
+  mode,
+}: {
+  cluster: ClusterEntry;
+  source: string;
+  mode: "cull" | "curated";
+}) {
   const accent = accentFor(cluster.tag);
   const glyph = GLYPHS[cluster.tag] ?? DOT_GLYPH;
 
   return (
     <Link
-      to={`/clusters/${encodeURIComponent(cluster.tag)}?source=${source}`}
+      to={`${mode === "curated" ? "/curated" : "/cull"}/clusters/${encodeURIComponent(cluster.tag)}?source=${source}`}
       className="cluster-card cluster-card-link"
       style={{ "--accent": accent } as React.CSSProperties}
     >
@@ -267,6 +276,8 @@ export default function Clusters() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { pathname } = useLocation();
+  const mode = modeFromPath(pathname);
 
   useEffect(() => {
     setLoading(true);
@@ -289,7 +300,8 @@ export default function Clusters() {
     <div className="app">
       <Rail />
       <div className="workspace">
-        <Topbar folder="travelcull" context="clusters by theme" />
+        <Topbar folder="travelcull" context={mode === "curated" ? "curated · clusters" : "clusters by theme"} />
+        <ModeViewBar />
         <StatusRow
           details={loading ? "loading…" : error ? "error loading clusters" : `${clusters.length} ${source === "lookback" ? "themes" : "groups"} · ${total} photos`}
         />
@@ -337,7 +349,7 @@ export default function Clusters() {
               </div>
               <div className="cluster-grid">
                 {clusters.map(c => (
-                  <ClusterCard key={c.tag} cluster={c} source={source} />
+                  <ClusterCard key={c.tag} cluster={c} source={source} mode={mode} />
                 ))}
               </div>
             </>

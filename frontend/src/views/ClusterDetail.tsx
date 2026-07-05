@@ -29,6 +29,11 @@ export default function ClusterDetail() {
   const [exporting, setExporting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
+  // Aesthetic filter: drop photos below this library-wide percentile.
+  // 0 = show all; 50 = top half; 75 = top 25%.
+  const [aestheticPct, setAestheticPct] = useState<number>(0);
+  const [sortByAesthetic, setSortByAesthetic] = useState<boolean>(false);
+
   const decoded = decodeURIComponent(tag);
 
   useEffect(() => {
@@ -43,6 +48,24 @@ export default function ClusterDetail() {
         setLoading(false);
       });
   }, [decoded, source]);
+
+  // Derived: filter + sort
+  const visiblePhotos = (() => {
+    let list = photos;
+    if (aestheticPct > 0) {
+      const scored = photos.filter((p) => p.aesthetic_iqa != null);
+      if (scored.length > 1) {
+        const sorted = [...scored].map((p) => p.aesthetic_iqa as number).sort((a, b) => a - b);
+        const idx = Math.floor((aestheticPct / 100) * (sorted.length - 1));
+        const threshold = sorted[idx];
+        list = photos.filter((p) => (p.aesthetic_iqa ?? -1) >= threshold);
+      }
+    }
+    if (sortByAesthetic) {
+      list = [...list].sort((a, b) => (b.aesthetic_iqa ?? -1) - (a.aesthetic_iqa ?? -1));
+    }
+    return list;
+  })();
 
   const refreshEditStatus = useCallback(async () => {
     if (photos.length === 0) return;
@@ -151,7 +174,7 @@ export default function ClusterDetail() {
 
         <div className="cluster-detail-wrap">
           <div className="cluster-detail-toolbar">
-            <Link to="/clusters" className="btn btn-text" style={{ paddingLeft: 8 }}>
+            <Link to="/cull/clusters" className="btn btn-text" style={{ paddingLeft: 8 }}>
               ← All clusters
             </Link>
             <h1 style={{ margin: 0, fontFamily: "var(--font-display)", fontWeight: 500, fontSize: 28 }}>
@@ -188,14 +211,52 @@ export default function ClusterDetail() {
             <div className="cluster-detail-toast">{toast}</div>
           )}
 
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              padding: "8px 0",
+              borderTop: "1px solid var(--md-outline-var)",
+              borderBottom: "1px solid var(--md-outline-var)",
+              fontSize: 12,
+              color: "var(--md-on-surface-var)",
+            }}
+          >
+            <span>Aesthetic ≥ p{aestheticPct}</span>
+            <input
+              type="range"
+              min={0}
+              max={95}
+              step={5}
+              value={aestheticPct}
+              onChange={(e) => setAestheticPct(Number(e.target.value))}
+              style={{ width: 220 }}
+            />
+            <span style={{ fontFamily: "var(--font-mono)", color: "var(--md-on-surface)" }}>
+              {visiblePhotos.length} / {photos.length}
+            </span>
+            <div style={{ flex: 1 }} />
+            <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={sortByAesthetic}
+                onChange={(e) => setSortByAesthetic(e.target.checked)}
+              />
+              <span>Sort by aesthetic ★</span>
+            </label>
+          </div>
+
           {loading && <div className="cluster-detail-empty">Loading…</div>}
           {error && <div className="cluster-detail-empty error">{error}</div>}
-          {!loading && !error && photos.length === 0 && (
-            <div className="cluster-detail-empty">No photos in this cluster.</div>
+          {!loading && !error && visiblePhotos.length === 0 && (
+            <div className="cluster-detail-empty">
+              {photos.length === 0 ? "No photos in this cluster." : "No photos match the aesthetic filter."}
+            </div>
           )}
 
           <div className="cluster-detail-grid">
-            {photos.map((p) => {
+            {visiblePhotos.map((p) => {
               const sel = selected.has(p.sha256);
               const isEdited = editStatus[p.sha256]?.edited;
               return (

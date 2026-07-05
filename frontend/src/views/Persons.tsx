@@ -29,16 +29,23 @@ export default function Persons() {
 
   async function commitLabel(id: number) {
     const label = draft.trim() || null;
-    const res = await fetch(`/api/persons/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ label }),
-    });
-    if (res.ok) {
-      setPersons(prev => prev.map(p => p.id === id ? { ...p, label } : p));
+    try {
+      const res = await fetch(`/api/persons/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ label }),
+      });
+      if (res.ok) {
+        setPersons(prev => prev.map(p => p.id === id ? { ...p, label } : p));
+      } else {
+        setErr(`rename failed: HTTP ${res.status}`);
+      }
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setEditing(null);
+      setDraft("");
     }
-    setEditing(null);
-    setDraft("");
   }
 
   return (
@@ -73,7 +80,7 @@ export default function Persons() {
               return (
                 <div key={p.id} className="cluster-photo" style={{ position: "relative", aspectRatio: "1/1" }}>
                   <Link
-                    to={`/persons/${p.id}`}
+                    to={`/people/${p.id}`}
                     style={{ display: "block", width: "100%", height: "100%" }}
                     onClick={e => { if (isEditing) e.preventDefault(); }}
                   >

@@ -37,11 +37,6 @@ export interface Moment {
   members: MomentMember[];
 }
 
-export interface MomentList {
-  total: number;
-  moments: Moment[];
-}
-
 export interface PhotoList { total: number; items: Photo[]; }
 
 export interface ClusterEntry {
@@ -62,10 +57,6 @@ export interface TagEntry {
   count: number;
 }
 
-export interface TagList {
-  tags: TagEntry[];
-}
-
 export interface StoryItem {
   rank: number;
   photo_id: number;
@@ -75,6 +66,8 @@ export interface StoryItem {
   scene_label: string | null;
   taken_at: string | null;
   tag: string | null;
+  moment_id?: number | null;
+  moment_size?: number | null;
 }
 
 export interface VisitEntry {
@@ -106,25 +99,36 @@ export interface StoryList {
   stories: StoryEntry[];
 }
 
-export interface ProgressMsg {
-  stage: "index" | "classical" | "embed" | "tag" | "story" | "vl" | "done";
-  current: number;
-  total: number;
-  message?: string;
+export interface Library {
+  id: string;
+  name: string;
+  path: string;
+  active: boolean;
+  photo_count: number | null;
+  created_at: string;
 }
 
-export interface PhotoTagEntry {
-  tag: string;
-  score: number;
+export interface LibraryList {
+  libraries: Library[];
+  active_id: string | null;
 }
 
-export interface PhotoTagsResponse {
+export interface LibraryStatus {
+  needs_onboarding: boolean;
+  active: Library | null;
+  photo_count: number;
+  indexing: boolean;
+}
+
+export interface CuratedPhoto {
+  photo_id: number;
   sha256: string;
-  tags_by_source: {
-    ram?: PhotoTagEntry[];
-    lookback?: PhotoTagEntry[];
-    posting?: PhotoTagEntry[];
-    legacy?: PhotoTagEntry[];
-    [key: string]: PhotoTagEntry[] | undefined;
-  };
+  taken_at: string | null;
+  thumb_url: string;
+  preview_url: string;
+  combined: number | null;
+  ap25: number | null;
+  nima: number | null;
+  moment_id?: number | null;
+  moment_size?: number | null;
 }

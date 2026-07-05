@@ -65,7 +65,7 @@ export default function MapView() {
       const marker = L.marker([m.lat, m.lon], { icon: photoIcon(m.cover_url, m.count) }).addTo(mapRef.current!);
       const place = m.place || "Unnamed location";
       const clusterLink = m.place
-        ? `<a href="/clusters/${encodeURIComponent(m.place)}?source=thematic" style="color:#1A5DCC;font-size:12px;">Open cluster →</a>`
+        ? `<a href="/cull/clusters/${encodeURIComponent(m.place)}" style="color:#1A5DCC;font-size:12px;">Open cluster →</a>`
         : "";
       marker.bindPopup(`
         <div style="min-width:160px;">
