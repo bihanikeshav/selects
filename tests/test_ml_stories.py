@@ -189,7 +189,9 @@ class TestPickRepresentatives:
         assert len(reps) == 1
 
     def test_two_representatives_for_large_scene(self):
-        scene = [self._make_scene_item(i, iqa=0.5, blur=50.0, emb_seed=i) for i in range(10)]
+        # top_n = max(1, size // 3) for scenes under the size>=8 bucket, so a
+        # 7-photo scene (just below that bucket boundary) yields 2 reps.
+        scene = [self._make_scene_item(i, iqa=0.5, blur=50.0, emb_seed=i) for i in range(7)]
         reps = _pick_representatives([scene])
         assert len(reps) == 2
 
@@ -218,9 +220,10 @@ class TestRunStoryStage:
         import travelcull.ml.stories as stories_mod
         monkeypatch_init_db = lambda _path: session_factory  # noqa: E731
 
-        # Insert 2 days: one eligible (15 photos), one not (5 photos)
+        # Insert 2 days: one eligible (15 photos), one not (2 photos — below
+        # MIN_DAY_PHOTOS, which is now 3).
         _insert_photos_for_day(session_factory, tmp_path, "2026-03-29", 15, seed_offset=0)
-        _insert_photos_for_day(session_factory, tmp_path, "2026-03-30", 5, seed_offset=1)
+        _insert_photos_for_day(session_factory, tmp_path, "2026-03-30", 2, seed_offset=1)
 
         original_init_db = stories_mod.init_db
         stories_mod.init_db = monkeypatch_init_db
@@ -288,12 +291,12 @@ class TestRunStoryStage:
 
         monkeypatch_init_db = lambda _path: session_factory  # noqa: E731
 
-        # Insert 10 good photos + 5 auto-rejected ones
+        # Insert 10 photos, then auto-reject all but 2 of them.
         _insert_photos_for_day(session_factory, tmp_path, "2026-03-29", 10, seed_offset=0)
 
-        # Mark 5 of them as auto-rejected
+        # Mark 8 of them as auto-rejected, leaving only 2 eligible.
         with session_scope(session_factory) as s:
-            scores = s.query(ClassicalScore).limit(5).all()
+            scores = s.query(ClassicalScore).limit(8).all()
             for sc in scores:
                 sc.auto_reject = True
                 s.add(sc)
@@ -301,10 +304,10 @@ class TestRunStoryStage:
         original_init_db = stories_mod.init_db
         stories_mod.init_db = monkeypatch_init_db
         try:
-            # Now only 5 eligible photos remain — below MIN_DAY_PHOTOS (10)
+            # Now only 2 eligible photos remain — below MIN_DAY_PHOTOS (3)
             n = run_story_stage(cfg)
         finally:
             stories_mod.init_db = original_init_db
 
-        # Should build 0 stories because <10 non-rejected photos on that day
+        # Should build 0 stories because <3 non-rejected photos on that day
         assert n == 0

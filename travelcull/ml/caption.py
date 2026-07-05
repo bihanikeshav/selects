@@ -5,6 +5,7 @@ the visit names if known, and asks the VLM for a short caption + 4-6 hashtags.
 """
 from __future__ import annotations
 
+import gc
 import logging
 from io import BytesIO
 from typing import Optional
@@ -19,21 +20,44 @@ log = logging.getLogger(__name__)
 
 _MODEL = None
 _PROC = None
+_DEVICE: str | None = None
 
 
 def _load_qwen():
-    global _MODEL, _PROC
+    global _MODEL, _PROC, _DEVICE
     if _MODEL is not None:
         return _MODEL, _PROC
     import torch
-    from transformers import AutoModelForCausalLM, AutoProcessor
+    from transformers import Qwen3VLForConditionalGeneration, Qwen3VLProcessor
+
+    _DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+    dtype = torch.float16 if _DEVICE == "cuda" else torch.float32
 
     name = "Qwen/Qwen3-VL-2B-Instruct"
-    _MODEL = AutoModelForCausalLM.from_pretrained(
-        name, torch_dtype=torch.bfloat16, device_map="cuda"
+    log.info("loading VLM %s (device=%s)", name, _DEVICE)
+    _MODEL = Qwen3VLForConditionalGeneration.from_pretrained(
+        name, torch_dtype=dtype, device_map=_DEVICE
     ).eval()
-    _PROC = AutoProcessor.from_pretrained(name)
+    _PROC = Qwen3VLProcessor.from_pretrained(name)
     return _MODEL, _PROC
+
+
+def unload_caption_model():
+    """Free the Qwen3-VL caption model + processor (VRAM coordination)."""
+    global _MODEL, _PROC, _DEVICE
+    if _MODEL is not None:
+        import torch
+
+        del _MODEL
+        del _PROC
+        _MODEL = None
+        _PROC = None
+        device = _DEVICE
+        _DEVICE = None
+        gc.collect()
+        if device == "cuda":
+            torch.cuda.empty_cache()
+        log.info("caption model unloaded")
 
 
 def generate_caption(cfg: FolderConfig, story_id: int) -> dict:
@@ -109,7 +133,7 @@ def generate_caption(cfg: FolderConfig, story_id: int) -> dict:
         images=images,
         padding=True,
         return_tensors="pt",
-    ).to("cuda")
+    ).to(_DEVICE)
 
     with torch.no_grad():
         out_ids = model.generate(

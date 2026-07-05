@@ -14,18 +14,66 @@ from travelcull.db.models import ClassicalScore, Embedding, Photo, Story, StoryI
 
 log = logging.getLogger(__name__)
 
-# Minimum photos for a day to get its own story (drops "I just took 3 sunset shots" days)
-MIN_DAY_PHOTOS = 15
-# Max photos per story (final cap) — bumped to let dense days breathe
-MAX_STORY_PHOTOS = 30
+# Minimum photos for a day to get its own story (drops trivial 1-photo days
+# that aren't useful as narratives). Lowered from 15: the curation pipeline
+# now filters down to the top 25%, so we don't need a hard pre-filter.
+MIN_DAY_PHOTOS = 3
+# Max photos per story (final cap). Was 30 — bumped so dense days don't get
+# capped before per-scope curation has a chance to pick its 25%.
+MAX_STORY_PHOTOS = 300
 # Minimum photos for a place to get its own (non-day) story
 MIN_PLACE_PHOTOS = 30
-# Minimum representative photos AFTER dedup/MMR — drops anemic stories
-MIN_STORY_REPS = 6
+# Minimum representative photos AFTER dedup/MMR — drops anemic stories.
+# Lowered from 6: thin days are now allowed; curation+min_keep handles them.
+MIN_STORY_REPS = 1
 # Time gap (seconds) that splits scenes when visual similarity is also low
 SCENE_TIME_GAP_S = 600  # 10 minutes
 # Cosine similarity threshold: above this, same scene; below + time gap, new scene
 SCENE_SIM_THRESHOLD = 0.75
+
+
+def _disambiguate_visits_globally(Session, min_separation_km: float = 2.0) -> None:
+    """Append numeric suffixes to same-name Visit rows separated by more
+    than ``min_separation_km`` between centroids.
+
+    Per-day disambiguation already handles same-day duplicates; this pass
+    handles cross-day duplicates so the place facet aggregates correctly.
+    """
+    import re as _re
+    from collections import defaultdict
+
+    with session_scope(Session) as s:
+        visits = s.query(Visit).all()
+        by_base_name: dict[str, list] = defaultdict(list)
+        for v in visits:
+            base = _re.sub(r"\s*\(\d+\)$", "", v.name)
+            by_base_name[base].append(v)
+
+        for base, group in by_base_name.items():
+            if len(group) < 2:
+                continue
+            group.sort(key=lambda v: v.arrived_at)
+            buckets: list[list] = []
+            for v in group:
+                placed = False
+                for bucket in buckets:
+                    rep = bucket[0]
+                    dlat_km = (v.lat - rep.lat) * 111.0
+                    dlon_km = (v.lon - rep.lon) * 92.0
+                    if (dlat_km * dlat_km + dlon_km * dlon_km) ** 0.5 <= min_separation_km:
+                        bucket.append(v)
+                        placed = True
+                        break
+                if not placed:
+                    buckets.append([v])
+            if len(buckets) < 2:
+                for v in group:
+                    v.name = base
+                continue
+            for idx, bucket in enumerate(buckets):
+                label = base if idx == 0 else f"{base} ({idx + 1})"
+                for v in bucket:
+                    v.name = label
 
 
 def run_story_stage(
@@ -166,6 +214,11 @@ def run_story_stage(
                     cover_photo_id=vd.cover_photo_id,
                 ))
         n_stories += 1
+
+    # ── Cross-day place disambiguation ───────────────────────────────────────
+    # Same-name visits across different days may still be far apart geographically.
+    # Append numeric suffixes so /best/place/<name> doesn't lump distant clusters.
+    _disambiguate_visits_globally(Session, min_separation_km=2.0)
 
     # ── Per-place stories ────────────────────────────────────────────────────
     n_stories += _build_place_stories(cfg, Session, rows, on_progress)

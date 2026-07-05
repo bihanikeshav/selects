@@ -17,6 +17,9 @@ log = logging.getLogger(__name__)
 
 _MODEL = None
 _PROC = None
+_IQA_TEXT_FEATS: torch.Tensor | None = None
+
+_DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 # CLIP-IQA-style antonym pair prompts (Wang et al. 2023).
 # Softmax over the pair gives prob(positive) = aesthetic IQA in [0, 1].
@@ -31,8 +34,9 @@ def _load():
     from transformers import AutoModel, AutoProcessor
 
     name = "google/siglip-so400m-patch14-384"
-    log.info("loading SigLIP model %s", name)
-    _MODEL = AutoModel.from_pretrained(name, dtype=torch.float16).to("cuda").eval()
+    log.info("loading SigLIP model %s (device=%s)", name, _DEVICE)
+    dtype = torch.float16 if _DEVICE == "cuda" else torch.float32
+    _MODEL = AutoModel.from_pretrained(name, dtype=dtype).to(_DEVICE).eval()
     _PROC = AutoProcessor.from_pretrained(name)
     log.info("SigLIP loaded")
     return _MODEL, _PROC
@@ -58,7 +62,7 @@ def encode_text_prompts(prompts: list[str]) -> torch.Tensor:
     """Return L2-normalized [N, 1152] text embeddings on cuda."""
     model, proc = _load()
     with torch.no_grad():
-        inp = proc(text=prompts, return_tensors="pt", padding=True, truncation=True).to("cuda")
+        inp = proc(text=prompts, return_tensors="pt", padding=True, truncation=True).to(_DEVICE)
         raw = model.get_text_features(**inp)
         feats = _extract_tensor(raw)
         feats = torch.nn.functional.normalize(feats.float(), dim=-1)
@@ -71,11 +75,15 @@ def encode_image_batch(images: list[Image.Image]) -> tuple[torch.Tensor, np.ndar
     IQA is computed from the same forward pass — image features are compared against
     the pos/neg IQA text prompts via softmax over the antonym pair.
     """
+    global _IQA_TEXT_FEATS
     model, proc = _load()
-    iqa_text = encode_text_prompts([IQA_POS, IQA_NEG])  # [2, 1152] float32 on cuda
+    if _IQA_TEXT_FEATS is None:
+        _IQA_TEXT_FEATS = encode_text_prompts([IQA_POS, IQA_NEG])  # [2, 1152] float32, computed once
+    iqa_text = _IQA_TEXT_FEATS
 
     with torch.no_grad():
-        inp = proc(images=images, return_tensors="pt").to("cuda", torch.float16)
+        img_dtype = torch.float16 if _DEVICE == "cuda" else torch.float32
+        inp = proc(images=images, return_tensors="pt").to(_DEVICE, img_dtype)
         raw = model.get_image_features(**inp)
         feats = _extract_tensor(raw)                        # [B, 1152] fp16 or float32
         feats = torch.nn.functional.normalize(feats.float(), dim=-1)  # [B, 1152] float32

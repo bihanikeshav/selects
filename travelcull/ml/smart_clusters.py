@@ -110,12 +110,13 @@ def _run_hdbscan_on(embs: np.ndarray, min_cluster_size: int) -> np.ndarray:
     import umap  # umap-learn
 
     n = len(embs)
-    if n < 2:
+    if n < max(min_cluster_size, 4):
+        # too small to cluster meaningfully — one cluster
         return np.zeros(n, dtype=np.int32)
 
     # UMAP reduction for better clustering geometry
     n_components = min(10, n - 1)
-    n_neighbors = min(15, n - 1)
+    n_neighbors = max(2, min(15, n - 1))
 
     log.debug("UMAP: n=%d, n_components=%d, n_neighbors=%d", n, n_components, n_neighbors)
     reducer = umap.UMAP(
@@ -168,26 +169,32 @@ def _pick_representatives(embs: np.ndarray, cluster_mask: np.ndarray, n: int = 4
 _VLM_MODEL = None
 _VLM_PROC = None
 _VLM_NAME: str | None = None
+_VLM_DEVICE: str | None = None
 
 
 def _load_vlm(model_name: str = "Qwen/Qwen3-VL-2B-Instruct"):
-    global _VLM_MODEL, _VLM_PROC, _VLM_NAME
+    global _VLM_MODEL, _VLM_PROC, _VLM_NAME, _VLM_DEVICE
     if _VLM_MODEL is not None:
         return _VLM_MODEL, _VLM_PROC
 
-    log.info("loading VLM %s", model_name)
+    _VLM_DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+    dtype = torch.float16 if _VLM_DEVICE == "cuda" else torch.float32
+    log.info("loading VLM %s (device=%s)", model_name, _VLM_DEVICE)
     from transformers import Qwen3VLForConditionalGeneration, Qwen3VLProcessor
 
     _VLM_PROC = Qwen3VLProcessor.from_pretrained(model_name)
     _VLM_MODEL = Qwen3VLForConditionalGeneration.from_pretrained(
         model_name,
-        torch_dtype=torch.float16,
-        device_map="cuda",
+        torch_dtype=dtype,
+        device_map=_VLM_DEVICE,
     )
     _VLM_MODEL.eval()
     _VLM_NAME = model_name
-    vram_gb = torch.cuda.memory_allocated(0) / 1024 ** 3
-    log.info("VLM loaded (%.1f GB VRAM)", vram_gb)
+    if _VLM_DEVICE == "cuda":
+        vram_gb = torch.cuda.memory_allocated(0) / 1024 ** 3
+        log.info("VLM loaded (%.1f GB VRAM)", vram_gb)
+    else:
+        log.info("VLM loaded (cpu)")
     return _VLM_MODEL, _VLM_PROC
 
 
@@ -240,7 +247,7 @@ def _call_vlm(images: list[Image.Image], prompt: str, model, proc) -> str:
         padding=True,
         return_tensors="pt",
         processor_kwargs={},
-    ).to("cuda")
+    ).to(_VLM_DEVICE)
 
     with torch.no_grad():
         out = model.generate(**inputs, max_new_tokens=24, do_sample=False)

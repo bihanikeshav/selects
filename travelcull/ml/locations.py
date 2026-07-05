@@ -40,9 +40,17 @@ _GENERIC_WORDS = {
     "unnamed", "unknown", "unspecified",
 }
 
-# DBSCAN parameters — ~500 m radius, at least 3 photos
-DBSCAN_EPS = 0.005      # degrees (~550 m at Ladakh latitude)
+# DBSCAN parameters — tight ~250m radius keeps places from snowballing
+# into multi-km blobs along travel routes. Was 0.005 (~550m) and produced
+# clusters spanning >10km when stitched together transitively.
+DBSCAN_EPS = 0.0025     # degrees (~275 m at Ladakh latitude)
 DBSCAN_MIN_SAMPLES = 3
+
+# Maximum landmark-match radius. Earlier this used per-landmark radii up to
+# 0.30 deg (~33 km), which made unrelated GPS clusters all collapse into
+# "Pangong Tso" or "Nubra Valley". Cap at ~1.5 km so a landmark only names
+# a cluster when it's genuinely close.
+MAX_LANDMARK_RADIUS = 0.014   # degrees (~1.5 km at this latitude)
 
 # Known Ladakh landmarks with precise GPS coordinates.
 # Used to improve on Nominatim's generic results for remote/natural features.
@@ -151,12 +159,15 @@ def cluster_day_photos(
 
 
 def _check_known_landmark(lat: float, lon: float) -> Optional[str]:
-    """Return known landmark name if (lat, lon) is within radius of a known site."""
+    """Return known landmark name if (lat, lon) is within the smaller of
+    the landmark's declared radius or ``MAX_LANDMARK_RADIUS`` (~1.5 km).
+    """
     best_name: Optional[str] = None
     best_dist: float = float("inf")
     for klat, klon, radius, name in _KNOWN_LANDMARKS:
+        effective_radius = min(radius, MAX_LANDMARK_RADIUS)
         dist = ((lat - klat) ** 2 + (lon - klon) ** 2) ** 0.5
-        if dist <= radius and dist < best_dist:
+        if dist <= effective_radius and dist < best_dist:
             best_dist = dist
             best_name = name
     return best_name
@@ -268,7 +279,10 @@ def reverse_geocode(lat: float, lon: float, session_db) -> tuple[str, Optional[s
                 "format": "jsonv2",
                 "lat": lat,
                 "lon": lon,
-                "zoom": 14,
+                # zoom=17 targets specific POIs / building / hamlet level so
+                # we don't end up with "Nubra Valley" naming clusters 85 km
+                # apart. Was zoom=14 (city/town level).
+                "zoom": 17,
                 "addressdetails": 1,
                 "extratags": 1,
             },
@@ -431,6 +445,47 @@ def build_visits_for_day(
             cover_photo_id=cover_photo_id,
         ))
 
+    # Disambiguate visits that landed on the same Nominatim name but are
+    # geographically far apart. Without this, a /best/place/<name> view
+    # would aggregate clusters that are 50+ km apart under one label.
+    _disambiguate_same_name_visits(visits, min_separation_km=2.0)
+
     log.info("Day story %d: %d visits — %s", story_id, len(visits),
              " > ".join(v.name for v in visits))
     return visits
+
+
+def _disambiguate_same_name_visits(visits: list, min_separation_km: float = 2.0) -> None:
+    """Mutate ``visits`` so that same-name entries separated by more than
+    ``min_separation_km`` between centroids get a numeric suffix.
+
+    Example: three "Nubra Valley" centroids that are 20 km apart become
+    "Nubra Valley", "Nubra Valley (2)", "Nubra Valley (3)".
+    """
+    from collections import defaultdict
+    by_name: dict[str, list] = defaultdict(list)
+    for v in visits:
+        by_name[v.name].append(v)
+    for name, group in by_name.items():
+        if len(group) < 2:
+            continue
+        # Compute pairwise centroid separation; if >min_separation between any
+        # pair, treat them as distinct sub-locations.
+        far_apart = False
+        for i in range(len(group)):
+            for j in range(i + 1, len(group)):
+                dlat_km = (group[i].lat - group[j].lat) * 111.0
+                dlon_km = (group[i].lon - group[j].lon) * 92.0
+                if (dlat_km * dlat_km + dlon_km * dlon_km) ** 0.5 > min_separation_km:
+                    far_apart = True
+                    break
+            if far_apart:
+                break
+        if not far_apart:
+            continue
+        # Sort by arrival time so the suffix order is intuitive.
+        group.sort(key=lambda v: v.arrived_at)
+        for idx, v in enumerate(group):
+            if idx == 0:
+                continue  # the earliest keeps the bare name
+            v.name = f"{v.name} ({idx + 1})"
