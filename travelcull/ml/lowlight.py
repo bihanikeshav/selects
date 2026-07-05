@@ -110,8 +110,8 @@ def _ensure_weights(cfg) -> Path:
     if target.exists() and target.stat().st_size > 1000:
         return target
     log.info("zero-dce++: downloading weights to %s", target)
-    import urllib.request
-    urllib.request.urlretrieve(WEIGHTS_URL, target)
+    from travelcull.ml.model_assets import download_file
+    download_file(WEIGHTS_URL, target)
     return target
 
 
