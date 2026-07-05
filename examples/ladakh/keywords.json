@@ -1,0 +1,8 @@
+{
+  "Indoor moments":      ["interior", "indoor", "inside", "room"],
+  "Mountain landscapes": ["mountain", "snowy", "valley", "summit", "barren", "landscape"],
+  "Monastery & shrines": ["monastery", "temple", "buddhist", "stupa", "shrine"],
+  "Food & dining":       ["food", "meal", "dish", "tea", "kitchen", "breakfast"],
+  "Wildlife & animals":  ["yak", "animal", "dog", "horse", "sheep", "wildlife"],
+  "On the road":         ["road", "transit", "drive", "vehicle", "bus", "car"]
+}

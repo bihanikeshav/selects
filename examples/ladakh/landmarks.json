@@ -1,0 +1,302 @@
+[
+  {
+    "name": "Pangong Tso",
+    "lat": 33.77,
+    "lon": 78.67,
+    "radius_m": 33396
+  },
+  {
+    "name": "Pangong Tso",
+    "lat": 33.96,
+    "lon": 78.42,
+    "radius_m": 22264
+  },
+  {
+    "name": "Pangong Tso",
+    "lat": 34.281,
+    "lon": 76.7,
+    "radius_m": 8906
+  },
+  {
+    "name": "Nubra Valley",
+    "lat": 34.28,
+    "lon": 77.6,
+    "radius_m": 13358
+  },
+  {
+    "name": "Diskit",
+    "lat": 34.29,
+    "lon": 76.71,
+    "radius_m": 11132
+  },
+  {
+    "name": "Diskit Monastery",
+    "lat": 34.3,
+    "lon": 76.7,
+    "radius_m": 8906
+  },
+  {
+    "name": "Nubra Valley",
+    "lat": 34.29,
+    "lon": 76.7,
+    "radius_m": 11132
+  },
+  {
+    "name": "Hunder",
+    "lat": 34.22,
+    "lon": 77.17,
+    "radius_m": 8906
+  },
+  {
+    "name": "Hunder Sand Dunes",
+    "lat": 34.24,
+    "lon": 77.15,
+    "radius_m": 6679
+  },
+  {
+    "name": "Nubra Valley",
+    "lat": 34.28,
+    "lon": 77.6,
+    "radius_m": 6679
+  },
+  {
+    "name": "Nubra Valley",
+    "lat": 34.28,
+    "lon": 77.63,
+    "radius_m": 6679
+  },
+  {
+    "name": "Nubra Valley",
+    "lat": 34.27,
+    "lon": 77.6,
+    "radius_m": 8906
+  },
+  {
+    "name": "Nubra Valley",
+    "lat": 34.2796,
+    "lon": 77.6045,
+    "radius_m": 11132
+  },
+  {
+    "name": "Nubra Valley",
+    "lat": 34.27,
+    "lon": 77.6,
+    "radius_m": 16698
+  },
+  {
+    "name": "Nubra Valley",
+    "lat": 34.267,
+    "lon": 77.6263,
+    "radius_m": 8906
+  },
+  {
+    "name": "Nubra Valley",
+    "lat": 34.283,
+    "lon": 77.605,
+    "radius_m": 11132
+  },
+  {
+    "name": "Nubra Valley",
+    "lat": 34.26,
+    "lon": 77.63,
+    "radius_m": 11132
+  },
+  {
+    "name": "Nubra Valley",
+    "lat": 34.29,
+    "lon": 76.7,
+    "radius_m": 13358
+  },
+  {
+    "name": "Diskit",
+    "lat": 34.2879,
+    "lon": 76.7095,
+    "radius_m": 8906
+  },
+  {
+    "name": "Hunder",
+    "lat": 34.23,
+    "lon": 77.17,
+    "radius_m": 11132
+  },
+  {
+    "name": "Sumur, Nubra",
+    "lat": 34.28,
+    "lon": 77.6,
+    "radius_m": 8906
+  },
+  {
+    "name": "Diskit Monastery",
+    "lat": 34.28,
+    "lon": 76.71,
+    "radius_m": 8906
+  },
+  {
+    "name": "Leh",
+    "lat": 34.167,
+    "lon": 77.588,
+    "radius_m": 8906
+  },
+  {
+    "name": "Leh",
+    "lat": 34.165,
+    "lon": 77.59,
+    "radius_m": 5566
+  },
+  {
+    "name": "Leh",
+    "lat": 34.166,
+    "lon": 77.587,
+    "radius_m": 6679
+  },
+  {
+    "name": "Leh",
+    "lat": 34.164,
+    "lon": 77.584,
+    "radius_m": 6679
+  },
+  {
+    "name": "Leh Old Town",
+    "lat": 34.168,
+    "lon": 77.584,
+    "radius_m": 6679
+  },
+  {
+    "name": "Leh",
+    "lat": 34.152,
+    "lon": 77.57,
+    "radius_m": 6679
+  },
+  {
+    "name": "Leh",
+    "lat": 34.1435,
+    "lon": 77.5564,
+    "radius_m": 6679
+  },
+  {
+    "name": "Leh",
+    "lat": 34.17,
+    "lon": 77.58,
+    "radius_m": 8906
+  },
+  {
+    "name": "Thiksey Monastery",
+    "lat": 34.09,
+    "lon": 77.77,
+    "radius_m": 6679
+  },
+  {
+    "name": "Hemis Monastery",
+    "lat": 34.076,
+    "lon": 77.664,
+    "radius_m": 6679
+  },
+  {
+    "name": "Hemis",
+    "lat": 34.073,
+    "lon": 77.633,
+    "radius_m": 6679
+  },
+  {
+    "name": "Hemis Monastery",
+    "lat": 34.056,
+    "lon": 77.667,
+    "radius_m": 6679
+  },
+  {
+    "name": "Hemis",
+    "lat": 34.076,
+    "lon": 77.643,
+    "radius_m": 6679
+  },
+  {
+    "name": "Shanti Stupa, Leh",
+    "lat": 34.145,
+    "lon": 77.526,
+    "radius_m": 8906
+  },
+  {
+    "name": "Shanti Stupa, Leh",
+    "lat": 34.152,
+    "lon": 77.527,
+    "radius_m": 6679
+  },
+  {
+    "name": "Leh",
+    "lat": 34.16,
+    "lon": 77.57,
+    "radius_m": 6679
+  },
+  {
+    "name": "Leh Market",
+    "lat": 34.168,
+    "lon": 77.589,
+    "radius_m": 6679
+  },
+  {
+    "name": "Alchi Monastery",
+    "lat": 34.175,
+    "lon": 77.35,
+    "radius_m": 8906
+  },
+  {
+    "name": "Alchi",
+    "lat": 34.193,
+    "lon": 77.34,
+    "radius_m": 8906
+  },
+  {
+    "name": "Alchi Monastery",
+    "lat": 34.196,
+    "lon": 77.334,
+    "radius_m": 8906
+  },
+  {
+    "name": "Nimmu",
+    "lat": 34.225,
+    "lon": 77.27,
+    "radius_m": 6679
+  },
+  {
+    "name": "Hunder",
+    "lat": 34.24,
+    "lon": 77.15,
+    "radius_m": 6679
+  },
+  {
+    "name": "Hunder",
+    "lat": 34.235,
+    "lon": 77.175,
+    "radius_m": 6679
+  },
+  {
+    "name": "Spituk Monastery",
+    "lat": 34.199,
+    "lon": 77.6,
+    "radius_m": 6679
+  },
+  {
+    "name": "Panamik, Nubra",
+    "lat": 34.282,
+    "lon": 77.607,
+    "radius_m": 8906
+  },
+  {
+    "name": "Hemis",
+    "lat": 34.072,
+    "lon": 77.645,
+    "radius_m": 7792
+  },
+  {
+    "name": "Hemis Monastery",
+    "lat": 34.059,
+    "lon": 77.667,
+    "radius_m": 6679
+  },
+  {
+    "name": "Hemis National Park",
+    "lat": 34.071,
+    "lon": 77.638,
+    "radius_m": 7792
+  }
+]

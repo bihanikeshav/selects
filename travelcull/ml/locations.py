@@ -21,6 +21,8 @@ import requests
 from sklearn.cluster import DBSCAN
 import numpy as np
 
+from travelcull.ml.trip_data import KM_PER_DEG_LAT, km_per_deg_lon, load_landmarks
+
 log = logging.getLogger(__name__)
 
 # Nominatim strict rate-limit: 1 req/sec
@@ -40,74 +42,25 @@ _GENERIC_WORDS = {
     "unnamed", "unknown", "unspecified",
 }
 
-# DBSCAN parameters — tight ~250m radius keeps places from snowballing
+# DBSCAN parameters — tight ~275m radius keeps places from snowballing
 # into multi-km blobs along travel routes. Was 0.005 (~550m) and produced
 # clusters spanning >10km when stitched together transitively.
-DBSCAN_EPS = 0.0025     # degrees (~275 m at Ladakh latitude)
+# NOTE: eps is in degree-space with euclidean metric, so its metric size varies
+# slightly with latitude. ~275 m holds near mid-latitudes; converting to a
+# metric (haversine) DBSCAN would be more invasive, so it's left as-is.
+DBSCAN_EPS = 0.0025     # degrees (~275 m near mid-latitudes)
 DBSCAN_MIN_SAMPLES = 3
 
-# Maximum landmark-match radius. Earlier this used per-landmark radii up to
-# 0.30 deg (~33 km), which made unrelated GPS clusters all collapse into
-# "Pangong Tso" or "Nubra Valley". Cap at ~1.5 km so a landmark only names
-# a cluster when it's genuinely close.
-MAX_LANDMARK_RADIUS = 0.014   # degrees (~1.5 km at this latitude)
+# Maximum landmark-match radius (metres). Earlier per-landmark radii went up to
+# ~33 km, which made unrelated GPS clusters all collapse into one named place.
+# Cap at ~1.5 km so a landmark only names a cluster when it's genuinely close.
+MAX_LANDMARK_RADIUS_M = 1500.0
+# Default match radius for a landmark entry that omits "radius_m".
+DEFAULT_LANDMARK_RADIUS_M = 1500.0
 
-# Known Ladakh landmarks with precise GPS coordinates.
-# Used to improve on Nominatim's generic results for remote/natural features.
-# Matching radius: 0.05 degrees (~5 km) — coarse enough to catch shore photos.
-_KNOWN_LANDMARKS: list[tuple[float, float, float, str]] = [
-    # (lat, lon, radius_deg, name)
-    (33.77, 78.67, 0.30, "Pangong Tso"),         # Pangong lake — very spread
-    (33.96, 78.42, 0.20, "Pangong Tso"),         # western shore camp area
-    (34.281, 76.700, 0.08, "Pangong Tso"),       # south Pangong
-    (34.28, 77.60, 0.12, "Nubra Valley"),        # Hunder area
-    (34.29, 76.71, 0.10, "Diskit"),              # Diskit Monastery area
-    (34.30, 76.70, 0.08, "Diskit Monastery"),
-    (34.29, 76.70, 0.10, "Nubra Valley"),
-    (34.22, 77.17, 0.08, "Hunder"),              # Hunder sand dunes
-    (34.24, 77.15, 0.06, "Hunder Sand Dunes"),
-    (34.28, 77.60, 0.06, "Nubra Valley"),
-    (34.28, 77.63, 0.06, "Nubra Valley"),
-    (34.27, 77.60, 0.08, "Nubra Valley"),
-    (34.2796, 77.6045, 0.10, "Nubra Valley"),
-    (34.27, 77.60, 0.15, "Nubra Valley"),
-    (34.2670, 77.6263, 0.08, "Nubra Valley"),
-    (34.283, 77.605, 0.10, "Nubra Valley"),
-    (34.26, 77.63, 0.10, "Nubra Valley"),
-    (34.29, 76.70, 0.12, "Nubra Valley"),        # Diskit side
-    (34.2879, 76.7095, 0.08, "Diskit"),
-    (34.23, 77.17, 0.10, "Hunder"),
-    (34.28, 77.60, 0.08, "Sumur, Nubra"),
-    (34.28, 76.71, 0.08, "Diskit Monastery"),
-    (34.167, 77.588, 0.08, "Leh"),
-    (34.165, 77.590, 0.05, "Leh"),
-    (34.166, 77.587, 0.06, "Leh"),
-    (34.164, 77.584, 0.06, "Leh"),
-    (34.168, 77.584, 0.06, "Leh Old Town"),
-    (34.152, 77.570, 0.06, "Leh"),
-    (34.1435, 77.5564, 0.06, "Leh"),
-    (34.17, 77.58, 0.08, "Leh"),
-    (34.09, 77.77, 0.06, "Thiksey Monastery"),
-    (34.076, 77.664, 0.06, "Hemis Monastery"),
-    (34.073, 77.633, 0.06, "Hemis"),
-    (34.056, 77.667, 0.06, "Hemis Monastery"),
-    (34.076, 77.643, 0.06, "Hemis"),
-    (34.145, 77.526, 0.08, "Shanti Stupa, Leh"),
-    (34.152, 77.527, 0.06, "Shanti Stupa, Leh"),
-    (34.16, 77.57, 0.06, "Leh"),
-    (34.168, 77.589, 0.06, "Leh Market"),
-    (34.175, 77.35, 0.08, "Alchi Monastery"),
-    (34.193, 77.34, 0.08, "Alchi"),
-    (34.196, 77.334, 0.08, "Alchi Monastery"),
-    (34.225, 77.27, 0.06, "Nimmu"),
-    (34.240, 77.15, 0.06, "Hunder"),
-    (34.235, 77.175, 0.06, "Hunder"),
-    (34.199, 77.60, 0.06, "Spituk Monastery"),
-    (34.282, 77.607, 0.08, "Panamik, Nubra"),
-    (34.072, 77.645, 0.07, "Hemis"),
-    (34.059, 77.667, 0.06, "Hemis Monastery"),
-    (34.071, 77.638, 0.07, "Hemis National Park"),
-]
+# Landmarks (name/lat/lon/radius_m) are loaded per-library from
+# <state_dir>/landmarks.json via trip_data.load_landmarks(). With no file the
+# list is empty and reverse geocoding relies entirely on Nominatim.
 
 
 @dataclass
@@ -158,17 +111,24 @@ def cluster_day_photos(
     return ordered
 
 
-def _check_known_landmark(lat: float, lon: float) -> Optional[str]:
-    """Return known landmark name if (lat, lon) is within the smaller of
-    the landmark's declared radius or ``MAX_LANDMARK_RADIUS`` (~1.5 km).
+def _check_known_landmark(lat: float, lon: float, landmarks: list[dict]) -> Optional[str]:
+    """Return the nearest landmark name if (lat, lon) is within the smaller of
+    the landmark's declared radius or ``MAX_LANDMARK_RADIUS_M`` (~1.5 km).
+
+    Distance is computed in metres using a latitude-corrected equirectangular
+    approximation so matching works at any latitude.
     """
     best_name: Optional[str] = None
     best_dist: float = float("inf")
-    for klat, klon, radius, name in _KNOWN_LANDMARKS:
-        effective_radius = min(radius, MAX_LANDMARK_RADIUS)
-        dist = ((lat - klat) ** 2 + (lon - klon) ** 2) ** 0.5
-        if dist <= effective_radius and dist < best_dist:
-            best_dist = dist
+    for lm in landmarks:
+        klat, klon, name = lm["lat"], lm["lon"], lm["name"]
+        radius_m = lm.get("radius_m") or DEFAULT_LANDMARK_RADIUS_M
+        effective_radius_m = min(radius_m, MAX_LANDMARK_RADIUS_M)
+        dlat_km = (lat - klat) * KM_PER_DEG_LAT
+        dlon_km = (lon - klon) * km_per_deg_lon((lat + klat) / 2.0)
+        dist_m = ((dlat_km ** 2 + dlon_km ** 2) ** 0.5) * 1000.0
+        if dist_m <= effective_radius_m and dist_m < best_dist:
+            best_dist = dist_m
             best_name = name
     return best_name
 
@@ -240,12 +200,18 @@ def _is_generic(name: str) -> bool:
     return False
 
 
-def reverse_geocode(lat: float, lon: float, session_db) -> tuple[str, Optional[str]]:
+def reverse_geocode(
+    lat: float,
+    lon: float,
+    session_db,
+    landmarks: Optional[list[dict]] = None,
+) -> tuple[str, Optional[str]]:
     """Return (display_name, wikipedia_summary) for a lat/lon.
 
     Uses geocode_cache table to avoid repeat API calls.
     Priority: 1) cache, 2) known-landmarks table, 3) Nominatim API.
     session_db is a SQLAlchemy session — we open/close it outside this fn.
+    ``landmarks`` is the per-library landmark table (empty list if none).
     """
     from travelcull.db.models import GeocodeCache
 
@@ -258,7 +224,7 @@ def reverse_geocode(lat: float, lon: float, session_db) -> tuple[str, Optional[s
         return cached.display_name or "Unknown location", cached.wikipedia_summary
 
     # Check known-landmarks table for reliable POI names
-    landmark_name = _check_known_landmark(lat, lon)
+    landmark_name = _check_known_landmark(lat, lon, landmarks or [])
 
     if landmark_name:
         # Known landmark — fetch Wikipedia summary directly
@@ -333,7 +299,7 @@ def _fetch_wikipedia_summary(title: str) -> Optional[str]:
             data = resp.json()
             # Reject disambiguation pages
             if data.get("type") == "disambiguation":
-                pass  # fall through to opensearch with Ladakh context
+                pass  # fall through to opensearch
             else:
                 extract = data.get("extract", "").strip()
                 if extract and len(extract) > 20:
@@ -341,10 +307,9 @@ def _fetch_wikipedia_summary(title: str) -> Optional[str]:
     except Exception as exc:
         log.debug("Wikipedia direct lookup failed for %r: %s", title, exc)
 
-    # Fall back: opensearch with Ladakh context — require title relevance check
+    # Fall back: opensearch — require title relevance check
     try:
-        # Try searching with " Ladakh" appended for ambiguous names
-        search_title = f"{title} Ladakh" if len(title) < 10 else title
+        search_title = title
         resp = _SESSION.get(
             "https://en.wikipedia.org/w/api.php",
             params={
@@ -401,6 +366,7 @@ def build_visits_for_day(
     story_id: int,
     photos: list[dict],   # dicts: photo_id, taken_at, gps_lat, gps_lon, aesthetic_iqa
     Session,              # SQLAlchemy sessionmaker
+    cfg=None,             # FolderConfig — used to load per-library landmarks
 ) -> list[VisitData]:
     """Cluster, geocode, enrich, and return ordered VisitData for a story day.
 
@@ -409,6 +375,8 @@ def build_visits_for_day(
     clusters = cluster_day_photos(photos)
     if not clusters:
         return []
+
+    landmarks = load_landmarks(cfg) if cfg is not None else []
 
     visits = []
     for rank, cluster in enumerate(clusters):
@@ -430,7 +398,7 @@ def build_visits_for_day(
 
         # Reverse geocode using a fresh session
         with Session() as s:
-            name, summary = reverse_geocode(lat_c, lon_c, s)
+            name, summary = reverse_geocode(lat_c, lon_c, s, landmarks)
 
         visits.append(VisitData(
             rank=rank,
@@ -474,8 +442,9 @@ def _disambiguate_same_name_visits(visits: list, min_separation_km: float = 2.0)
         far_apart = False
         for i in range(len(group)):
             for j in range(i + 1, len(group)):
-                dlat_km = (group[i].lat - group[j].lat) * 111.0
-                dlon_km = (group[i].lon - group[j].lon) * 92.0
+                mean_lat = (group[i].lat + group[j].lat) / 2.0
+                dlat_km = (group[i].lat - group[j].lat) * KM_PER_DEG_LAT
+                dlon_km = (group[i].lon - group[j].lon) * km_per_deg_lon(mean_lat)
                 if (dlat_km * dlat_km + dlon_km * dlon_km) ** 0.5 > min_separation_km:
                     far_apart = True
                     break

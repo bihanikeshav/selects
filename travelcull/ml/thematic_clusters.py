@@ -61,10 +61,9 @@ GOLDEN_HOUR = (time(16, 30), time(19, 30))
 NIGHT = (time(20, 0), time(23, 59))
 COUPLE_BOTH_DOMINANT_THRESHOLD = 0.05   # 5% of photos => "dominant"
 
-FOOD_KEYWORDS = ["food", "meal", "dish", "kitchen", "tea", "cup", "breakfast", "lunch"]
-WILDLIFE_KEYWORDS = ["yak", "animal", "dog", "horse", "sheep", "wildlife"]
-INDOOR_KEYWORDS = ["interior", "indoor", "inside", "room"]
-ROAD_KEYWORDS = ["road", "transit", "drive", "vehicle", "bus", "car"]
+# The theme keyword taxonomy (formerly a set of divergent Ladakh-specific lists
+# duplicated from stories.py) now lives in trip_data.DEFAULT_KEYWORDS and is
+# loaded per-library via trip_data.load_keywords(cfg).
 
 
 def run_date_stage(

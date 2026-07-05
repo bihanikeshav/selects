@@ -1,0 +1,23 @@
+{
+  "landscape":      ["a scenic landscape photograph", "mountains and valleys", "a panoramic view of nature"],
+  "mountain":       ["snow-capped mountains", "a high mountain peak", "a rugged mountain range"],
+  "sky":            ["a sky full of clouds", "a vivid sunset", "stars in the night sky"],
+  "monastery":      ["a Buddhist monastery", "a temple with prayer flags", "religious architecture"],
+  "architecture":   ["a building or structure", "traditional architecture", "an arched doorway"],
+  "portrait":       ["a portrait of a person", "a person's face", "a close-up of someone"],
+  "people":         ["a group of people", "people interacting", "candid people on a trip"],
+  "food":           ["a plate of food", "a meal on a table", "local cuisine"],
+  "transit":        ["a road through mountains", "a vehicle on a journey", "travel in transit"],
+  "interior":       ["the inside of a room", "an interior space", "indoor lighting"],
+  "water":          ["a river or lake", "flowing water", "a reflection on water"],
+  "night":          ["a photograph taken at night", "low-light scene", "city lights at night"],
+  "animal":         ["an animal", "wildlife in nature", "a domesticated animal"],
+  "abstract":       ["an abstract pattern", "a close-up texture", "a minimalist composition"],
+  "documents":      ["a document or sign", "text on a page", "a screenshot or receipt"],
+  "prayer_flags":   ["colorful Tibetan prayer flags", "prayer flags strung across the sky", "rows of prayer flags"],
+  "barren_terrain": ["a barren rocky desert", "a high-altitude cold desert", "dusty arid terrain"],
+  "village":        ["a small village in the mountains", "a remote settlement", "stone houses in a valley"],
+  "yak":            ["a yak", "a hairy bovine animal in the highlands"],
+  "shrine":         ["a small wayside shrine", "a stupa", "a small religious altar"],
+  "close_up":       ["a close-up detail shot", "macro photography", "a focused detail"]
+}
