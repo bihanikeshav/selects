@@ -11,6 +11,7 @@ import numpy as np
 from travelcull.config import FolderConfig
 from travelcull.db import init_db, session_scope
 from travelcull.db.models import ClassicalScore, Embedding, Photo, Story, StoryItem, Visit
+from travelcull.ml.trip_data import KM_PER_DEG_LAT, km_per_deg_lon, load_keywords
 
 log = logging.getLogger(__name__)
 
@@ -58,8 +59,9 @@ def _disambiguate_visits_globally(Session, min_separation_km: float = 2.0) -> No
                 placed = False
                 for bucket in buckets:
                     rep = bucket[0]
-                    dlat_km = (v.lat - rep.lat) * 111.0
-                    dlon_km = (v.lon - rep.lon) * 92.0
+                    mean_lat = (v.lat + rep.lat) / 2.0
+                    dlat_km = (v.lat - rep.lat) * KM_PER_DEG_LAT
+                    dlon_km = (v.lon - rep.lon) * km_per_deg_lon(mean_lat)
                     if (dlat_km * dlat_km + dlon_km * dlon_km) ** 0.5 <= min_separation_km:
                         bucket.append(v)
                         placed = True
@@ -171,7 +173,7 @@ def run_story_stage(
             }
             for r in photos
         ]
-        visit_data_list = build_visits_for_day(0, photo_dicts, Session)  # story_id filled in loop below
+        visit_data_list = build_visits_for_day(0, photo_dicts, Session, cfg)  # story_id filled in loop below
 
         if len(representatives) < MIN_STORY_REPS:
             continue  # drop anemic day stories
@@ -303,14 +305,7 @@ def _build_pattern_stories(cfg, Session, rows, on_progress=None) -> int:
     """Stories grouped by what kind of photo it is. Buckets defined by visual tag
     keywords against the existing photo_tags content (any source).
     """
-    KEYWORDS = {
-        "Indoor moments":       ["interior", "indoor", "inside", "room"],
-        "Mountain landscapes":  ["mountain", "snowy", "valley", "summit", "barren", "landscape"],
-        "Monastery & shrines":  ["monastery", "temple", "buddhist", "stupa", "shrine"],
-        "Food & dining":        ["food", "meal", "dish", "tea", "kitchen", "breakfast"],
-        "Wildlife & animals":   ["yak", "animal", "dog", "horse", "sheep", "wildlife"],
-        "On the road":          ["road", "transit", "drive", "vehicle", "bus", "car"],
-    }
+    KEYWORDS = load_keywords(cfg)
     from travelcull.db.models import PhotoTag
     with session_scope(Session) as s:
         tag_by_photo: dict[int, list[str]] = defaultdict(list)

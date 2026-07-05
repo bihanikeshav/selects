@@ -90,6 +90,21 @@ Configuration is per-folder, via `pydantic-settings`. Every field can be overrid
 
 Derived, non-configurable paths under `<folder>/.travelcull/`: `index.db`, `thumbs/`, `previews/`.
 
+### Per-trip customization
+
+The location and tagging stages ship with travel-generic defaults, but you can tune them per
+library by dropping optional JSON files into `<folder>/.travelcull/`:
+
+| File | Purpose |
+|---|---|
+| `landmarks.json` | Named GPS landmarks (`{"name", "lat", "lon", "radius_m"}`) used as a fast-path override for reverse geocoding. Without it, geocoding relies entirely on Nominatim. |
+| `keywords.json` | Theme buckets (`{label: [keyword, ...]}`) for pattern/thematic stories. |
+| `tag_prompts.json` | Zero-shot SigLIP tag taxonomy (`{tag: [prompt, ...]}`). |
+
+Each file is optional; a missing or malformed file falls back to the built-in defaults. See
+[`examples/ladakh/`](examples/ladakh/) for a complete worked example (the original Ladakh dataset)
+and copy any file into your own `.travelcull/` to customize.
+
 ## Hardware notes
 
 The ML stages (embedding, tagging, face recognition, clustering, enhancement) are much faster with

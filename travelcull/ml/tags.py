@@ -10,6 +10,7 @@ import torch
 from travelcull.config import FolderConfig
 from travelcull.db import init_db, session_scope
 from travelcull.db.models import Embedding, PhotoTag, PipelineState
+from travelcull.ml.trip_data import DEFAULT_TAG_PROMPTS, load_tag_prompts
 
 from .embed import encode_text_prompts
 
@@ -19,32 +20,11 @@ log = logging.getLogger(__name__)
 # Photos that don't clear this threshold for any tag are left untagged (uncategorized).
 DEFAULT_MIN_Z: float = 0.5
 
-# Default taxonomy for travel photos. Each tag has a list of prompts —
-# we mean-pool across prompts for richer concept coverage.
-DEFAULT_TAG_PROMPTS: dict[str, list[str]] = {
-    "landscape":      ["a scenic landscape photograph", "mountains and valleys", "a panoramic view of nature"],
-    "mountain":       ["snow-capped mountains", "a high mountain peak", "a rugged mountain range"],
-    "sky":            ["a sky full of clouds", "a vivid sunset", "stars in the night sky"],
-    "monastery":      ["a Buddhist monastery", "a temple with prayer flags", "religious architecture"],
-    "architecture":   ["a building or structure", "traditional architecture", "an arched doorway"],
-    "portrait":       ["a portrait of a person", "a person's face", "a close-up of someone"],
-    "people":         ["a group of people", "people interacting", "candid people on a trip"],
-    "food":           ["a plate of food", "a meal on a table", "local cuisine"],
-    "transit":        ["a road through mountains", "a vehicle on a journey", "travel in transit"],
-    "interior":       ["the inside of a room", "an interior space", "indoor lighting"],
-    "water":          ["a river or lake", "flowing water", "a reflection on water"],
-    "night":          ["a photograph taken at night", "low-light scene", "city lights at night"],
-    "animal":         ["an animal", "wildlife in nature", "a domesticated animal"],
-    "abstract":       ["an abstract pattern", "a close-up texture", "a minimalist composition"],
-    "documents":      ["a document or sign", "text on a page", "a screenshot or receipt"],
-    # New tags to break up the over-dominant "mountain" cluster
-    "prayer_flags":   ["colorful Tibetan prayer flags", "prayer flags strung across the sky", "rows of prayer flags"],
-    "barren_terrain": ["a barren rocky desert", "a high-altitude cold desert", "dusty arid terrain"],
-    "village":        ["a small village in the mountains", "a remote settlement", "stone houses in a valley"],
-    "yak":            ["a yak", "a hairy bovine animal in the highlands"],
-    "shrine":         ["a small wayside shrine", "a stupa", "a small religious altar"],
-    "close_up":       ["a close-up detail shot", "macro photography", "a focused detail"],
-}
+# The zero-shot tag taxonomy (DEFAULT_TAG_PROMPTS) is defined in trip_data and
+# re-exported here for API/back-compat. It is loaded per-library via
+# trip_data.load_tag_prompts(cfg), which reads <state_dir>/tag_prompts.json when
+# present and otherwise falls back to the generic default.
+__all__ = ["run_tag_stage", "DEFAULT_TAG_PROMPTS", "DEFAULT_MIN_Z"]
 
 
 def run_tag_stage(
@@ -68,7 +48,7 @@ def run_tag_stage(
 
     Returns the number of photos tagged.
     """
-    prompts = tag_prompts or DEFAULT_TAG_PROMPTS
+    prompts = tag_prompts or load_tag_prompts(cfg)
     Session = init_db(cfg.db_path)
 
     # Build prompt -> tag index and encode text features on GPU once
