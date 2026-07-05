@@ -1,9 +1,14 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
+import { Link } from "react-router-dom";
+import ModeViewBar, { modeFromPath } from "../components/ModeViewBar";
 import Rail from "../components/Rail";
+import StackPhoto from "../components/StackPhoto";
 import Topbar from "../components/Topbar";
 import StatusRow from "../components/StatusRow";
-import { listStories, listTags } from "../api/client";
-import type { StoryEntry, TagEntry, VisitEntry } from "../api/types";
+import { useLocation } from "react-router-dom";
+import { getLikedStatus } from "../api/client";
+import type { StoryEntry, VisitEntry } from "../api/types";
+import { useLikeStatus, useToggleLike } from "../hooks/useLikes";
 
 // Google Material accent quartet — rotated by day hash
 const ACCENT_COLORS = [
@@ -181,13 +186,23 @@ function ItinerarySection({ visits }: { visits: VisitEntry[] }) {
 function StoryCard({ story }: { story: StoryEntry }) {
   const accent = accentFor(story.day);
   const dayLabel = formatDayLabel(story.day);
-  const [lightboxSha, setLightboxSha] = useState<string | null>(null);
+  const [playerStartIdx, setPlayerStartIdx] = useState<number | null>(null);
   const [playerOpen, setPlayerOpen] = useState(false);
   const [caption, setCaption] = useState<{ caption: string; hashtags: string[] } | null>(null);
   const [captionLoading, setCaptionLoading] = useState(false);
   const [copied, setCopied] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportResult, setExportResult] = useState<string | null>(null);
+  const [focusedPhotoId, setFocusedPhotoId] = useState<number | null>(null);
+  const [likedMap, setLikedMap] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    const shas = story.items.map((it) => it.sha256);
+    if (shas.length === 0) return;
+    getLikedStatus(shas)
+      .then(setLikedMap)
+      .catch(() => undefined);
+  }, [story.items]);
 
   async function exportStory() {
     setExporting(true);
@@ -281,7 +296,7 @@ function StoryCard({ story }: { story: StoryEntry }) {
             disabled={captionLoading || story.items.length === 0}
             title="Generate Instagram-ready caption + hashtags"
           >
-            {captionLoading ? "Writing…" : "✨ Caption"}
+            {captionLoading ? "Writing…" : "Caption"}
           </button>
         </div>
 
@@ -339,114 +354,403 @@ function StoryCard({ story }: { story: StoryEntry }) {
           {story.items.length === 0 ? (
             <div className="story-strip-empty">No photos match current filters</div>
           ) : (
-            story.items.map((item, i) => (
-              <button
-                className="story-frame"
-                key={item.photo_id}
-                onClick={() => setLightboxSha(item.sha256)}
-                style={{ border: 0, padding: 0, cursor: "zoom-in", background: "transparent" }}
-                title={item.taken_at ?? undefined}
-                aria-label={`Enlarge photo ${i + 1}`}
-              >
-                <img
-                  src={item.thumb_url}
-                  alt={`Photo ${i + 1}`}
-                  loading="lazy"
-                />
-                <span className="idx">{formatIndex(item.rank)}</span>
-                {item.tag && <span className="story-frame-tag">{item.tag}</span>}
-              </button>
-            ))
+            story.items.map((item, i) => {
+              const hasStack = !!(item.moment_id && item.moment_size && item.moment_size > 1);
+              return (
+                <div
+                  className="story-frame"
+                  key={item.photo_id}
+                  title={
+                    (item.taken_at ?? "") +
+                    (hasStack ? ` · burst of ${item.moment_size} — press [ ] in player to cycle` : "")
+                  }
+                  style={{ cursor: "zoom-in" }}
+                >
+                  <StackPhoto
+                    sha256={item.sha256}
+                    thumbUrl={item.thumb_url}
+                    momentId={item.moment_id ?? null}
+                    momentSize={item.moment_size ?? null}
+                    isFocused={focusedPhotoId === item.photo_id}
+                    onFocus={() => setFocusedPhotoId(item.photo_id)}
+                    onClick={() => {
+                      setPlayerStartIdx(i);
+                      setPlayerOpen(true);
+                    }}
+                    initialLiked={likedMap[item.sha256] ?? false}
+                    onLikeChange={(sha, liked) =>
+                      setLikedMap((m) => ({ ...m, [sha]: liked }))
+                    }
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      overflow: "hidden",
+                      borderRadius: "inherit",
+                    }}
+                  >
+                    <span className="idx">{formatIndex(item.rank)}</span>
+                    {item.tag && <span className="story-frame-tag">{item.tag}</span>}
+                  </StackPhoto>
+                </div>
+              );
+            })
           )}
         </div>
       </div>
-      {lightboxSha && (
-        <Lightbox sha256={lightboxSha} onClose={() => setLightboxSha(null)} />
-      )}
       {playerOpen && (
-        <StoryPlayer story={story} onClose={() => setPlayerOpen(false)} />
+        <StoryPlayer
+          story={story}
+          initialIndex={playerStartIdx ?? 0}
+          onClose={() => {
+            setPlayerOpen(false);
+            setPlayerStartIdx(null);
+          }}
+        />
       )}
     </article>
   );
 }
 
-function StoryPlayer({ story, onClose }: { story: StoryEntry; onClose: () => void }) {
-  const [index, setIndex] = useState(0);
-  const [playing, setPlaying] = useState(true);
+function StoryPlayer({
+  story,
+  initialIndex = 0,
+  onClose,
+}: {
+  story: StoryEntry;
+  initialIndex?: number;
+  onClose: () => void;
+}) {
+  const [index, setIndex] = useState(initialIndex);
+  const [playing, setPlaying] = useState(false); // user opened it manually — don't autoplay by default
+  const [enhancedOn, setEnhancedOn] = useState(false);
+  const [straightenOn, setStraightenOn] = useState(false);
+  const [stackMoment, setStackMoment] = useState<import("../api/types").Moment | null>(null);
+  const [stackIdx, setStackIdx] = useState(0);
+  const persistTimer = useRef<number | null>(null);
   const SLIDE_MS = 4000;
+
+  const item = story.items[index];
+
+  // Reset per-photo state when index changes
+  useEffect(() => {
+    setEnhancedOn(false);
+    setStraightenOn(false);
+    setStackMoment(null);
+    setStackIdx(0);
+  }, [index]);
+
+  // Load liked status for current photo
+  const activeSha = stackMoment?.members[stackIdx]?.sha256 ?? item?.sha256 ?? null;
+  const { liked: activeLikedMap, setLiked: setActiveLikedMap } = useLikeStatus(
+    activeSha ? [activeSha] : [],
+  );
+  const liked = Boolean(activeSha && activeLikedMap[activeSha]);
 
   // Autoplay
   useEffect(() => {
     if (!playing) return;
     const t = setTimeout(() => {
-      setIndex(i => (i + 1) % story.items.length);
+      setIndex((i) => (i + 1) % story.items.length);
     }, SLIDE_MS);
     return () => clearTimeout(t);
   }, [index, playing, story.items.length]);
 
+  const toggleLikeInner = useToggleLike(setActiveLikedMap);
+  const toggleLike = useCallback(() => {
+    if (activeSha) toggleLikeInner(activeSha, liked);
+  }, [activeSha, liked, toggleLikeInner]);
+
+  const cycleStack = useCallback(
+    async (delta: number) => {
+      if (!item?.moment_id || !(item.moment_size && item.moment_size > 1)) return;
+      let mom = stackMoment;
+      if (!mom) {
+        try {
+          const res = await fetch(`/api/photos/${item.sha256}/moment`);
+          if (!res.ok) return;
+          mom = await res.json();
+        } catch {
+          return;
+        }
+        if (!mom) return;
+        setStackMoment(mom);
+        setStackIdx(0);
+      }
+      const n = mom.members.length;
+      if (n === 0) return;
+      const nextIdx = (stackIdx + delta + n) % n;
+      setStackIdx(nextIdx);
+      if (persistTimer.current) window.clearTimeout(persistTimer.current);
+      const newPrimary = mom.members[nextIdx];
+      persistTimer.current = window.setTimeout(() => {
+        fetch(`/api/moments/${mom!.id}/primary`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ photo_id: newPrimary.photo_id }),
+        }).catch(() => undefined);
+      }, 450);
+    },
+    [item, stackMoment, stackIdx],
+  );
+
   // Keyboard
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-      else if (e.key === "ArrowRight" || e.key === " ") {
-        setIndex(i => (i + 1) % story.items.length);
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.key === "Escape") {
+        onClose();
+      } else if (e.key === "[") {
+        e.preventDefault();
+        cycleStack(-1);
+      } else if (e.key === "]") {
+        e.preventDefault();
+        cycleStack(1);
+      } else if (e.key === "ArrowRight" || e.key === " ") {
+        e.preventDefault();
+        setIndex((i) => (i + 1) % story.items.length);
       } else if (e.key === "ArrowLeft") {
-        setIndex(i => (i - 1 + story.items.length) % story.items.length);
+        e.preventDefault();
+        setIndex((i) => (i - 1 + story.items.length) % story.items.length);
+      } else if (e.key === "f" || e.key === "F") {
+        e.preventDefault();
+        toggleLike();
+      } else if (e.key === "e" || e.key === "E") {
+        e.preventDefault();
+        setEnhancedOn((v) => !v);
+      } else if (e.key === "s" || e.key === "S") {
+        e.preventDefault();
+        setStraightenOn((v) => !v);
       } else if (e.key.toLowerCase() === "p") {
-        setPlaying(p => !p);
+        e.preventDefault();
+        setPlaying((p) => !p);
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, story.items.length]);
+  }, [onClose, story.items.length, cycleStack, toggleLike]);
 
-  const item = story.items[index];
   if (!item) return null;
 
+  const displayedSha = activeSha ?? item.sha256;
+  const imageUrl =
+    enhancedOn || straightenOn
+      ? `/api/enhance/${displayedSha}?preset=film&grade=${enhancedOn ? "true" : "false"}&straighten=${straightenOn ? "true" : "false"}`
+      : `/api/preview/${displayedSha}`;
+  const isBurst = !!(item.moment_id && item.moment_size && item.moment_size > 1);
+
   return (
-    <div style={{
-      position: "fixed", inset: 0, zIndex: 100,
-      background: "#000",
-      display: "grid",
-      gridTemplateRows: "auto 1fr auto",
-    }}>
-      {/* top bar */}
-      <div style={{
-        display: "flex", alignItems: "center", gap: 12,
-        padding: "10px 20px", color: "#fff",
-        background: "rgba(0,0,0,0.5)",
-      }}>
-        <button onClick={onClose} className="btn btn-text" style={{ color: "#fff" }}>← Close</button>
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 100,
+        background: "#000",
+        display: "grid",
+        gridTemplateRows: "auto 1fr auto",
+      }}
+    >
+      {/* Top bar */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          padding: "10px 20px",
+          color: "#fff",
+          background: "rgba(0,0,0,0.5)",
+        }}
+      >
+        <button onClick={onClose} className="btn btn-text" style={{ color: "#fff" }}>
+          ← Close
+        </button>
         <div style={{ flex: 1, fontFamily: "var(--font-display)", fontSize: 16 }}>
           {story.title}
         </div>
+
+        {/* Action cluster */}
+        <button
+          onClick={toggleLike}
+          title={liked ? "Unlike (F)" : "Like — F"}
+          style={{
+            padding: "6px 12px 6px 10px",
+            borderRadius: 999,
+            border: 0,
+            background: liked ? "var(--g-red)" : "rgba(255,255,255,0.12)",
+            color: "#fff",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            fontFamily: "var(--font-display)",
+            fontSize: 12,
+            fontWeight: 500,
+          }}
+        >
+          <svg
+            viewBox="0 0 24 24"
+            width="13"
+            height="13"
+            fill={liked ? "currentColor" : "none"}
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+          </svg>
+          {liked ? "Liked" : "Like · F"}
+        </button>
+        <button
+          onClick={() => setEnhancedOn((v) => !v)}
+          title="Enhance (E)"
+          style={{
+            padding: "6px 12px",
+            borderRadius: 999,
+            border: 0,
+            background: enhancedOn ? "var(--md-primary)" : "rgba(255,255,255,0.12)",
+            color: "#fff",
+            cursor: "pointer",
+            fontFamily: "var(--font-display)",
+            fontSize: 12,
+            fontWeight: 500,
+          }}
+        >
+          {enhancedOn ? "Auto-edited" : "Auto edit · E"}
+        </button>
+        <button
+          onClick={() => setStraightenOn((v) => !v)}
+          title="Straighten (S)"
+          style={{
+            padding: "6px 12px",
+            borderRadius: 999,
+            border: 0,
+            background: straightenOn ? "var(--md-primary)" : "rgba(255,255,255,0.12)",
+            color: "#fff",
+            cursor: "pointer",
+            fontFamily: "var(--font-display)",
+            fontSize: 12,
+            fontWeight: 500,
+          }}
+        >
+          {straightenOn ? "Straightened" : "Straighten · S"}
+        </button>
+
         <span style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>
           {index + 1} / {story.items.length}
         </span>
       </div>
 
-      {/* image */}
-      <div style={{ display: "grid", placeItems: "center", overflow: "hidden", padding: 16 }}>
+      {/* Image — square letterbox */}
+      <div
+        style={{
+          display: "grid",
+          placeItems: "center",
+          overflow: "hidden",
+          padding: 16,
+          position: "relative",
+        }}
+      >
+        {/* Burst badge (top-left of stage) */}
+        {isBurst && (
+          <div
+            key={`stack-badge-${displayedSha}`}
+            style={{
+              position: "absolute",
+              top: 24,
+              left: 24,
+              zIndex: 2,
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              background: "var(--g-yellow)",
+              color: "#000",
+              padding: "8px 14px 8px 12px",
+              borderRadius: 999,
+              fontFamily: "var(--font-display)",
+              fontSize: 13,
+              fontWeight: 600,
+              boxShadow: "0 4px 14px rgba(0,0,0,0.45)",
+              animation: "burst-pulse 1500ms ease-out 1",
+            }}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              width="16"
+              height="16"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <rect x="3" y="7" width="14" height="14" rx="2" />
+              <rect x="7" y="3" width="14" height="14" rx="2" />
+            </svg>
+            <span>
+              Burst{" "}
+              <span style={{ fontFamily: "var(--font-mono)" }}>
+                {stackMoment ? stackIdx + 1 : 1} / {item.moment_size}
+              </span>
+            </span>
+            <button
+              onClick={() => cycleStack(-1)}
+              title="Previous (key: [)"
+              style={{
+                background: "rgba(0,0,0,0.12)",
+                color: "#000",
+                border: 0,
+                borderRadius: 4,
+                padding: "2px 8px",
+                cursor: "pointer",
+                fontFamily: "var(--font-mono)",
+                fontWeight: 700,
+                fontSize: 13,
+              }}
+            >
+              [
+            </button>
+            <button
+              onClick={() => cycleStack(1)}
+              title="Next (key: ])"
+              style={{
+                background: "rgba(0,0,0,0.12)",
+                color: "#000",
+                border: 0,
+                borderRadius: 4,
+                padding: "2px 8px",
+                cursor: "pointer",
+                fontFamily: "var(--font-mono)",
+                fontWeight: 700,
+                fontSize: 13,
+              }}
+            >
+              ]
+            </button>
+          </div>
+        )}
+
         <img
-          src={item.preview_url}
+          key={imageUrl}
+          src={imageUrl}
           alt=""
           style={{
-            maxWidth: "100%", maxHeight: "100%", objectFit: "contain",
-            transition: "opacity 200ms",
+            maxWidth: "100%",
+            maxHeight: "100%",
+            objectFit: "contain",
             boxShadow: "0 20px 60px rgba(0,0,0,0.7)",
+            animation: "stack-swap-fade 200ms ease",
           }}
         />
       </div>
 
-      {/* progress + controls */}
+      {/* Progress + controls */}
       <div style={{ background: "rgba(0,0,0,0.6)", color: "#fff" }}>
-        <div style={{
-          height: 3, background: "rgba(255,255,255,0.15)",
-        }}>
+        <div style={{ height: 3, background: "rgba(255,255,255,0.15)" }}>
           <div
             key={index}
             style={{
-              width: "100%", height: "100%",
+              width: "100%",
+              height: "100%",
               background: "var(--md-primary)",
               transform: playing ? "scaleX(1)" : "scaleX(0)",
               transformOrigin: "left",
@@ -454,33 +758,41 @@ function StoryPlayer({ story, onClose }: { story: StoryEntry; onClose: () => voi
             }}
           />
         </div>
-        <div style={{
-          display: "flex", alignItems: "center", gap: 14,
-          padding: "10px 20px",
-          justifyContent: "center",
-        }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 14,
+            padding: "10px 20px",
+            justifyContent: "center",
+          }}
+        >
           <button
-            onClick={() => setIndex(i => (i - 1 + story.items.length) % story.items.length)}
+            onClick={() => setIndex((i) => (i - 1 + story.items.length) % story.items.length)}
             className="btn btn-text"
             style={{ color: "#fff" }}
           >
             ← Prev
           </button>
-          <button
-            onClick={() => setPlaying(p => !p)}
-            className="btn btn-filled"
-          >
+          <button onClick={() => setPlaying((p) => !p)} className="btn btn-filled">
             {playing ? "❚❚ Pause" : "▶ Play"}
           </button>
           <button
-            onClick={() => setIndex(i => (i + 1) % story.items.length)}
+            onClick={() => setIndex((i) => (i + 1) % story.items.length)}
             className="btn btn-text"
             style={{ color: "#fff" }}
           >
             Next →
           </button>
-          <span style={{ marginLeft: 16, fontFamily: "var(--font-mono)", fontSize: 11, opacity: 0.6 }}>
-            ←/→ navigate · Space next · P play/pause · Esc close
+          <span
+            style={{
+              marginLeft: 16,
+              fontFamily: "var(--font-mono)",
+              fontSize: 11,
+              opacity: 0.6,
+            }}
+          >
+            ← → Prev/Next · F like · E enhance · S straighten · [ ] burst cycle · P play · Esc close
           </span>
         </div>
       </div>
@@ -488,119 +800,20 @@ function StoryPlayer({ story, onClose }: { story: StoryEntry; onClose: () => voi
   );
 }
 
-function Lightbox({ sha256, onClose }: { sha256: string; onClose: () => void }) {
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-  return (
-    <div
-      onClick={onClose}
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.9)",
-        zIndex: 90,
-        display: "grid",
-        placeItems: "center",
-        cursor: "zoom-out",
-      }}
-    >
-      <img
-        src={`/api/preview/${sha256}`}
-        alt=""
-        style={{ maxWidth: "94vw", maxHeight: "94vh", boxShadow: "0 12px 60px rgba(0,0,0,0.8)" }}
-      />
-    </div>
-  );
-}
+// Lightbox component removed — clicking a story photo now opens the full
+// StoryPlayer at that photo, so a one-shot zoom view is no longer needed.
 
-// ---- Filter chip bar ----
-
-function FilterChipBar({ tags, selected, onChange }: {
-  tags: TagEntry[];
-  selected: Set<string>;
-  onChange: (next: Set<string>) => void;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const allSelected = selected.size === tags.length;
-  // Show ~2 lines worth of chips by default — roughly 14 chips at 1440 width
-  const COLLAPSED_LIMIT = 14;
-  const collapsed = !expanded && tags.length > COLLAPSED_LIMIT;
-  const visible = collapsed ? tags.slice(0, COLLAPSED_LIMIT) : tags;
-  const hidden = tags.length - visible.length;
-
-  function toggleTag(tag: string) {
-    const next = new Set(selected);
-    if (next.has(tag)) next.delete(tag);
-    else next.add(tag);
-    onChange(next);
-  }
-
-  function selectAll() {
-    onChange(new Set(tags.map(t => t.tag)));
-  }
-
-  return (
-    <div className="filter-chip-bar">
-      <div
-        className="filter-chip-scroll"
-        style={collapsed ? { maxHeight: 84, overflow: "hidden" } : undefined}
-      >
-        {visible.map(t => {
-          const active = selected.has(t.tag);
-          return (
-            <button
-              key={t.tag}
-              className={`filter-chip${active ? " filter-chip--active" : ""}`}
-              onClick={() => toggleTag(t.tag)}
-              aria-pressed={active}
-              title={`${t.count} photos`}
-            >
-              {t.tag}
-              <span className="filter-chip-count">{t.count}</span>
-            </button>
-          );
-        })}
-        {collapsed && (
-          <button
-            className="filter-chip filter-chip--more"
-            onClick={() => setExpanded(true)}
-          >
-            +{hidden} more
-          </button>
-        )}
-        {expanded && tags.length > COLLAPSED_LIMIT && (
-          <button
-            className="filter-chip filter-chip--more"
-            onClick={() => setExpanded(false)}
-          >
-            Show less
-          </button>
-        )}
-      </div>
-      {!allSelected && (
-        <button className="btn btn-text filter-chip-clear" onClick={selectAll}>
-          Clear filters
-        </button>
-      )}
-    </div>
-  );
-}
+// Filter chip bar removed (2026-05-24). Stories are now aesthetic-curated
+// instead of tag-filtered. See docs/superpowers/specs/2026-05-24-aesthetic-curation-design.md
 
 // ---- Main view ----
 
-type StoryGroup = "day" | "place" | "people" | "pattern";
+type StoryGroup = "day" | "people";
 
 function StoryGroupTabs({ value, onChange }: { value: StoryGroup; onChange: (g: StoryGroup) => void }) {
   const opts: { key: StoryGroup; label: string }[] = [
     { key: "day", label: "By day" },
-    { key: "place", label: "By place" },
     { key: "people", label: "By people" },
-    { key: "pattern", label: "By pattern" },
   ];
   return (
     <div className="story-group-tabs" role="tablist">
@@ -619,74 +832,191 @@ function StoryGroupTabs({ value, onChange }: { value: StoryGroup; onChange: (g: 
   );
 }
 
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+// ── Best-Of dropdown ─────────────────────────────────────────────────────
 
-function tagsExcludingDates(tags: TagEntry[]): TagEntry[] {
-  return tags.filter(t => !DATE_RE.test(t.tag));
+type FacetsResp = {
+  days: { value: string; count: number }[];
+  places: { value: string; count: number }[];
+  persons: { value: string; label: string; count: number }[];
+  categories: { value: string; count: number }[];
+};
+
+function BestOfDropdown() {
+  const [open, setOpen] = useState(false);
+  const [facets, setFacets] = useState<FacetsResp | null>(null);
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open || facets) return;
+    fetch("/api/curate/facets")
+      .then((r) => (r.ok ? r.json() : null))
+      .then(setFacets)
+      .catch(() => undefined);
+  }, [open, facets]);
+
+  useEffect(() => {
+    function onClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    if (open) document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [open]);
+
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <button
+        className={`btn ${open ? "btn-filled" : "btn-tonal"}`}
+        onClick={() => setOpen((o) => !o)}
+      >
+        Best of ▾
+      </button>
+      {open && (
+        <div
+          style={{
+            position: "absolute",
+            top: "calc(100% + 6px)",
+            right: 0,
+            zIndex: 50,
+            minWidth: 380,
+            maxHeight: 480,
+            overflowY: "auto",
+            background: "var(--md-surface)",
+            border: "1px solid var(--md-outline-var)",
+            borderRadius: 12,
+            boxShadow: "0 12px 32px rgba(0,0,0,0.25)",
+            padding: 12,
+          }}
+        >
+          {!facets ? (
+            <div style={{ padding: 12, color: "var(--md-on-surface-var)", fontSize: 13 }}>
+              Loading…
+            </div>
+          ) : (
+            <>
+              <FacetGroup label="Category" entries={facets.categories.map(c => ({ value: c.value, label: c.value, count: c.count }))} hrefBase="/best/category/" />
+              <FacetGroup label="People" entries={facets.persons.map(p => ({ value: p.value, label: p.label, count: p.count }))} hrefBase="/best/person/" />
+              <FacetGroup label="Place" entries={facets.places.map(p => ({ value: p.value, label: p.value, count: p.count }))} hrefBase="/best/place/" />
+              <FacetGroup label="Day" entries={facets.days.map(d => ({ value: d.value, label: d.value, count: d.count }))} hrefBase="/best/day/" />
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FacetGroup({
+  label,
+  entries,
+  hrefBase,
+}: {
+  label: string;
+  entries: { value: string; label: string; count: number }[];
+  hrefBase: string;
+}) {
+  if (entries.length === 0) return null;
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <div
+        style={{
+          fontSize: 10,
+          textTransform: "uppercase",
+          letterSpacing: "0.06em",
+          color: "var(--md-on-surface-var)",
+          padding: "4px 8px",
+        }}
+      >
+        {label}
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+        {entries.slice(0, 24).map((e) => (
+          <Link
+            key={e.value}
+            to={`${hrefBase}${encodeURIComponent(e.value)}`}
+            className="btn btn-text"
+            style={{
+              fontSize: 12,
+              padding: "4px 9px",
+              borderRadius: 999,
+              background: "var(--md-surface-c)",
+              border: "1px solid var(--md-outline-var)",
+              textDecoration: "none",
+            }}
+          >
+            {e.label}{" "}
+            <span style={{ color: "var(--md-on-surface-var)", fontFamily: "var(--font-mono)", fontSize: 11 }}>
+              {e.count}
+            </span>
+          </Link>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 export default function Stories() {
-  const [allTags, setAllTags] = useState<TagEntry[]>([]);
-  const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
   const [stories, setStories] = useState<StoryEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [tagsLoaded, setTagsLoaded] = useState(false);
   const [groupBy, setGroupBy] = useState<StoryGroup>("day");
+  const [searchInput, setSearchInput] = useState("");
+  const [searchQ, setSearchQ] = useState(""); // debounced
+  const [scopePct, setScopePct] = useState<number>(75);
+  const [libraryPct, setLibraryPct] = useState<number>(50);
+  const { pathname } = useLocation();
+  // Mode comes from the URL — /curated/* means liked-only. The legacy in-page
+  // "Culling / Curated ♥" toggle was redundant once mode lives in the route.
+  const likedOnly = modeFromPath(pathname) === "curated";
 
-  // Load tags once on mount
+  // Debounce searchInput → searchQ
   useEffect(() => {
-    listTags()
-      .then(data => {
-        setAllTags(data.tags);
-        setSelectedTags(new Set(data.tags.map(t => t.tag)));
-        setTagsLoaded(true);
-      })
-      .catch(() => {
-        // Tags may not exist yet — proceed without filter UI
-        setTagsLoaded(true);
-      });
-  }, []);
+    const id = setTimeout(() => setSearchQ(searchInput.trim()), 350);
+    return () => clearTimeout(id);
+  }, [searchInput]);
 
-  // Load stories whenever tag filter changes (after tags are loaded)
-  const fetchStories = useCallback((selected: Set<string>, allTagList: TagEntry[]) => {
-    setLoading(true);
-    const allSelected = selected.size === allTagList.length || allTagList.length === 0;
-    const opts = allSelected
-      ? {}
-      : { includeTags: Array.from(selected) };
-
-    listStories(opts)
-      .then(data => {
-        setStories(data.stories);
-        setLoading(false);
-      })
-      .catch(err => {
-        setError(String(err));
-        setLoading(false);
-      });
-  }, []);
+  const fetchStories = useCallback(
+    (q: string, scope: number, lib: number, likedOnlyVal: boolean) => {
+      setLoading(true);
+      const params = new URLSearchParams();
+      if (q) params.set("q", q);
+      params.set("scope_pct", String(scope));
+      params.set("library_pct", String(lib));
+      if (likedOnlyVal) params.set("liked_only", "true");
+      fetch(`/api/stories?${params}`)
+        .then((r) => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.json();
+        })
+        .then((data) => {
+          setStories(data.stories);
+          setLoading(false);
+        })
+        .catch((err) => {
+          setError(String(err));
+          setLoading(false);
+        });
+    },
+    [],
+  );
 
   useEffect(() => {
-    if (!tagsLoaded) return;
-    fetchStories(selectedTags, allTags);
-  }, [tagsLoaded, selectedTags, allTags, fetchStories]);
-
-  function handleTagChange(next: Set<string>) {
-    setSelectedTags(next);
-  }
+    fetchStories(searchQ, scopePct, libraryPct, likedOnly);
+  }, [searchQ, scopePct, libraryPct, likedOnly, fetchStories]);
 
   const statusDetails = loading
     ? "loading…"
     : error
     ? "error loading stories"
-    : `${stories.length} suggested stories`;
+    : searchQ
+    ? `${stories.length} stories match "${searchQ}"`
+    : `${stories.length} curated stories`;
 
   return (
     <div className="app">
       <Rail />
       <div className="workspace">
-        <Topbar folder="travelcull" context="narrative sequences" />
+        <Topbar folder="travelcull" context={likedOnly ? "curated · stories" : "stories"} />
+        <ModeViewBar />
         <StatusRow details={statusDetails} />
 
         <div className="stories-wrap" style={{ gridRow: "3 / span 3" }}>
@@ -775,25 +1105,103 @@ export default function Stories() {
                 <div>
                   <h1>Narrative sequences</h1>
                   <div className="sub">
-                    {stories.length} suggested stories — drag to reorder · click to enlarge
+                    Aesthetic-curated · {stories.length} stories · top 25% by combined AP V2.5 + NIMA, burst-deduped
                   </div>
                 </div>
-                <StoryGroupTabs value={groupBy} onChange={setGroupBy} />
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <StoryGroupTabs value={groupBy} onChange={setGroupBy} />
+                  <BestOfDropdown />
+                </div>
               </div>
 
-              {allTags.length > 0 && (
-                <FilterChipBar
-                  tags={tagsExcludingDates(allTags)}
-                  selected={selectedTags}
-                  onChange={handleTagChange}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: "8px 0 4px",
+                }}
+              >
+                <input
+                  type="search"
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  placeholder="Search stories — e.g. 'monastery courtyard at dusk', 'snowy passes', 'high-altitude lake'"
+                  style={{
+                    flex: 1,
+                    background: "var(--md-surface-c-low)",
+                    border: "1px solid var(--md-outline-var)",
+                    borderRadius: 999,
+                    padding: "10px 18px",
+                    fontFamily: "inherit",
+                    fontSize: 14,
+                    color: "var(--md-on-surface)",
+                    outline: "none",
+                  }}
                 />
-              )}
+                {searchInput && (
+                  <button
+                    className="btn btn-text"
+                    onClick={() => setSearchInput("")}
+                    style={{ fontSize: 12 }}
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 16,
+                  fontSize: 11,
+                  color: "var(--md-on-surface-var)",
+                  padding: "6px 0 18px",
+                }}
+              >
+                <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span title="Per-scope percentile gate. Higher = stricter; 75 = top 25% of the day/place/person scope">
+                    Per-scope ≥ p{scopePct}
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={95}
+                    step={5}
+                    value={scopePct}
+                    onChange={(e) => setScopePct(Number(e.target.value))}
+                    style={{ width: 160 }}
+                  />
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span title="Library-wide percentile floor. A photo below this percentile in the whole library is dropped regardless of scope">
+                    Library ≥ p{libraryPct}
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={95}
+                    step={5}
+                    value={libraryPct}
+                    onChange={(e) => setLibraryPct(Number(e.target.value))}
+                    style={{ width: 160 }}
+                  />
+                </label>
+                <button
+                  className="btn btn-text"
+                  onClick={() => {
+                    setScopePct(75);
+                    setLibraryPct(50);
+                  }}
+                  style={{ fontSize: 11 }}
+                >
+                  Reset
+                </button>
+              </div>
 
               {stories
                 .filter(story => {
-                  if (groupBy === "place") return story.day.startsWith("place:");
                   if (groupBy === "people") return story.day.startsWith("people:");
-                  if (groupBy === "pattern") return story.day.startsWith("pattern:");
                   return !story.day.startsWith("place:")
                       && !story.day.startsWith("people:")
                       && !story.day.startsWith("pattern:");
@@ -801,24 +1209,6 @@ export default function Stories() {
                 .map(story => (
                   <StoryCard key={story.id} story={story} />
                 ))}
-
-              <div style={{ display: "flex", justifyContent: "center", padding: "8px 0 32px" }}>
-                <button className="btn btn-tonal">
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    width="16"
-                    height="16"
-                  >
-                    <path d="M12 5v14M5 12h14"/>
-                  </svg>
-                  Build a new story from selection
-                </button>
-              </div>
             </>
           )}
         </div>

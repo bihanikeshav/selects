@@ -1,10 +1,9 @@
 interface TopbarProps {
   folder: string;
   context: string;
-  scoring?: { current: number; total: number } | null;
 }
 
-export default function Topbar({ folder, context, scoring }: TopbarProps) {
+export default function Topbar({ folder, context }: TopbarProps) {
   return (
     <header className="topbar">
       <div className="topbar-folder">
@@ -13,16 +12,6 @@ export default function Topbar({ folder, context, scoring }: TopbarProps) {
         <span className="crumb-context">{context}</span>
       </div>
       <div className="topbar-grow"></div>
-
-      {scoring && (
-        <div className="scoring-chip" title="Smart-pass scoring progress">
-          <span className="ring"></span>
-          smart-pass{" "}
-          <span className="pct">
-            {scoring.current} / {scoring.total}
-          </span>
-        </div>
-      )}
 
       <button className="icon-btn" title="Search">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

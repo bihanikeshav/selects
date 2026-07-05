@@ -1,15 +1,20 @@
-import { useNavigate, useLocation } from "react-router-dom";
+import type { ReactNode } from "react";
 
 interface StatusRowProps {
   pos?: string;
   keepersCount?: number;
   details?: string;
+  right?: ReactNode;
 }
 
-export default function StatusRow({ pos, keepersCount, details }: StatusRowProps) {
-  const navigate = useNavigate();
-  const { pathname } = useLocation();
-
+/**
+ * Lightweight informational row: position counter, keepers tally, and an
+ * optional right-aligned slot for view-specific controls (sort toggles etc.).
+ *
+ * The Cull/Clusters/Stories tabs that used to live here have moved to
+ * ``ModeViewBar`` so we don't have two competing navigation bars.
+ */
+export default function StatusRow({ pos, keepersCount, details, right }: StatusRowProps) {
   return (
     <div className="status-row">
       {pos && <span className="pos">{pos}</span>}
@@ -17,42 +22,17 @@ export default function StatusRow({ pos, keepersCount, details }: StatusRowProps
       {keepersCount !== undefined && (
         <>
           <span className="keepers">
-            <span className="keepers-dot"></span>
+            <span className="keepers-dot" aria-hidden="true"></span>
             {keepersCount} keepers so far
           </span>
           <span className="div">·</span>
         </>
       )}
-      {details && <span>{details}</span>}
+      {details && <span className="status-details">{details}</span>}
 
       <div className="status-row-spacer"></div>
 
-      <div className="view-tabs" role="tablist">
-        <button
-          className={"view-tab" + (pathname === "/" ? " is-active" : "")}
-          role="tab"
-          aria-selected={pathname === "/"}
-          onClick={() => navigate("/")}
-        >
-          Burst cull
-        </button>
-        <button
-          className={"view-tab" + (pathname === "/clusters" ? " is-active" : "")}
-          role="tab"
-          aria-selected={pathname === "/clusters"}
-          onClick={() => navigate("/clusters")}
-        >
-          Clusters
-        </button>
-        <button
-          className={"view-tab" + (pathname === "/stories" ? " is-active" : "")}
-          role="tab"
-          aria-selected={pathname === "/stories"}
-          onClick={() => navigate("/stories")}
-        >
-          Stories
-        </button>
-      </div>
+      {right && <div className="status-row-right">{right}</div>}
     </div>
   );
 }

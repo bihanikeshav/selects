@@ -1,81 +1,162 @@
+import { useEffect, useState } from "react";
+
 import type { Photo } from "../api/types";
 
 interface ScoresCardProps {
   photo: Photo | null;
 }
 
-interface AxisRowProps {
-  axisClass: string;
-  name: string;
-  value01: number | null;          // already 0..1
-  display: string;
+interface Histogram {
+  bins: number;
+  r: number[];
+  g: number[];
+  b: number[];
+  luma: number[];
 }
 
-function AxisRow({ axisClass, name, value01, display }: AxisRowProps) {
-  const pct = value01 !== null ? Math.min(100, Math.max(0, value01 * 100)) : 0;
+function MiniHistogram({ histogram }: { histogram: Histogram | null }) {
+  if (!histogram) {
+    return (
+      <div
+        style={{
+          height: 56,
+          background: "var(--md-surface-c)",
+          borderRadius: 6,
+          display: "grid",
+          placeItems: "center",
+          color: "var(--md-on-surface-var)",
+          fontSize: 10,
+          fontFamily: "var(--font-mono)",
+        }}
+      >
+        no histogram
+      </div>
+    );
+  }
+  // Pre-compute max for normalization
+  const max = Math.max(
+    ...histogram.luma,
+    ...histogram.r,
+    ...histogram.g,
+    ...histogram.b,
+    1,
+  );
+  const w = 160;
+  const h = 50;
+  const bw = w / histogram.bins;
+
+  const channels = [
+    { data: histogram.r, color: "rgba(234,67,53,0.62)" },   // g-red
+    { data: histogram.g, color: "rgba(52,168,83,0.55)" },   // g-green
+    { data: histogram.b, color: "rgba(66,133,244,0.55)" },  // g-blue
+    { data: histogram.luma, color: "rgba(255,255,255,0.85)" },
+  ];
+
   return (
-    <div className={`axis-row ${axisClass}`}>
-      <span className="name">{name}</span>
-      <span className="bar">
-        <span className="fill" style={{ width: `${pct}%` }}></span>
-      </span>
-      <span className="num">{value01 === null ? "—" : display}</span>
-    </div>
+    <svg
+      viewBox={`0 0 ${w} ${h}`}
+      width="100%"
+      height={h}
+      style={{ display: "block", background: "#0d0d0f", borderRadius: 6 }}
+    >
+      {channels.map((ch, ci) => {
+        const path = ch.data
+          .map((v, i) => {
+            const x = i * bw;
+            const y = h - (v / max) * h;
+            return `${i === 0 ? "M" : "L"}${x.toFixed(2)},${y.toFixed(2)}`;
+          })
+          .concat([`L${w},${h}`, `L0,${h}Z`])
+          .join(" ");
+        return (
+          <path
+            key={ci}
+            d={path}
+            fill={ch.color}
+            opacity={ci === 3 ? 1 : 0.55}
+          />
+        );
+      })}
+    </svg>
   );
 }
 
-// Map Laplacian variance to a 0..1 sharpness — clamp at 1500 since anything
-// above is "very sharp" and beyond that the eye doesn't care.
-function sharpness01(blur: number | null | undefined): number | null {
-  if (blur === null || blur === undefined) return null;
-  return Math.min(1, blur / 1500);
-}
-
 export default function ScoresCard({ photo }: ScoresCardProps) {
-  const sharp = sharpness01(photo?.blur);
-  const exp = photo?.exposure ?? null;          // already 0..1
-  const faces = photo?.faces_count ?? null;
+  const [hist, setHist] = useState<Histogram | null>(null);
+
+  useEffect(() => {
+    setHist(null);
+    if (!photo?.sha256) return;
+    let cancelled = false;
+    fetch(`/api/doctor/histogram/${photo.sha256}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (!cancelled) setHist(j);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [photo?.sha256]);
+
   const rejected = photo?.auto_reject ?? false;
 
   return (
     <div className="scores-card">
       <div className="scores-head">
-        <span className="label">Stage 1 · Classical signals</span>
+        <span className="label">Photo</span>
         {rejected && (
           <span
             style={{
-              padding: "2px 8px",
+              padding: "1px 7px",
               borderRadius: 999,
-              background: "var(--md-error-container)",
-              color: "var(--md-error)",
+              background: "color-mix(in srgb, var(--g-red) 18%, transparent)",
+              color: "var(--g-red)",
               fontFamily: "var(--font-mono)",
-              fontSize: 11,
+              fontSize: 10,
               fontWeight: 500,
             }}
           >
-            auto-reject · {photo?.reject_reason ?? "unknown"}
+            auto-reject
           </span>
         )}
       </div>
 
-      <AxisRow
-        axisClass="axis-sharpness"
-        name="sharpness"
-        value01={sharp}
-        display={sharp !== null ? (sharp * 10).toFixed(1) : "—"}
-      />
-      <AxisRow
-        axisClass="axis-lighting"
-        name="lighting"
-        value01={exp}
-        display={exp !== null ? (exp * 10).toFixed(1) : "—"}
-      />
-      <AxisRow
-        axisClass="axis-subject"
-        name="people"
-        value01={faces !== null ? Math.min(1, faces / 4) : null}
-        display={faces !== null ? String(faces) : "—"}
-      />
+      <MiniHistogram histogram={hist} />
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "auto 1fr",
+          rowGap: 2,
+          columnGap: 8,
+          fontFamily: "var(--font-mono)",
+          fontSize: 11,
+          color: "var(--md-on-surface-var)",
+          marginTop: 6,
+        }}
+      >
+        <span>iqa</span>
+        <span style={{ color: "var(--md-on-surface)", textAlign: "right" }}>
+          {photo?.aesthetic_iqa != null ? photo.aesthetic_iqa.toFixed(3) : "—"}
+        </span>
+        <span>blur</span>
+        <span style={{ color: "var(--md-on-surface)", textAlign: "right" }}>
+          {photo?.blur != null ? photo.blur.toFixed(0) : "—"}
+        </span>
+        <span>faces</span>
+        <span style={{ color: "var(--md-on-surface)", textAlign: "right" }}>
+          {photo?.faces_count != null ? photo.faces_count : "—"}
+        </span>
+        {photo?.moment_size && photo.moment_size > 1 && (
+          <>
+            <span>burst</span>
+            <span style={{ color: "var(--md-on-surface)", textAlign: "right" }}>
+              {photo.moment_size}
+            </span>
+          </>
+        )}
+      </div>
     </div>
   );
 }

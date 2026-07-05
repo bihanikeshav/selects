@@ -60,6 +60,25 @@ export default function PersonDetail() {
   }
 
   const displayName = label || `P${id}`;
+  const [editingLabel, setEditingLabel] = useState(false);
+  const [labelDraft, setLabelDraft] = useState("");
+
+  async function saveLabel() {
+    const newLabel = labelDraft.trim() || null;
+    try {
+      const res = await fetch(`/api/persons/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ label: newLabel }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setLabel(newLabel);
+      setEditingLabel(false);
+      setToast(`Renamed to ${newLabel || `P${id}`}`);
+    } catch (e) {
+      setToast(`Rename failed: ${e}`);
+    }
+  }
 
   return (
     <div className="app">
@@ -74,11 +93,60 @@ export default function PersonDetail() {
 
         <div className="cluster-detail-wrap">
           <div className="cluster-detail-toolbar">
-            <Link to="/persons" className="btn btn-text" style={{ paddingLeft: 8 }}>← All persons</Link>
-            <h1 style={{ margin: 0, fontFamily: "var(--font-display)", fontWeight: 500, fontSize: 28 }}>
-              {displayName}
-            </h1>
+            <Link to="/people" className="btn btn-text" style={{ paddingLeft: 8 }}>← All people</Link>
+            {editingLabel ? (
+              <input
+                autoFocus
+                value={labelDraft}
+                onChange={(e) => setLabelDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") saveLabel();
+                  if (e.key === "Escape") setEditingLabel(false);
+                }}
+                onBlur={saveLabel}
+                placeholder={`P${id} (clear to unset)`}
+                style={{
+                  fontFamily: "var(--font-display)",
+                  fontSize: 26,
+                  fontWeight: 500,
+                  background: "var(--md-surface-c-low)",
+                  border: "1px solid var(--md-outline-var)",
+                  borderRadius: 8,
+                  padding: "4px 10px",
+                  color: "var(--md-on-surface)",
+                  outline: "none",
+                  minWidth: 220,
+                }}
+              />
+            ) : (
+              <h1
+                onClick={() => {
+                  setLabelDraft(label || "");
+                  setEditingLabel(true);
+                }}
+                title="Click to rename"
+                style={{
+                  margin: 0,
+                  fontFamily: "var(--font-display)",
+                  fontWeight: 500,
+                  fontSize: 28,
+                  cursor: "text",
+                  borderBottom: "1px dashed transparent",
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.borderBottomColor = "var(--md-outline-var)")}
+                onMouseLeave={(e) => (e.currentTarget.style.borderBottomColor = "transparent")}
+              >
+                {displayName}
+              </h1>
+            )}
             <div style={{ flex: 1 }} />
+            <Link
+              to={`/best/person/${id}`}
+              className="btn btn-tonal"
+              title="Best photos of this person"
+            >
+              ★ Best of {displayName}
+            </Link>
             <button className="btn btn-text" onClick={() => setSelected(new Set(photos.map(p => p.sha256)))}>
               Select all
             </button>

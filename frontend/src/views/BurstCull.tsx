@@ -1,13 +1,14 @@
-import { useEffect, useCallback, useState } from "react";
-import { listPhotos, getPhotoMoment } from "../api/client";
+import { useEffect, useCallback, useRef, useState } from "react";
+import { listPhotos, getPhotoMoment, setMomentPrimary } from "../api/client";
 import type { Photo, Moment, MomentMember } from "../api/types";
+import { useLikeStatus, useToggleLike } from "../hooks/useLikes";
 import Rail from "../components/Rail";
 import Topbar from "../components/Topbar";
 import StatusRow from "../components/StatusRow";
+import ModeViewBar from "../components/ModeViewBar";
 import KbdFooter from "../components/KbdFooter";
 import BurstThumb from "../components/BurstThumb";
 import ScoresCard from "../components/ScoresCard";
-import MemoryRing from "../components/MemoryRing";
 
 type LoadState = "loading" | "error" | "empty" | "loaded";
 
@@ -19,12 +20,15 @@ interface SwipeSummary {
   undecided: number;
 }
 
+type SortMode = "aesthetic" | "taken_at" | "random";
+
 export default function BurstCull() {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [total, setTotal] = useState(0);
   const [idx, setIdx] = useState(0);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [swipeSummary, setSwipeSummary] = useState<SwipeSummary | null>(null);
+  const [sortMode, setSortMode] = useState<SortMode>("aesthetic");
 
   // Moment state: when a photo has a moment, we may expand it
   const [expandedMoment, setExpandedMoment] = useState<Moment | null>(null);
@@ -47,7 +51,8 @@ export default function BurstCull() {
 
   useEffect(() => {
     let cancelled = false;
-    listPhotos({ limit: 200, collapse: "moments" })
+    setLoadState("loading");
+    listPhotos({ limit: 200, collapse: "moments", sort: sortMode })
       .then((data) => {
         if (cancelled) return;
         if (data.items.length === 0) {
@@ -63,13 +68,51 @@ export default function BurstCull() {
         if (!cancelled) setLoadState("error");
       });
     return () => { cancelled = true; };
-  }, []);
+  }, [sortMode]);
 
-  // Reset moment expansion when navigating to a different photo
+  // Reset moment expansion and per-photo edit toggles when navigating
   useEffect(() => {
     setExpandedMoment(null);
     setMomentIdx(0);
+    setBurstLiked({});
   }, [idx]);
+
+  // Liked status for every member of the expanded burst — so the badge can
+  // show how many of the stack the user has liked and the pip strip can
+  // highlight liked alternates. Refetches whenever the expanded moment
+  // changes.
+  const { liked: burstLiked, setLiked: setBurstLiked } = useLikeStatus(
+    expandedMoment ? expandedMoment.members.map((m) => m.sha256) : [],
+  );
+
+  // The "current" sha whose like state the F key / like button act on —
+  // computed early so it (and the derived liked flag below) are available
+  // to the keyboard-shortcut effect further down.
+  const currentPhotoForLike = photos[idx] ?? null;
+  const activeMemberForLike: MomentMember | null = expandedMoment
+    ? (expandedMoment.members[momentIdx] ?? null)
+    : null;
+  const activeShaForUrl = activeMemberForLike
+    ? activeMemberForLike.sha256
+    : currentPhotoForLike?.sha256;
+
+  // Liked status for the active photo — refetches whenever it changes.
+  const { liked: activeLikedMap, setLiked: setActiveLikedMap } = useLikeStatus(
+    activeShaForUrl ? [activeShaForUrl] : [],
+  );
+  const activeLiked = Boolean(activeShaForUrl && activeLikedMap[activeShaForUrl]);
+
+  // Toggling likes updates both the single active-photo map and the
+  // burst-wide map together, so the badge/pip strip and the like button
+  // stay in sync from a single swipe POST.
+  const setBothLiked = useCallback(
+    (updater: (prev: Record<string, boolean>) => Record<string, boolean>) => {
+      setActiveLikedMap(updater);
+      setBurstLiked(updater);
+    },
+    [setActiveLikedMap, setBurstLiked],
+  );
+  const toggleLike = useToggleLike(setBothLiked);
 
   const expandMoment = useCallback(async (photo: Photo) => {
     if (!photo.moment_id || !photo.sha256) return;
@@ -121,10 +164,73 @@ export default function BurstCull() {
     }
   }
 
+  // Stack-cycle within the current burst moment. Lazily expands the moment
+  // if not already expanded, then advances / regresses momentIdx, and
+  // persists the new top-of-stack to the backend (debounced).
+  const cycleStackTimer = useRef<number | null>(null);
+  const cycleStack = useCallback(
+    async (delta: number) => {
+      const currentPhotoLocal = photos[idx];
+      if (!currentPhotoLocal?.moment_id) return;
+      let mom = expandedMoment;
+      if (!mom) {
+        try {
+          mom = await getPhotoMoment(currentPhotoLocal.sha256);
+        } catch {
+          return;
+        }
+        if (!mom) return;
+        setExpandedMoment(mom);
+        setMomentIdx(0);
+      }
+      const n = mom.members.length;
+      if (n === 0) return;
+      const next = (momentIdx + delta + n) % n;
+      setMomentIdx(next);
+      const newPrimary = mom.members[next];
+      // Debounced persistence
+      if (cycleStackTimer.current) window.clearTimeout(cycleStackTimer.current);
+      cycleStackTimer.current = window.setTimeout(() => {
+        setMomentPrimary(mom!.id, newPrimary.photo_id).catch(() => {
+          /* non-fatal */
+        });
+      }, 450);
+    },
+    [photos, idx, expandedMoment, momentIdx],
+  );
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       const sha = (expandedMoment?.members[momentIdx]?.sha256) || photos[idx]?.sha256;
+
+      // Stack-cycle keys stay inside burst view
+      if (e.key === "[") {
+        e.preventDefault();
+        cycleStack(-1);
+        return;
+      }
+      if (e.key === "]") {
+        e.preventDefault();
+        cycleStack(1);
+        return;
+      }
+
+      // Keys that operate on the CURRENT burst alternate without leaving
+      // the burst view. F/E/S all toggle state on the displayed photo and
+      // are core to the multi-like-within-burst workflow.
+      const STAY_IN_BURST = ["[", "]", "f", "F", "e", "E", "s", "S"];
+
+      // Any OTHER key while inside burst view pops us back out first,
+      // then falls through to its normal handler (j/k/l/d/arrows).
+      if (expandedMoment && !STAY_IN_BURST.includes(e.key)) {
+        collapseMoment();
+        if (e.key === "Escape") {
+          e.preventDefault();
+          return;
+        }
+      }
+
       if (e.key === "j" || e.key === "J") {
         e.preventDefault();
         if (sha) recordSwipe(sha, "reject");
@@ -137,6 +243,9 @@ export default function BurstCull() {
         e.preventDefault();
         if (sha) recordSwipe(sha, "silver");
         next();
+      } else if (e.key === "f" || e.key === "F") {
+        e.preventDefault();
+        if (sha) toggleLike(sha, activeLiked);
       } else if (e.key === "ArrowDown" || e.key === "ArrowRight") {
         e.preventDefault();
         next();
@@ -146,26 +255,40 @@ export default function BurstCull() {
       } else if (e.key === "e" || e.key === "E") {
         e.preventDefault();
         setEnhancedOn((v) => !v);
-      } else if (e.key === "Escape" && expandedMoment) {
+      } else if (e.key === "s" || e.key === "S") {
         e.preventDefault();
-        collapseMoment();
+        setStraightenOn((v) => !v);
+      } else if (e.key === "d" || e.key === "D") {
+        e.preventDefault();
+        if (sha) recordSwipe(sha, "reject");
+        next();
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [next, prev, expandedMoment, collapseMoment, idx, momentIdx, photos]);
+  }, [next, prev, expandedMoment, collapseMoment, idx, momentIdx, photos, cycleStack, activeLiked, toggleLike]);
 
-  const currentPhoto = photos[idx] ?? null;
+  const currentPhoto = currentPhotoForLike;
 
   // When a moment is expanded, the "current" view is the selected moment member
-  const activeMember: MomentMember | null = expandedMoment
-    ? (expandedMoment.members[momentIdx] ?? null)
-    : null;
+  const activeMember = activeMemberForLike;
 
-  const activeShaForUrl = activeMember ? activeMember.sha256 : currentPhoto?.sha256;
   const [enhancedOn, setEnhancedOn] = useState(false);
+  const [straightenOn, setStraightenOn] = useState(false);
+
+  // Reset enhance/straighten per photo so each shot is judged fresh
+  useEffect(() => {
+    setEnhancedOn(false);
+    setStraightenOn(false);
+  }, [activeShaForUrl]);
+
+  const toggleLikeActive = useCallback(() => {
+    if (activeShaForUrl) toggleLike(activeShaForUrl, activeLiked);
+  }, [activeShaForUrl, activeLiked, toggleLike]);
   const activePreviewUrl = activeShaForUrl
-    ? (enhancedOn ? `/api/enhance/${activeShaForUrl}` : `/api/preview/${activeShaForUrl}`)
+    ? (enhancedOn || straightenOn
+        ? `/api/enhance/${activeShaForUrl}?preset=film&grade=${enhancedOn ? "true" : "false"}&straighten=${straightenOn ? "true" : "false"}`
+        : `/api/preview/${activeShaForUrl}`)
     : "";
   const activeFilename = activeMember
     ? activeMember.sha256.slice(0, 8)
@@ -173,13 +296,10 @@ export default function BurstCull() {
       ? (currentPhoto.path.split(/[\\/]/).pop() ?? currentPhoto.path)
       : "";
 
-  // Folder name: take the parent directory of the first photo's path
-  const folderName = photos[0]
-    ? (() => {
-        const parts = photos[0].path.split(/[\\/]/);
-        return parts[parts.length - 2] ?? "photos";
-      })()
-    : "travelcull";
+  // Use a consistent folder label across all views so the Topbar doesn't
+  // change shape when switching modes. The actual folder shows up in the
+  // status row context only.
+  const folderName = "travelcull";
 
   const hasMoment = Boolean(currentPhoto?.moment_id && (currentPhoto?.moment_size ?? 0) > 1);
 
@@ -190,8 +310,9 @@ export default function BurstCull() {
       <div className="workspace">
         <Topbar
           folder={folderName}
-          context={loadState === "loaded" ? `photo ${idx + 1} of ${total}` : "cull"}
+          context={loadState === "loaded" ? `cull · ${idx + 1} of ${total}` : "cull"}
         />
+        <ModeViewBar />
 
         <StatusRow
           pos={loadState === "loaded" ? `${idx + 1} / ${total}` : undefined}
@@ -203,38 +324,255 @@ export default function BurstCull() {
                 : `${total} photos indexed`
               : undefined
           }
+          right={
+            <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+              <span style={{ fontSize: 11, color: "var(--md-on-surface-var)", marginRight: 6 }}>
+                Sort:
+              </span>
+              {(["aesthetic", "taken_at", "random"] as const).map((m) => (
+                <button
+                  key={m}
+                  className={`btn ${sortMode === m ? "btn-filled" : "btn-text"}`}
+                  style={{ fontSize: 12, padding: "3px 10px" }}
+                  onClick={() => setSortMode(m)}
+                >
+                  {m === "aesthetic" ? "Best ★" : m === "taken_at" ? "Time" : "Random"}
+                </button>
+              ))}
+            </div>
+          }
         />
 
         {/* Cull stage */}
         {loadState === "loaded" && currentPhoto && (
           <section className="cull-stage">
-            <div className="gold-frame">
+            <div
+              className="gold-frame"
+              style={
+                hasMoment
+                  ? {
+                      // Yellow ring around the frame to scream "this is a stack"
+                      boxShadow:
+                        "0 0 0 3px var(--g-yellow), 0 14px 40px rgba(0,0,0,0.4)",
+                    }
+                  : undefined
+              }
+            >
               <img
+                key={activePreviewUrl}
                 src={activePreviewUrl}
                 alt={activeFilename}
+                style={{
+                  animation: hasMoment ? "stack-swap-fade 200ms ease" : undefined,
+                }}
               />
-              <button
-                onClick={() => setEnhancedOn((v) => !v)}
-                title="Toggle auto-enhance preview (press E)"
+
+              {/* Big burst badge — top-left, bright accent, always visible */}
+              {hasMoment && (() => {
+                const likedCount = expandedMoment
+                  ? expandedMoment.members.filter((m) => burstLiked[m.sha256]).length
+                  : Object.values(burstLiked).filter(Boolean).length;
+                return (
+                <div
+                  style={{
+                    position: "absolute",
+                    top: 12,
+                    left: 12,
+                    zIndex: 2,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    background: "var(--g-yellow)",
+                    color: "#000",
+                    padding: "7px 12px 7px 10px",
+                    borderRadius: 999,
+                    fontFamily: "var(--font-display)",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    boxShadow: "0 4px 14px rgba(0,0,0,0.35)",
+                    animation: "burst-pulse 1500ms ease-out 1",
+                  }}
+                  key={`badge-${activeShaForUrl}`}
+                  title={`Burst of ${currentPhoto.moment_size} — [ ] cycle, F likes each independently`}
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="15"
+                    height="15"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <rect x="3" y="7" width="14" height="14" rx="2" />
+                    <rect x="7" y="3" width="14" height="14" rx="2" />
+                  </svg>
+                  <span>
+                    <span style={{ fontFamily: "var(--font-mono)" }}>
+                      {(expandedMoment ? momentIdx + 1 : 1)} / {currentPhoto.moment_size}
+                    </span>
+                  </span>
+                  {likedCount > 0 && (
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 3,
+                        background: "var(--g-red)",
+                        color: "#fff",
+                        padding: "2px 8px 2px 6px",
+                        borderRadius: 999,
+                        fontFamily: "var(--font-mono)",
+                        fontSize: 11,
+                        fontWeight: 700,
+                      }}
+                    >
+                      <svg
+                        viewBox="0 0 24 24"
+                        width="11"
+                        height="11"
+                        fill="currentColor"
+                        aria-hidden="true"
+                      >
+                        <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+                      </svg>
+                      {likedCount}
+                    </span>
+                  )}
+                  <button
+                    onClick={() => cycleStack(-1)}
+                    title="Previous in stack (key: [)"
+                    style={{
+                      background: "rgba(0,0,0,0.12)",
+                      color: "#000",
+                      border: 0,
+                      borderRadius: 4,
+                      padding: "2px 7px",
+                      cursor: "pointer",
+                      fontFamily: "var(--font-mono)",
+                      fontWeight: 700,
+                      fontSize: 13,
+                    }}
+                  >
+                    [
+                  </button>
+                  <button
+                    onClick={() => cycleStack(1)}
+                    title="Next in stack (key: ])"
+                    style={{
+                      background: "rgba(0,0,0,0.12)",
+                      color: "#000",
+                      border: 0,
+                      borderRadius: 4,
+                      padding: "2px 7px",
+                      cursor: "pointer",
+                      fontFamily: "var(--font-mono)",
+                      fontWeight: 700,
+                      fontSize: 13,
+                    }}
+                  >
+                    ]
+                  </button>
+                </div>
+                );
+              })()}
+
+
+              <div
                 style={{
                   position: "absolute",
                   top: 12,
                   right: 12,
                   zIndex: 2,
-                  padding: "6px 12px",
-                  borderRadius: 999,
-                  border: 0,
-                  background: enhancedOn ? "var(--md-primary)" : "rgba(0,0,0,0.55)",
-                  color: enhancedOn ? "var(--md-on-primary)" : "#fff",
-                  fontFamily: "var(--font-display)",
-                  fontSize: 12,
-                  fontWeight: 500,
-                  cursor: "pointer",
-                  boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+                  display: "flex",
+                  gap: 6,
                 }}
               >
-                {enhancedOn ? "✨ Enhanced" : "Original · press E"}
-              </button>
+                <button
+                  onClick={toggleLikeActive}
+                  title={activeLiked ? "Unlike (F)" : "Like — adds to Curated (F)"}
+                  className="cull-action-btn"
+                  style={{
+                    background: activeLiked ? "var(--g-red)" : "rgba(0,0,0,0.55)",
+                    color: "#fff",
+                    boxShadow: activeLiked
+                      ? "0 0 0 2px color-mix(in srgb, var(--g-red) 35%, transparent), 0 2px 8px rgba(0,0,0,0.3)"
+                      : "0 2px 8px rgba(0,0,0,0.3)",
+                  }}
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="13"
+                    height="13"
+                    fill={activeLiked ? "currentColor" : "none"}
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+                  </svg>
+                  {activeLiked ? "Liked" : "Like · F"}
+                </button>
+
+                <button
+                  onClick={() => {
+                    if (activeShaForUrl) {
+                      recordSwipe(activeShaForUrl, "reject");
+                      next();
+                    }
+                  }}
+                  title="Discard — record a reject and move on (D)"
+                  className="cull-action-btn"
+                  style={{
+                    background: "rgba(0,0,0,0.55)",
+                    color: "#fff",
+                    boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+                  }}
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="13"
+                    height="13"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M3 6h18" />
+                    <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                    <path d="m5 6 1 14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-14" />
+                  </svg>
+                  Discard · D
+                </button>
+                <button
+                  onClick={() => setEnhancedOn((v) => !v)}
+                  title="Auto-edit: stretch exposure, lift shadows, recover highlights, white-balance (E)"
+                  className="cull-action-btn"
+                  style={{
+                    background: enhancedOn ? "var(--md-primary)" : "rgba(0,0,0,0.55)",
+                    color: enhancedOn ? "var(--md-on-primary)" : "#fff",
+                    boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+                  }}
+                >
+                  {enhancedOn ? "Auto-edited" : "Auto edit · E"}
+                </button>
+                <button
+                  onClick={() => setStraightenOn((v) => !v)}
+                  title="Quick auto-straighten (S)"
+                  disabled={!activeShaForUrl}
+                  className="cull-action-btn"
+                  style={{
+                    background: straightenOn ? "var(--md-primary)" : "rgba(0,0,0,0.55)",
+                    color: straightenOn ? "var(--md-on-primary)" : "#fff",
+                    boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+                  }}
+                >
+                  {straightenOn ? "Straightened" : "Straighten · S"}
+                </button>
+              </div>
               <div className="gold-overlay">
                 <div>
                   <div className="filename">{activeFilename}</div>
@@ -298,36 +636,38 @@ export default function BurstCull() {
               )}
             </div>
 
-            <aside className="burst-strip" aria-label="Photos">
-              {expandedMoment ? (
-                // Expanded moment: show all members in rank order
-                expandedMoment.members.map((member, memberI) => (
-                  <BurstThumb
-                    key={member.photo_id}
-                    src={member.thumb_url}
-                    badge={String(memberI + 1)}
-                    isGold={memberI === momentIdx}
-                    onClick={() => setMomentIdx(memberI)}
-                    alt={`Moment member ${memberI + 1}`}
-                  />
-                ))
-              ) : (
-                // Normal burst view
-                photos.slice(Math.max(0, idx - 3), idx + 8).map((p, relI) => {
-                  const absI = Math.max(0, idx - 3) + relI;
-                  const thumbFilename = p.path.split(/[\\/]/).pop() ?? p.path;
-                  return (
+            <aside className="cull-side">
+              <ScoresCard photo={currentPhoto} />
+              <div className="burst-strip" aria-label="Photos">
+                {expandedMoment ? (
+                  expandedMoment.members.map((member, memberI) => (
                     <BurstThumb
-                      key={p.id}
-                      src={p.thumb_url}
-                      badge={p.moment_size && p.moment_size > 1 ? `+${p.moment_size - 1}` : String(absI + 1)}
-                      isGold={absI === idx}
-                      onClick={() => setIdx(absI)}
-                      alt={thumbFilename}
+                      key={member.photo_id}
+                      src={member.thumb_url}
+                      badge={String(memberI + 1)}
+                      isGold={memberI === momentIdx}
+                      isLiked={burstLiked[member.sha256] === true}
+                      onClick={() => setMomentIdx(memberI)}
+                      alt={`Moment member ${memberI + 1}`}
                     />
-                  );
-                })
-              )}
+                  ))
+                ) : (
+                  photos.slice(Math.max(0, idx - 3), idx + 8).map((p, relI) => {
+                    const absI = Math.max(0, idx - 3) + relI;
+                    const thumbFilename = p.path.split(/[\\/]/).pop() ?? p.path;
+                    return (
+                      <BurstThumb
+                        key={p.id}
+                        src={p.thumb_url}
+                        badge={p.moment_size && p.moment_size > 1 ? `+${p.moment_size - 1}` : String(absI + 1)}
+                        isGold={absI === idx}
+                        onClick={() => setIdx(absI)}
+                        alt={thumbFilename}
+                      />
+                    );
+                  })
+                )}
+              </div>
             </aside>
           </section>
         )}
@@ -368,12 +708,6 @@ export default function BurstCull() {
             </div>
           </section>
         )}
-
-        {/* Meta row */}
-        <section className="meta-row">
-          <ScoresCard photo={currentPhoto} />
-          <MemoryRing />
-        </section>
 
         <KbdFooter />
       </div>
