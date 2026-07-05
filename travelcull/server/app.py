@@ -2,68 +2,59 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+from typing import Optional
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from travelcull.config import FolderConfig
-from travelcull.indexer.orchestrator import index_folder
-from travelcull.pipeline import run_classical_stage
 
+from .libraries import register_libraries
+from .library_manager import ActiveConfigProxy, LibraryManager
+from .pipeline_runner import run_pipeline_stages
 from .routes import register_routes
 from .ws import progress_bus, register_ws
 
 
-def build_app(cfg: FolderConfig, run_background: bool = True) -> FastAPI:
+def build_app(
+    cfg: Optional[FolderConfig] = None,
+    run_background: bool = True,
+    manager: Optional[LibraryManager] = None,
+) -> FastAPI:
+    """Build the FastAPI app.
+
+    *cfg* bootstraps a single-folder library when *manager* is not supplied
+    (the CLI path). Tests can inject a *manager* with an isolated registry.
+    All /api/* endpoints follow the manager's active library via a proxy.
+    """
+    if manager is None:
+        manager = LibraryManager(bootstrap_cfg=cfg)
+    proxy = ActiveConfigProxy(manager)
+
+    def publish(msg: dict) -> None:
+        loop = manager.loop
+        if loop is not None:
+            asyncio.run_coroutine_threadsafe(progress_bus().publish(msg), loop)
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        if not run_background:
+        manager.set_loop(asyncio.get_running_loop())
+
+        if not run_background or manager.active_cfg is None:
             yield
             return
 
-        bus = progress_bus()
-        loop = asyncio.get_event_loop()
-
-        def index_progress(i, total, name):
-            asyncio.run_coroutine_threadsafe(
-                bus.publish({"stage": "index", "current": i, "total": total, "message": name}),
-                loop,
-            )
-
-        def classical_progress(i, total, name):
-            asyncio.run_coroutine_threadsafe(
-                bus.publish({"stage": "classical", "current": i, "total": total, "message": name}),
-                loop,
-            )
-
-        def embed_progress(i, total, name):
-            asyncio.run_coroutine_threadsafe(
-                bus.publish({"stage": "embed", "current": i, "total": total, "message": name}),
-                loop,
-            )
-
-        def tag_progress(i, total, name):
-            asyncio.run_coroutine_threadsafe(
-                bus.publish({"stage": "tag", "current": i, "total": total, "message": name}),
-                loop,
-            )
-
-        def story_progress(i, total, name):
-            asyncio.run_coroutine_threadsafe(
-                bus.publish({"stage": "story", "current": i, "total": total, "message": name}),
-                loop,
-            )
-
         async def background():
-            await asyncio.to_thread(index_folder, cfg, index_progress)
-            await asyncio.to_thread(run_classical_stage, cfg, classical_progress)
-            from travelcull.ml.embed import run_embedding_stage
-            from travelcull.ml.tags import run_tag_stage
-            from travelcull.ml.stories import run_story_stage
-            await asyncio.to_thread(run_embedding_stage, cfg, embed_progress)
-            await asyncio.to_thread(run_tag_stage, cfg, tag_progress)
-            await asyncio.to_thread(run_story_stage, cfg, story_progress)
-            await bus.publish({"stage": "done", "current": 1, "total": 1})
+            if not manager.begin_indexing():
+                return
+
+            def worker():
+                try:
+                    run_pipeline_stages(manager.active_cfg, publish)
+                finally:
+                    manager.end_indexing()
+
+            await asyncio.to_thread(worker)
 
         task = asyncio.create_task(background())
         try:
@@ -85,6 +76,7 @@ def build_app(cfg: FolderConfig, run_background: bool = True) -> FastAPI:
     def health():
         return {"status": "ok"}
 
-    register_routes(app, cfg)
+    register_routes(app, proxy)
+    register_libraries(app, manager, publish)
     register_ws(app)
     return app

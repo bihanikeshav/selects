@@ -10,6 +10,14 @@ import pytest
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
+@pytest.fixture(autouse=True)
+def isolate_registry(tmp_path_factory, monkeypatch) -> None:
+    """Point the multi-library registry at an isolated temp file for every test
+    so nothing ever touches the real ~/.travelcull/libraries.json."""
+    reg = tmp_path_factory.mktemp("registry") / "libraries.json"
+    monkeypatch.setenv("TRAVELCULL_REGISTRY", str(reg))
+
+
 @pytest.fixture()
 def fixtures_dir() -> Path:
     """Return the path to the static fixtures directory."""
