@@ -120,6 +120,31 @@ export interface LibraryStatus {
   indexing: boolean;
 }
 
+export interface FsDir {
+  name: string;
+  path: string;
+}
+
+export interface FsList {
+  path: string;
+  parent: string | null;
+  dirs: FsDir[];
+}
+
+export interface ModelInfo {
+  id: string;
+  name: string;
+  present: boolean;
+  approx_size_mb: number;
+  required_for: string;
+}
+
+export interface ModelsStatus {
+  models: ModelInfo[];
+  total_missing_mb: number;
+  downloading: boolean;
+}
+
 export interface CuratedPhoto {
   photo_id: number;
   sha256: string;
