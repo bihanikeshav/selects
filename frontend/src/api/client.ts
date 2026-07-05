@@ -1,9 +1,11 @@
 import type {
   ClusterList,
   CuratedPhoto,
+  FsList,
   Library,
   LibraryList,
   LibraryStatus,
+  ModelsStatus,
   Moment,
   PhotoList,
 } from "./types";
@@ -142,4 +144,29 @@ export async function startIndexing(id: string): Promise<void> {
     method: "POST",
   });
   if (!res.ok) throw await detailError(res, "startIndexing");
+}
+
+// ===== filesystem browsing ===============================================
+
+export async function fsList(path: string): Promise<FsList> {
+  const res = await fetch(`${BASE}/fs/list?path=${encodeURIComponent(path)}`);
+  if (!res.ok) throw await detailError(res, "fsList");
+  return res.json();
+}
+
+// ===== model weights =====================================================
+
+export async function modelsStatus(): Promise<ModelsStatus> {
+  const res = await fetch(`${BASE}/models/status`);
+  if (!res.ok) throw new Error(`modelsStatus ${res.status}`);
+  return res.json();
+}
+
+/** Kick off a model download. Resolves `true` if started, `false` on a 409
+ *  (a download is already running — the caller should just show progress). */
+export async function startModelsDownload(): Promise<boolean> {
+  const res = await fetch(`${BASE}/models/download`, { method: "POST" });
+  if (res.status === 409) return false;
+  if (!res.ok) throw await detailError(res, "startModelsDownload");
+  return true;
 }

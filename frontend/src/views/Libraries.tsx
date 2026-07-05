@@ -9,6 +9,8 @@ import {
   startIndexing,
 } from "../api/client";
 import type { Library } from "../api/types";
+import FolderPicker from "../components/FolderPicker";
+import ModelsCard from "../components/ModelsCard";
 import Rail from "../components/Rail";
 
 function fmtDate(iso: string): string {
@@ -220,22 +222,18 @@ export default function Libraries() {
                   placeholder="My Trip"
                 />
               </label>
-              <label className="onb-field lib-add-path">
+              <div className="onb-field lib-add-path">
                 <span className="onb-label">Folder path</span>
-                <input
-                  className="onb-input onb-input-mono"
-                  type="text"
-                  value={path}
-                  onChange={(e) => setPath(e.target.value)}
-                  placeholder="C:\Photos\Ladakh-2025"
-                />
-              </label>
+                <FolderPicker value={path} onChange={setPath} />
+              </div>
               <button className="btn btn-filled lib-add-btn" type="submit" disabled={creating}>
                 {creating ? "Adding…" : "Add"}
               </button>
             </div>
             {formErr && <p className="onb-error">{formErr}</p>}
           </form>
+
+          <ModelsCard />
         </div>
       </div>
     </div>
