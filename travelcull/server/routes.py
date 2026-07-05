@@ -1,8 +1,20 @@
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from pathlib import Path
 from typing import Optional
+
+# Pre-load torch in the MAIN thread so subsequent imports from FastAPI worker
+# threads don't hit a Windows DLL-load race. Torch's C++ extensions need the
+# host process to have the right PATH set up — that's only reliable when the
+# initial import happens in the main thread.
+try:
+    import torch as _torch_preload  # noqa: F401
+except Exception:
+    pass
+
+log = logging.getLogger(__name__)
 
 from fastapi import Body, FastAPI, HTTPException, Query, Response
 from fastapi.responses import FileResponse
@@ -12,7 +24,8 @@ from sqlalchemy import select
 from travelcull.config import FolderConfig
 from travelcull.db import init_db, session_scope
 from travelcull.db.models import (
-    ClassicalScore, Embedding, Moment, MomentMember, Photo, PhotoTag, Story, StoryItem, Visit,
+    AestheticScore, ClassicalScore, Embedding, Moment, MomentMember, Photo, PhotoCategory,
+    PhotoPerson, PhotoRating, PhotoTag, Story, StoryItem, Visit,
 )
 
 
@@ -96,6 +109,8 @@ class StoryItemOut(BaseModel):
     scene_label: Optional[str]
     taken_at: Optional[str]
     tag: Optional[str] = None
+    moment_id: Optional[int] = None
+    moment_size: Optional[int] = None
 
 
 class VisitOut(BaseModel):
@@ -161,20 +176,25 @@ def _story_to_out(
     visits_rows: list[Visit],
     cover_sha_by_photo_id: dict[int, str],
     primary_tag_by_photo: dict[int, str],
+    moment_info_by_photo: Optional[dict[int, tuple[int, int]]] = None,
 ) -> StoryOut:
-    items = [
-        StoryItemOut(
-            rank=it.rank,
-            photo_id=it.photo_id,
+    minfo = moment_info_by_photo or {}
+    items = []
+    for i, (it, p) in enumerate(items_rows):
+        pid = it.photo_id if it is not None else p.id
+        mom_id, mom_size = minfo.get(pid, (None, None))
+        items.append(StoryItemOut(
+            rank=(it.rank if it is not None else i),
+            photo_id=pid,
             sha256=p.sha256,
             thumb_url=f"/api/thumb/{p.sha256}",
             preview_url=f"/api/preview/{p.sha256}",
-            scene_label=it.scene_label,
+            scene_label=(it.scene_label if it is not None else None),
             taken_at=p.taken_at.isoformat() if p.taken_at else None,
-            tag=primary_tag_by_photo.get(it.photo_id),
-        )
-        for it, p in items_rows
-    ]
+            tag=primary_tag_by_photo.get(pid),
+            moment_id=mom_id,
+            moment_size=mom_size,
+        ))
     cover_url = items[0].thumb_url if items else "/api/thumb/missing"
 
     visits_out = [
@@ -196,7 +216,13 @@ def _story_to_out(
 
 
 def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
-    Session = init_db(cfg.db_path)
+    # Resolve the sessionmaker at REQUEST time (not registration time) so that
+    # switching the active library at runtime is picked up. ``cfg`` may be an
+    # ActiveConfigProxy that forwards to whichever library is active; ``init_db``
+    # is idempotent + per-path cached, so this call is cheap. ``session_scope``
+    # only ever calls ``Session()``, so a plain callable is a drop-in.
+    def Session():
+        return init_db(cfg.db_path)()
 
     @app.get("/api/photos", response_model=PhotoList)
     def list_photos(
@@ -205,7 +231,17 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
         rejected: Optional[bool] = None,
         tag: Optional[str] = None,
         collapse: str = Query("moments", description="'moments' collapses to primaries only; 'none' returns all"),
+        sort: str = Query(
+            "taken_at",
+            description="'taken_at' (default), 'aesthetic' (combined NIMA+AP descending), 'iqa', 'random'",
+        ),
+        min_aesthetic_pct: float = Query(
+            0.0, ge=0.0, le=100.0,
+            description="Drop photos whose combined-aesthetic percentile is below this value",
+        ),
     ):
+        from sqlalchemy import func as _func
+
         with session_scope(Session) as s:
             # Build moment membership map for collapse support
             moment_of: dict[int, tuple[int, int, bool]] = {}
@@ -224,9 +260,10 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
                     moment_of[mm_pid] = (mm_mid, mom_size, is_primary)
 
             base = (
-                select(Photo, ClassicalScore, Embedding)
+                select(Photo, ClassicalScore, Embedding, AestheticScore)
                 .join(ClassicalScore, Photo.id == ClassicalScore.photo_id, isouter=True)
                 .join(Embedding, Photo.id == Embedding.photo_id, isouter=True)
+                .join(AestheticScore, Photo.id == AestheticScore.photo_id, isouter=True)
             )
             if rejected is True:
                 base = base.where(ClassicalScore.auto_reject.is_(True))
@@ -240,11 +277,57 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
                     PhotoTag.tag == tag
                 )
 
-            total = s.query(Photo).count()
+            # Aesthetic-percentile floor needs the library distribution
+            aesthetic_floor_val: Optional[float] = None
+            if min_aesthetic_pct > 0:
+                from travelcull.ml.curation import compute_library_threshold
+                aesthetic_floor_val = compute_library_threshold(
+                    s, pct_floor=min_aesthetic_pct,
+                )
+                if aesthetic_floor_val is not None:
+                    combined_expr = (
+                        cfg.ap_weight * AestheticScore.ap25_score
+                        + cfg.nima_weight * AestheticScore.nima_score
+                    )
+                    base = base.where(combined_expr >= aesthetic_floor_val)
+
+            # Collapse: drop non-primary moment members in SQL, before offset/limit,
+            # so pagination doesn't lose photos across page boundaries.
+            if collapse == "moments":
+                base = base.outerjoin(
+                    MomentMember, Photo.id == MomentMember.photo_id
+                ).outerjoin(
+                    Moment, MomentMember.moment_id == Moment.id
+                ).where(
+                    (MomentMember.photo_id.is_(None))
+                    | (Moment.primary_photo_id == Photo.id)
+                )
+
+            total = s.execute(
+                select(_func.count()).select_from(base.subquery())
+            ).scalar_one()
+
+            # Sort
+            if sort == "aesthetic":
+                combined_expr = (
+                    cfg.ap_weight * AestheticScore.ap25_score
+                    + cfg.nima_weight * AestheticScore.nima_score
+                )
+                base = base.where(AestheticScore.ap25_score.isnot(None))
+                base = base.where(AestheticScore.nima_score.isnot(None))
+                base = base.order_by(combined_expr.desc())
+            elif sort == "iqa":
+                base = base.where(Embedding.aesthetic_iqa.isnot(None))
+                base = base.order_by(Embedding.aesthetic_iqa.desc())
+            elif sort == "random":
+                base = base.order_by(_func.random())
+            else:  # taken_at
+                base = base.order_by(Photo.taken_at.asc().nullslast())
+
             rows = s.execute(base.offset(offset).limit(limit)).all()
 
             items = []
-            for photo, score, emb in rows:
+            for photo, score, emb, aest in rows:
                 # Collapse: skip non-primary moment members
                 if collapse == "moments" and photo.id in moment_of:
                     _, _, is_primary = moment_of[photo.id]
@@ -546,9 +629,35 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
 
     @app.get("/api/stories", response_model=StoryList)
     def list_stories(
-        include_tags: Optional[str] = Query(None, description="Comma-separated tags to include"),
-        exclude_tags: Optional[str] = Query(None, description="Comma-separated tags to exclude"),
+        include_tags: Optional[str] = Query(None, description="Legacy tag filter"),
+        exclude_tags: Optional[str] = Query(None, description="Legacy tag filter"),
+        curated: bool = Query(True, description="Apply aesthetic curation pipeline"),
+        liked_only: bool = Query(
+            False,
+            description="Restrict each story to photos the user has Liked (Swipe.decision in keep/silver)",
+        ),
+        q: Optional[str] = Query(None, description="Natural-language semantic query"),
+        scope_pct: float = Query(
+            None,
+            description="Per-scope percentile gate (default: cfg.aesthetic_per_scope_pct=75)",
+        ),
+        library_pct: float = Query(
+            None,
+            description="Library-wide percentile floor (default: cfg.aesthetic_library_pct=50)",
+        ),
     ):
+        """List stories, by default with the aesthetic-curation pipeline applied.
+
+        When ``curated`` (default True), each story's photo list is filtered
+        through the library-wide top-25% aesthetic gate + burst dedup, then
+        re-ordered chronologically. Empty stories are dropped from the response.
+
+        When ``q`` is supplied, photos within each story are ranked by SigLIP
+        text→image cosine similarity to the query; stories whose top photo
+        falls below a small threshold are dropped.
+        """
+        from travelcull.ml.curation import curate
+
         include_set: Optional[set[str]] = (
             {t.strip() for t in include_tags.split(",") if t.strip()}
             if include_tags else None
@@ -558,33 +667,161 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
             if exclude_tags else None
         )
 
+        # Encode query text once (if any) — used to score each story below.
+        q_vec = None
+        if q:
+            try:
+                from travelcull.ml.embed import encode_text_prompts
+                import numpy as _np
+                _t = encode_text_prompts([q])
+                _t = (_t / _t.norm(dim=-1, keepdim=True)).cpu().float().numpy().squeeze(0)
+                q_vec = _t.astype("float32")
+            except Exception:
+                q_vec = None
+
         with session_scope(Session) as s:
             stories = s.query(Story).order_by(Story.day).all()
             result = []
+            match_scores: list[float] = []  # parallel to result; used to sort if NL search active
             for st in stories:
-                items_rows = (
-                    s.query(StoryItem, Photo)
-                    .join(Photo, StoryItem.photo_id == Photo.id)
-                    .filter(StoryItem.story_id == st.id)
-                    .order_by(StoryItem.rank)
-                    .all()
-                )
+                # Per spec 2026-05-24: only "by day" and "by people" stories are
+                # surfaced. Place stories collapse into the day they belong to;
+                # pattern stories collapse into category facets.
+                if st.day.startswith("place:") or st.day.startswith("pattern:"):
+                    continue
 
-                # Apply tag filters if requested
+                # Fetch story photos. For regular day stories ("YYYY-MM-DD"),
+                # use ALL photos taken that day rather than the small set
+                # baked into StoryItem (which was capped + scene-segmented).
+                # This gives the curation pipeline the full library to choose
+                # the top 25% from.
+                items_rows = []
+                if st.day and len(st.day) == 10 and st.day[4] == "-" and st.day[7] == "-":
+                    from sqlalchemy import text as _text
+                    rows = s.execute(
+                        _text(
+                            "SELECT id FROM photos "
+                            "WHERE strftime('%Y-%m-%d', taken_at) = :d"
+                        ),
+                        {"d": st.day},
+                    ).fetchall()
+                    pids = [r[0] for r in rows]
+                    if pids:
+                        photos = (
+                            s.query(Photo)
+                            .filter(Photo.id.in_(pids))
+                            .order_by(Photo.taken_at)
+                            .all()
+                        )
+                        items_rows = [(None, p) for p in photos]
+
+                if not items_rows:
+                    # Fall back to StoryItem (people stories etc still use this).
+                    items_rows = (
+                        s.query(StoryItem, Photo)
+                        .join(Photo, StoryItem.photo_id == Photo.id)
+                        .filter(StoryItem.story_id == st.id)
+                        .order_by(StoryItem.rank)
+                        .all()
+                    )
+
+                # Helper to extract photo id from either tuple shape:
+                #   (StoryItem, Photo) or (None, Photo)
+                def _pid(row):
+                    it, p = row
+                    return it.photo_id if it is not None else p.id
+
+                # Legacy tag filter (kept for backward compat with old clients)
                 if include_set is not None or exclude_set is not None:
-                    all_photo_ids = [it.photo_id for it, p in items_rows]
+                    all_photo_ids = [_pid(r) for r in items_rows]
                     tags_map = _get_primary_tags_for_photos(s, all_photo_ids)
                     filtered = []
-                    for it, p in items_rows:
-                        photo_tag = tags_map.get(it.photo_id, "")
+                    for r in items_rows:
+                        photo_tag = tags_map.get(_pid(r), "")
                         if include_set is not None and photo_tag not in include_set:
                             continue
                         if exclude_set is not None and photo_tag in exclude_set:
                             continue
-                        filtered.append((it, p))
+                        filtered.append(r)
                     items_rows = filtered
 
-                # Load visits
+                # "Curated only" mode: restrict each story to liked photos.
+                if liked_only and items_rows:
+                    from travelcull.db.models import Swipe as _Swipe
+                    pids = [_pid(r) for r in items_rows]
+                    liked_pids = {
+                        r[0]
+                        for r in s.query(_Swipe.photo_id)
+                        .filter(_Swipe.photo_id.in_(pids))
+                        .filter(_Swipe.decision.in_(["keep", "silver"]))
+                        .all()
+                    }
+                    items_rows = [r for r in items_rows if _pid(r) in liked_pids]
+
+                # Aesthetic curation: gate + burst-dedup, chronological order.
+                # Skipped when liked_only is on — the user already curated by hand.
+                moment_info_for_story: dict[int, tuple[int, int]] = {}
+                if curated and not liked_only and items_rows:
+                    photo_ids = [_pid(r) for r in items_rows]
+                    is_people_story = st.day.startswith("people:")
+                    eff_scope = (
+                        0.0
+                        if is_people_story
+                        else (scope_pct if scope_pct is not None else cfg.aesthetic_per_scope_pct)
+                    )
+                    eff_library = library_pct if library_pct is not None else cfg.aesthetic_library_pct
+                    curated_list = curate(
+                        s, photo_ids,
+                        sort="chronological",
+                        ap_w=cfg.ap_weight, nima_w=cfg.nima_weight,
+                        pct_floor=eff_scope,
+                        library_pct_floor=eff_library,
+                    )
+                    kept_ids = {c.photo_id for c in curated_list}
+                    for c in curated_list:
+                        if c.moment_id is not None and c.moment_size and c.moment_size > 1:
+                            moment_info_for_story[c.photo_id] = (c.moment_id, c.moment_size)
+                    if kept_ids:
+                        items_rows = [r for r in items_rows if _pid(r) in kept_ids]
+                        order_idx = {c.photo_id: i for i, c in enumerate(curated_list)}
+                        items_rows.sort(key=lambda r: order_idx.get(_pid(r), 1e9))
+                    else:
+                        items_rows = []
+
+                # Natural-language scoring: per story, find the best photo
+                # similarity; drop stories whose best photo doesn't match.
+                story_match_score = None
+                if q_vec is not None and items_rows:
+                    import numpy as _np
+                    pids = [_pid(r) for r in items_rows]
+                    emb_rows = (
+                        s.query(Embedding.photo_id, Embedding.siglip)
+                        .filter(Embedding.photo_id.in_(pids))
+                        .all()
+                    )
+                    if emb_rows:
+                        embs = _np.stack([
+                            _np.frombuffer(r[1], dtype=_np.float16).astype(_np.float32)
+                            for r in emb_rows
+                        ])
+                        embs = embs / (_np.linalg.norm(embs, axis=1, keepdims=True) + 1e-9)
+                        sims = embs @ q_vec
+                        sim_by_pid = {r[0]: float(s_) for r, s_ in zip(emb_rows, sims)}
+                        # Drop stories whose max sim is below a small threshold.
+                        # SigLIP image-text sims are typically [-0.05, 0.12]; 0.03
+                        # is "meaningfully above random" for this content domain.
+                        max_sim = max(sim_by_pid.values())
+                        story_match_score = max_sim
+                        if max_sim < 0.03:
+                            continue
+                        items_rows.sort(
+                            key=lambda r: -sim_by_pid.get(_pid(r), -1.0)
+                        )
+
+                # Drop empty stories from the curated list (or liked-only list).
+                if (curated or liked_only) and not items_rows:
+                    continue
+
                 visits_rows = (
                     s.query(Visit)
                     .filter(Visit.story_id == st.id)
@@ -592,15 +829,23 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
                     .all()
                 )
 
-                # Get cover SHA for visits
                 cover_ids = [v.cover_photo_id for v in visits_rows if v.cover_photo_id]
                 cover_sha_map = _get_cover_sha_map(s, cover_ids)
 
-                # Get primary tags for items
-                all_pids = [it.photo_id for it, p in items_rows]
+                all_pids = [_pid(r) for r in items_rows]
                 primary_tags = _get_primary_tags_for_photos(s, all_pids)
 
-                result.append(_story_to_out(st, items_rows, visits_rows, cover_sha_map, primary_tags))
+                story_out = _story_to_out(
+                    st, items_rows, visits_rows, cover_sha_map, primary_tags,
+                    moment_info_by_photo=moment_info_for_story,
+                )
+                result.append(story_out)
+                match_scores.append(story_match_score if story_match_score is not None else 0.0)
+
+            # If NL search active, sort stories by their match score desc.
+            if q_vec is not None and match_scores:
+                paired = sorted(zip(result, match_scores), key=lambda p: -p[1])
+                result = [r for r, _ in paired]
 
         return StoryList(total=len(result), stories=result)
 
@@ -669,18 +914,47 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
         return _serve_image_for(cfg, sha256, kind="preview")
 
     @app.get("/api/enhance/{sha256}")
-    def enhance(sha256: str):
-        """Auto-enhance preview for cull-time before/after comparison.
+    def enhance(
+        sha256: str,
+        preset: str = Query("film"),
+        straighten: bool = Query(False, description="Apply quick auto-straighten"),
+        grade: bool = Query(True, description="Apply aesthetic colour grading"),
+        model: str = Query(
+            "clahe",
+            description=(
+                "Which enhancement model. 'clahe' = the classical CLAHE+WB pipeline "
+                "(default, fast). 'zero-dce-plus' = TPAMI'22 low-light specialist. "
+                "'csrnet' = ECCV'20 conditional MLP retoucher (FiveK-trained, experimental). "
+                "'nafnet' = CVPR'22 deblur (GoPro-trained, ~17M params)."
+            ),
+        ),
+    ):
+        """Render an edited preview. Either or both of grade/straighten can be
+        applied independently.
 
-        Applies a simple Imagen-style boost: gentle auto-levels, +saturation,
-        +contrast, +clarity (unsharp mask). Cached per-sha in
-        .travelcull/enhanced/<sha>.jpg.
+        Cached per-(sha, model, grade, straighten).
         """
         from io import BytesIO
+        from PIL import Image
+        from travelcull.classical.aesthetic_grade import aesthetic_grade
+        from travelcull.classical.straighten import straighten as do_straighten
 
-        from PIL import Image, ImageEnhance, ImageOps
+        if preset not in ("film", "clarity", "portrait"):
+            preset = "film"
+        if model not in ("clahe", "zero-dce-plus", "csrnet", "nafnet"):
+            model = "clahe"
 
-        cached = cfg.state_dir / "enhanced" / f"{sha256}.jpg"
+        # Build a cache key reflecting all toggles independently.
+        parts = []
+        if grade:
+            parts.append(model if model != "clahe" else preset)
+        if straighten:
+            parts.append("straight")
+        if not parts:
+            return _serve_image_for(cfg, sha256, kind="preview")
+        suffix = "-".join(parts)
+
+        cached = cfg.state_dir / "enhanced" / "v4" / f"{sha256}-{suffix}.jpg"
         cached.parent.mkdir(parents=True, exist_ok=True)
         if cached.exists():
             return FileResponse(cached, media_type="image/jpeg")
@@ -689,29 +963,184 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
         if not preview_path.exists():
             raise HTTPException(404, detail="preview missing")
 
+        has_face = False
+        if grade:
+            with session_scope(Session) as s:
+                row = (
+                    s.query(ClassicalScore.faces_count)
+                    .join(Photo, Photo.id == ClassicalScore.photo_id)
+                    .filter(Photo.sha256 == sha256)
+                    .first()
+                )
+                if row and row[0] and row[0] > 0:
+                    has_face = True
+
         with Image.open(preview_path) as im:
-            im = im.convert("RGB")
-            # Gentle autocontrast / black-point fix
-            im = ImageOps.autocontrast(im, cutoff=1, preserve_tone=True)
-            # Color pop
-            im = ImageEnhance.Color(im).enhance(1.18)
-            # Contrast bump
-            im = ImageEnhance.Contrast(im).enhance(1.08)
-            # Mild unsharp mask via Sharpness
-            im = ImageEnhance.Sharpness(im).enhance(1.4)
+            out = im
+            if straighten:
+                out, _angle = do_straighten(out)
+            if grade:
+                if model == "zero-dce-plus":
+                    try:
+                        from travelcull.ml.lowlight import enhance_with_zero_dce_plus
+                        out = enhance_with_zero_dce_plus(out, cfg)
+                    except Exception as exc:
+                        log.warning("zero-dce-plus failed: %s — falling back to CLAHE", exc)
+                        out = aesthetic_grade(out, preset=preset, has_face=has_face)
+                elif model == "csrnet":
+                    try:
+                        from travelcull.ml.retouch_csrnet import retouch_with_csrnet
+                        out = retouch_with_csrnet(out, cfg)
+                    except Exception as exc:
+                        log.warning("csrnet failed: %s — falling back to CLAHE", exc)
+                        out = aesthetic_grade(out, preset=preset, has_face=has_face)
+                elif model == "nafnet":
+                    try:
+                        from travelcull.ml.deblur_nafnet import deblur_with_nafnet
+                        out = deblur_with_nafnet(out, cfg)
+                    except Exception as exc:
+                        log.warning("nafnet failed: %s — falling back to CLAHE", exc)
+                        out = aesthetic_grade(out, preset=preset, has_face=has_face)
+                else:
+                    out = aesthetic_grade(out, preset=preset, has_face=has_face)
             buf = BytesIO()
-            im.save(buf, "JPEG", quality=88)
+            out.convert("RGB").save(buf, "JPEG", quality=90)
             cached.write_bytes(buf.getvalue())
             return Response(content=buf.getvalue(), media_type="image/jpeg")
 
-    # ── Editor integration ───────────────────────────────────────────────────
-    class OpenInEditorReq(BaseModel):
-        sha256s: list[str]
-        editor: str = "darktable"   # "darktable" | "rawtherapee" | "gimp"
+    @app.get("/api/doctor/issues")
+    def doctor_issues():
+        """Classify photos with detectable problems and return them in buckets.
 
-    class SaveEditReq(BaseModel):
-        data_url: str           # "data:image/jpeg;base64,..."
-        mime: str = "image/jpeg"
+        Buckets:
+          - underexposed: ClassicalScore.exposure < 0.35 and mean luma low
+          - overexposed:  high clipping ratio at the top end
+          - blurry:       ClassicalScore.blur below a threshold
+          - blurry_keeper: blur low but combined aesthetic high (rescuable)
+
+        Each photo can appear in multiple buckets.
+        """
+        AP_W = cfg.ap_weight
+        NIMA_W = cfg.nima_weight
+        BLUR_HARD = 150.0      # below this is genuinely blurry
+        BLUR_SOFT = 400.0      # below this is "a bit soft" — interesting if aesthetic
+        UNDER_MEAN = 0.32      # mean luma below this → underexposed
+        OVER_MEAN = 0.78       # mean luma above this → overexposed
+        HI_CLIP = 0.07         # >7% of pixels saturated at top end → overexposed
+        AESTHETIC_HIGH = 5.8   # combined aesthetic threshold for "keeper" status
+
+        with session_scope(Session) as s:
+            rows = (
+                s.query(
+                    Photo.id,
+                    Photo.sha256,
+                    Photo.taken_at,
+                    ClassicalScore.blur,
+                    ClassicalScore.exposure,
+                    AestheticScore.ap25_score,
+                    AestheticScore.nima_score,
+                )
+                .join(ClassicalScore, ClassicalScore.photo_id == Photo.id)
+                .outerjoin(AestheticScore, AestheticScore.photo_id == Photo.id)
+                .all()
+            )
+
+        underexposed: list[dict] = []
+        overexposed: list[dict] = []
+        blurry: list[dict] = []
+        blurry_keepers: list[dict] = []
+
+        from travelcull.ml.lowlight import luma_stats as _luma_stats
+        from PIL import Image as _PILImage
+
+        for pid, sha, taken, blur, exp, ap25, nima in rows:
+            blur_v = blur if blur is not None else 9999.0
+            exp_v = exp if exp is not None else 0.5
+            combined = (
+                AP_W * ap25 + NIMA_W * nima
+                if ap25 is not None and nima is not None
+                else None
+            )
+            base = {
+                "photo_id": pid,
+                "sha256": sha,
+                "taken_at": taken.isoformat() if taken else None,
+                "thumb_url": f"/api/thumb/{sha}",
+                "preview_url": f"/api/preview/{sha}",
+                "blur": blur_v,
+                "exposure": exp_v,
+                "combined": combined,
+            }
+
+            # Compute mean+clipping from the preview once per photo.
+            # The classical `exposure` is a composite score that doesn't tell
+            # us *direction*, so we have to look at the image.
+            preview_path = cfg.previews_dir / f"{sha}.jpg"
+            if preview_path.exists():
+                try:
+                    with _PILImage.open(preview_path) as _im:
+                        stats = _luma_stats(_im)
+                    base["luma_mean"] = stats["mean"]
+                    base["clipped_high"] = stats["clipped_high"]
+                    base["clipped_low"] = stats["clipped_low"]
+                    if stats["mean"] < UNDER_MEAN or stats["clipped_low"] > 0.10:
+                        underexposed.append(base)
+                    elif stats["mean"] > OVER_MEAN or stats["clipped_high"] > HI_CLIP:
+                        overexposed.append(base)
+                except Exception as exc:
+                    log.warning("doctor: luma_stats failed for %s: %s", sha, exc)
+
+            if blur_v < BLUR_HARD:
+                blurry.append(base)
+            elif blur_v < BLUR_SOFT and combined is not None and combined >= AESTHETIC_HIGH:
+                blurry_keepers.append(base)
+
+        # Sort each bucket: most-severe first
+        underexposed.sort(key=lambda p: p.get("luma_mean", 1.0))
+        overexposed.sort(key=lambda p: -p.get("clipped_high", 0.0))
+        blurry.sort(key=lambda p: p["blur"])
+        blurry_keepers.sort(key=lambda p: -(p["combined"] or 0))
+
+        return {
+            "underexposed": underexposed,
+            "overexposed": overexposed,
+            "blurry": blurry,
+            "blurry_keepers": blurry_keepers,
+            "counts": {
+                "underexposed": len(underexposed),
+                "overexposed": len(overexposed),
+                "blurry": len(blurry),
+                "blurry_keepers": len(blurry_keepers),
+            },
+        }
+
+    @app.get("/api/doctor/histogram/{sha256}")
+    def doctor_histogram(sha256: str):
+        """Return per-channel + luminance histogram for a photo (64 bins each).
+
+        Used by the ScoresCard / Doctor preview to show RGB+luma distribution.
+        """
+        from PIL import Image as _PILImage
+        import numpy as _np
+        preview_path = cfg.previews_dir / f"{sha256}.jpg"
+        if not preview_path.exists():
+            raise HTTPException(404, detail="preview missing")
+        with _PILImage.open(preview_path) as im:
+            arr = _np.asarray(im.convert("RGB"), dtype=_np.uint8)
+        bins = 64
+        edges = _np.linspace(0, 256, bins + 1)
+        r = _np.histogram(arr[..., 0], bins=edges)[0].astype(int)
+        g = _np.histogram(arr[..., 1], bins=edges)[0].astype(int)
+        b = _np.histogram(arr[..., 2], bins=edges)[0].astype(int)
+        luma = (0.299 * arr[..., 0] + 0.587 * arr[..., 1] + 0.114 * arr[..., 2]).astype(_np.uint8)
+        l = _np.histogram(luma, bins=edges)[0].astype(int)
+        return {
+            "bins": bins,
+            "r": r.tolist(),
+            "g": g.tolist(),
+            "b": b.tolist(),
+            "luma": l.tolist(),
+        }
 
     # ── Persons (face identity clusters) ─────────────────────────────────────
     class PersonOut(BaseModel):
@@ -723,9 +1152,6 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
     class PersonList(BaseModel):
         total: int
         persons: list[PersonOut]
-
-    class LabelReq(BaseModel):
-        label: Optional[str]
 
     @app.get("/api/persons", response_model=PersonList)
     def list_persons(
@@ -810,19 +1236,26 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
             raise HTTPException(404, detail="preview missing")
 
     @app.patch("/api/persons/{person_id}")
-    def label_person(person_id: int, req: LabelReq):
+    def label_person(person_id: int, payload: dict = Body(...)):
+        """Body: {label: str | null}."""
         from travelcull.db.models import Person, Story
+
+        label = payload.get("label")
+        if label is not None and not isinstance(label, str):
+            raise HTTPException(400, detail="label must be a string or null")
+        if isinstance(label, str):
+            label = label.strip() or None
 
         with session_scope(Session) as s:
             person = s.get(Person, person_id)
             if not person:
                 raise HTTPException(404, detail="person not found")
             old_label = person.label
-            person.label = req.label
+            person.label = label
             s.flush()
 
             # Cascade rename to story titles + synthetic_day keys
-            new_name = req.label or f"P{person_id}"
+            new_name = label or f"P{person_id}"
             old_name = old_label or f"P{person_id}"
             for story in s.query(Story).filter(Story.day.like("people:%")).all():
                 if old_name in story.day or old_name in story.title:
@@ -830,7 +1263,7 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
                     story.title = story.title.replace(old_name, new_name)
                     s.add(story)
 
-        return {"ok": True, "label": req.label}
+        return {"ok": True, "label": label}
 
     @app.get("/api/persons/{person_id}/photos", response_model=PhotoList)
     def person_photos(person_id: int, limit: int = Query(500, le=2000)):
@@ -887,6 +1320,68 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
             else:
                 s.add(Swipe(photo_id=photo.id, decision=decision))
         return {"ok": True, "decision": decision}
+
+    @app.get("/api/curated")
+    def list_curated(
+        sort: str = Query("aesthetic", description="aesthetic | taken_at"),
+    ):
+        """Return all photos the user has liked (Swipe.decision in keep/silver),
+        sorted by combined NIMA+AP aesthetic descending by default.
+
+        This is the curated set — the user's chosen keepers post-cull,
+        post-curate, ready for edit and post.
+        """
+        from travelcull.db.models import Swipe
+
+        with session_scope(Session) as s:
+            base = (
+                s.query(
+                    Photo,
+                    AestheticScore.ap25_score,
+                    AestheticScore.nima_score,
+                )
+                .join(Swipe, Swipe.photo_id == Photo.id)
+                .outerjoin(AestheticScore, AestheticScore.photo_id == Photo.id)
+                .filter(Swipe.decision.in_(["keep", "silver"]))
+            )
+            rows = base.all()
+            ap_w, nima_w = cfg.ap_weight, cfg.nima_weight
+            entries = []
+            for photo, ap25, nima in rows:
+                combined = None
+                if ap25 is not None and nima is not None:
+                    combined = ap_w * ap25 + nima_w * nima
+                entries.append({
+                    "photo_id": photo.id,
+                    "sha256": photo.sha256,
+                    "taken_at": photo.taken_at.isoformat() if photo.taken_at else None,
+                    "thumb_url": f"/api/thumb/{photo.sha256}",
+                    "preview_url": f"/api/preview/{photo.sha256}",
+                    "combined": combined,
+                    "ap25": ap25,
+                    "nima": nima,
+                })
+            if sort == "aesthetic":
+                entries.sort(key=lambda e: -(e["combined"] or -1e9))
+            else:  # taken_at
+                entries.sort(key=lambda e: e["taken_at"] or "")
+        return {"total": len(entries), "photos": entries}
+
+    @app.get("/api/likes/status")
+    def likes_status(shas: str = Query("", description="comma-separated sha256s")):
+        """Return {sha256: liked_bool} for the given list."""
+        from travelcull.db.models import Swipe
+        sha_list = [s for s in shas.split(",") if s.strip()] if shas else None
+        out: dict[str, bool] = {}
+        with session_scope(Session) as s:
+            q = s.query(Photo.sha256, Swipe.decision).join(
+                Swipe, Swipe.photo_id == Photo.id
+            )
+            if sha_list:
+                q = q.filter(Photo.sha256.in_(sha_list))
+            for sha, decision in q.all():
+                out[sha] = decision in ("keep", "silver")
+        return out
 
     @app.get("/api/swipes/summary")
     def swipes_summary():
@@ -1082,36 +1577,79 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
         return out
 
 
-    class DarktableLaunchReq(BaseModel):
-        sha256s: list[str]
+    def _find_darktable() -> Optional[str]:
+        """Return the path to darktable executable. Falls back to common
+        Windows install locations if shutil.which doesn't find it.
+        """
+        import shutil
+        from pathlib import Path as _P
+
+        # Honour PATH first
+        found = shutil.which("darktable")
+        if found:
+            return found
+
+        # Common Windows install locations
+        candidates = [
+            r"C:\Program Files\darktable\bin\darktable.exe",
+            r"C:\Program Files (x86)\darktable\bin\darktable.exe",
+            r"C:\Program Files\darktable\darktable.exe",
+            r"C:\darktable\bin\darktable.exe",
+        ]
+        for c in candidates:
+            if _P(c).exists():
+                return c
+        return None
+
+    def _find_darktable_cli() -> Optional[str]:
+        """Same auto-discovery for darktable-cli (ships next to darktable.exe)."""
+        import shutil
+        from pathlib import Path as _P
+
+        found = shutil.which("darktable-cli")
+        if found:
+            return found
+        candidates = [
+            r"C:\Program Files\darktable\bin\darktable-cli.exe",
+            r"C:\Program Files (x86)\darktable\bin\darktable-cli.exe",
+        ]
+        for c in candidates:
+            if _P(c).exists():
+                return c
+        return None
 
     @app.post("/api/edit/darktable")
-    def launch_darktable(req: DarktableLaunchReq):
+    def launch_darktable(payload: dict = Body(...)):
         """Launch darktable with the selected originals in a per-session library.
+
+        Body: {sha256s: list[str]}
 
         Per-session library avoids polluting the user's main catalog and lets
         us round-trip XMP edits cleanly. Darktable writes XMPs next to the
         original file when the user saves — no further coordination needed.
         """
-        import shutil
         import subprocess
         import uuid
 
-        editor_cmd = shutil.which("darktable")
+        sha256s = payload.get("sha256s") or []
+        if not isinstance(sha256s, list) or not sha256s:
+            raise HTTPException(400, detail="sha256s must be a non-empty list of strings")
+
+        editor_cmd = _find_darktable()
         if not editor_cmd:
             raise HTTPException(
                 400,
                 detail=(
-                    "darktable not found on PATH. Install from "
-                    "https://www.darktable.org/install/ and add the binary "
-                    "to your shell PATH."
+                    "darktable not found. Install it from "
+                    "https://www.darktable.org/install/ — the launcher checks "
+                    "PATH plus C:\\Program Files\\darktable\\bin\\darktable.exe."
                 ),
             )
 
         with session_scope(Session) as s:
             paths = [
                 r[0]
-                for r in s.query(Photo.path).filter(Photo.sha256.in_(req.sha256s)).all()
+                for r in s.query(Photo.path).filter(Photo.sha256.in_(sha256s)).all()
             ]
         if not paths:
             raise HTTPException(404, detail="no matching photos")
@@ -1134,38 +1672,40 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
         return {"opened": len(paths), "session": session_id, "library": str(library_path)}
 
 
-    class ExportEditsReq(BaseModel):
-        sha256s: list[str]
-        cluster_name: str = "untitled"
-        width: int = 2048
-        height: int = 0           # 0 = proportional
-
     @app.post("/api/edits/export")
-    def export_edits(req: ExportEditsReq):
+    def export_edits(payload: dict = Body(...)):
         """Render XMP edits to JPEGs via darktable-cli into
         .travelcull/exports/<cluster>/<timestamp>/.
+
+        Body: {sha256s: list[str], cluster_name?: str, width?: int, height?: int}.
         """
-        import shutil
         import subprocess
         from datetime import datetime
 
-        dt_cli = shutil.which("darktable-cli")
+        sha256s = payload.get("sha256s") or []
+        cluster_name = payload.get("cluster_name") or "untitled"
+        width = int(payload.get("width") or 2048)
+        height = int(payload.get("height") or 0)
+        if not isinstance(sha256s, list) or not sha256s:
+            raise HTTPException(400, detail="sha256s must be a non-empty list")
+
+        dt_cli = _find_darktable_cli()
         if not dt_cli:
             raise HTTPException(
                 400,
-                detail="darktable-cli not found. It ships with darktable; ensure the "
-                       "darktable bin directory is on PATH.",
+                detail="darktable-cli not found. It ships with darktable; install from "
+                       "https://www.darktable.org/install/ or add its bin dir to PATH.",
             )
 
         with session_scope(Session) as s:
             rows = s.query(Photo.sha256, Photo.path).filter(
-                Photo.sha256.in_(req.sha256s)
+                Photo.sha256.in_(sha256s)
             ).all()
         if not rows:
             raise HTTPException(404, detail="no matching photos")
 
         ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-        clean = "".join(c if c.isalnum() or c in "-_" else "_" for c in req.cluster_name) or "untitled"
+        clean = "".join(c if c.isalnum() or c in "-_" else "_" for c in cluster_name) or "untitled"
         out_dir = cfg.state_dir / "exports" / clean / ts
         out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1177,8 +1717,8 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
                 dt_cli,
                 str(src),
                 str(out),
-                "--width", str(req.width),
-                "--height", str(req.height),
+                "--width", str(width),
+                "--height", str(height),
                 "--core", "--conf", "plugins/imageio/format/jpeg/quality=92",
             ]
             try:
@@ -1200,25 +1740,32 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
         }
 
     @app.post("/api/edit/open")
-    def open_in_editor(req: OpenInEditorReq):
+    def open_in_editor(payload: dict = Body(...)):
         """Launch the chosen OSS editor with the original photo paths for the
         given sha256s. Editor runs detached — server returns immediately.
+
+        Body: {sha256s: list[str], editor?: "darktable"|"rawtherapee"|"gimp"}.
         """
         import shutil
         import subprocess
 
-        editor_cmd = shutil.which(req.editor)
+        sha256s = payload.get("sha256s") or []
+        editor = payload.get("editor") or "darktable"
+        if not isinstance(sha256s, list) or not sha256s:
+            raise HTTPException(400, detail="sha256s must be a non-empty list")
+
+        editor_cmd = shutil.which(editor)
         if not editor_cmd:
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    f"'{req.editor}' not found on PATH. Install it or pick a different "
+                    f"'{editor}' not found on PATH. Install it or pick a different "
                     "editor (darktable / rawtherapee / gimp)."
                 ),
             )
 
         with session_scope(Session) as s:
-            rows = s.query(Photo.path).filter(Photo.sha256.in_(req.sha256s)).all()
+            rows = s.query(Photo.path).filter(Photo.sha256.in_(sha256s)).all()
             paths = [r[0] for r in rows]
         if not paths:
             raise HTTPException(404, detail="no matching photos")
@@ -1230,8 +1777,568 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
                 close_fds=True,
             )
         except Exception as exc:
-            raise HTTPException(500, detail=f"failed to launch {req.editor}: {exc}")
-        return {"opened": len(paths), "editor": req.editor}
+            raise HTTPException(500, detail=f"failed to launch {editor}: {exc}")
+        return {"opened": len(paths), "editor": editor}
+
+    # ── Aesthetic calibration ────────────────────────────────────────────────
+    #
+    # The on-disk CLIP-IQA score (Embedding.aesthetic_iqa) doesn't track human
+    # aesthetic judgment well. This subsystem lets the user rate photos
+    # (+1/-1/skip), trains a per-folder personal logistic regression on SigLIP
+    # embeddings, and surfaces NIMA + AP-V2.5 + personal scores alongside the
+    # original IQA so the user can compare and pick which signal to drive
+    # story curation with.
+
+    def _combined_percentile_pairs(s) -> list[tuple]:
+        """Return list of (photo_id, sha256, taken_at, iqa, nima, ap25, personal,
+        combined_pct) for every photo with both NIMA and AP25 scored, sorted by
+        combined percentile ascending.
+
+        combined_pct = mean(percentile_rank_in_nima, percentile_rank_in_ap25), 0–100.
+        """
+        rows = (
+            s.query(
+                Photo.id, Photo.sha256, Photo.taken_at,
+                Embedding.aesthetic_iqa,
+                AestheticScore.nima_score, AestheticScore.ap25_score,
+                AestheticScore.personal_score,
+            )
+            .join(Embedding, Embedding.photo_id == Photo.id)
+            .join(AestheticScore, AestheticScore.photo_id == Photo.id)
+            .filter(AestheticScore.nima_score.isnot(None))
+            .filter(AestheticScore.ap25_score.isnot(None))
+            .all()
+        )
+        if not rows:
+            return []
+        # Compute percentile ranks within current library
+        n = len(rows)
+        # rank nima
+        nima_sorted = sorted(range(n), key=lambda i: rows[i][4])
+        nima_pct = [0.0] * n
+        for rank, idx in enumerate(nima_sorted):
+            nima_pct[idx] = (rank / max(1, n - 1)) * 100
+        ap_sorted = sorted(range(n), key=lambda i: rows[i][5])
+        ap_pct = [0.0] * n
+        for rank, idx in enumerate(ap_sorted):
+            ap_pct[idx] = (rank / max(1, n - 1)) * 100
+        out = []
+        for i, r in enumerate(rows):
+            combined = (nima_pct[i] + ap_pct[i]) / 2.0
+            out.append((*r, combined))
+        out.sort(key=lambda t: t[7])  # ascending by combined
+        return out
+
+    @app.get("/api/calibrate/extremes")
+    def calibrate_extremes(bucket: str = Query("worst"), n: int = Query(30, ge=1, le=200)):
+        """Return N unrated photos at the worst (bottom) or best (top) of the
+        NIMA+AP combined percentile ranking.
+
+        bucket='worst' → bottom N, presented as candidates for rescue (default
+        rating -1, user flips ones they like to +1).
+        bucket='best'  → top N, presented as candidates for demotion (default
+        rating +1, user flips ones they don't like to -1).
+        """
+        if bucket not in ("worst", "best"):
+            raise HTTPException(400, detail="bucket must be 'worst' or 'best'")
+
+        with session_scope(Session) as s:
+            rated_ids = {r[0] for r in s.query(PhotoRating.photo_id).all()}
+            ranked = _combined_percentile_pairs(s)
+        if not ranked:
+            return {"photos": [], "total_indexed": 0, "rated_count": len(rated_ids)}
+
+        unrated = [r for r in ranked if r[0] not in rated_ids]
+        chosen = unrated[:n] if bucket == "worst" else list(reversed(unrated[-n:]))
+
+        return {
+            "photos": [
+                {
+                    "photo_id": r[0],
+                    "sha256": r[1],
+                    "taken_at": r[2].isoformat() if r[2] else None,
+                    "thumb_url": f"/api/thumb/{r[1]}",
+                    "preview_url": f"/api/preview/{r[1]}",
+                    "scores": {
+                        "iqa": r[3],
+                        "nima": r[4],
+                        "ap25": r[5],
+                        "personal": r[6],
+                        "combined": r[7],
+                    },
+                    "default_rating": -1 if bucket == "worst" else 1,
+                }
+                for r in chosen
+            ],
+            "bucket": bucket,
+            "total_indexed": len(ranked),
+            "rated_count": len(rated_ids),
+        }
+
+    @app.get("/api/calibrate/next")
+    def calibrate_next():
+        """Return one random photo that hasn't been rated yet, with all 4 scores.
+
+        Kept for backward-compat; the primary calibration flow now uses
+        /api/calibrate/extremes.
+        """
+        import random as _random
+
+        with session_scope(Session) as s:
+            rated_ids = {r[0] for r in s.query(PhotoRating.photo_id).all()}
+            rows = (
+                s.query(Photo.id, Photo.sha256, Photo.taken_at, Embedding.aesthetic_iqa)
+                .join(Embedding, Embedding.photo_id == Photo.id)
+                .all()
+            )
+            unrated = [r for r in rows if r[0] not in rated_ids]
+            if not unrated:
+                return {"done": True, "rated_count": len(rated_ids)}
+            choice = _random.choice(unrated)
+            pid = choice[0]
+            aest = s.get(AestheticScore, pid)
+            return {
+                "done": False,
+                "photo_id": pid,
+                "sha256": choice[1],
+                "taken_at": choice[2].isoformat() if choice[2] else None,
+                "preview_url": f"/api/preview/{choice[1]}",
+                "scores": {
+                    "iqa": choice[3],
+                    "nima": aest.nima_score if aest else None,
+                    "ap25": aest.ap25_score if aest else None,
+                    "personal": aest.personal_score if aest else None,
+                },
+                "rated_count": len(rated_ids),
+                "total": len(rows),
+            }
+
+    @app.post("/api/calibrate/rate_batch")
+    def calibrate_rate_batch(payload: dict = Body(...)):
+        """Persist many ratings at once.
+        Body: {ratings: [{photo_id: int, rating: -1|0|1}, ...]}.
+        """
+        from datetime import datetime as _dt
+        ratings = payload.get("ratings") or []
+        n_written = 0
+        with session_scope(Session) as s:
+            for item in ratings:
+                pid = item.get("photo_id") if isinstance(item, dict) else None
+                rating = item.get("rating") if isinstance(item, dict) else None
+                if not isinstance(pid, int) or rating not in (-1, 0, 1):
+                    continue
+                existing = s.get(PhotoRating, pid)
+                if existing:
+                    existing.rating = rating
+                    existing.rated_at = _dt.utcnow()
+                else:
+                    s.add(PhotoRating(photo_id=pid, rating=rating, rated_at=_dt.utcnow()))
+                n_written += 1
+        return {"ok": True, "n": n_written}
+
+    @app.post("/api/calibrate/rate")
+    def calibrate_rate(payload: dict = Body(...)):
+        """Persist a single rating. Body: {photo_id: int, rating: -1|0|1}."""
+        from datetime import datetime as _dt
+        photo_id = payload.get("photo_id")
+        rating = payload.get("rating")
+        if not isinstance(photo_id, int):
+            raise HTTPException(400, detail="photo_id must be an int")
+        if rating not in (-1, 0, 1):
+            raise HTTPException(400, detail="rating must be -1, 0, or 1")
+        with session_scope(Session) as s:
+            existing = s.get(PhotoRating, photo_id)
+            if existing:
+                existing.rating = rating
+                existing.rated_at = _dt.utcnow()
+            else:
+                s.add(PhotoRating(photo_id=photo_id, rating=rating, rated_at=_dt.utcnow()))
+        return {"ok": True}
+
+    @app.get("/api/calibrate/agreement")
+    def calibrate_agreement():
+        """For each model, report the median percentile rank of the user's
+        upvoted photos within the model's full-library ranking.
+
+        Under the new semantics, only rating=+1 is a positive signal.
+        A rating of -1 means "user reviewed and agreed with the ensemble's
+        placement", carrying no training signal.
+
+        Per-model output:
+          - median_upvote_percentile: median percentile rank (0-100) of
+            upvoted photos under this model. 50 = upvotes scattered evenly;
+            90 = upvotes consistently near the top (good agreement).
+          - n_scored_upvotes: how many upvoted photos this model has scored
+        """
+        import numpy as np
+
+        with session_scope(Session) as s:
+            upvoted_ids = {
+                r[0]
+                for r in s.query(PhotoRating.photo_id)
+                .filter(PhotoRating.rating == 1).all()
+            }
+            rows = (
+                s.query(
+                    Photo.id,
+                    Embedding.aesthetic_iqa,
+                    AestheticScore.nima_score,
+                    AestheticScore.ap25_score,
+                    AestheticScore.personal_score,
+                )
+                .join(Embedding, Embedding.photo_id == Photo.id)
+                .outerjoin(AestheticScore, AestheticScore.photo_id == Photo.id)
+                .all()
+            )
+
+        if not upvoted_ids:
+            return {"models": {}, "n_upvotes": 0, "message": "Upvote at least 1 photo."}
+
+        photo_ids = np.array([r[0] for r in rows])
+        model_cols = {"iqa": 1, "nima": 2, "ap25": 3, "personal": 4}
+        out: dict[str, dict] = {}
+        for name, col in model_cols.items():
+            vals = np.array([
+                r[col] if r[col] is not None else np.nan for r in rows
+            ], dtype=float)
+            mask = ~np.isnan(vals)
+            if mask.sum() < 2:
+                out[name] = {"median_upvote_percentile": None, "n_scored_upvotes": 0}
+                continue
+            v = vals[mask]
+            ids_sub = photo_ids[mask]
+            order = np.argsort(v)
+            pct = np.empty_like(v)
+            pct[order] = np.arange(len(v)) / max(1, len(v) - 1) * 100.0
+            id_to_pct = dict(zip(ids_sub.tolist(), pct.tolist()))
+            upvote_pcts = [id_to_pct[uid] for uid in upvoted_ids if uid in id_to_pct]
+            out[name] = {
+                "median_upvote_percentile": (
+                    float(np.median(upvote_pcts)) if upvote_pcts else None
+                ),
+                "n_scored_upvotes": len(upvote_pcts),
+            }
+
+        # Also report the combined NIMA+AP percentile fusion as if it were a model
+        nima_vals = np.array([
+            r[model_cols["nima"]] if r[model_cols["nima"]] is not None else np.nan
+            for r in rows
+        ])
+        ap_vals = np.array([
+            r[model_cols["ap25"]] if r[model_cols["ap25"]] is not None else np.nan
+            for r in rows
+        ])
+        m_combined = ~(np.isnan(nima_vals) | np.isnan(ap_vals))
+        if m_combined.sum() >= 2:
+            ids_c = photo_ids[m_combined]
+            nima_sub = nima_vals[m_combined]
+            ap_sub = ap_vals[m_combined]
+            n_o = np.argsort(nima_sub)
+            n_pct = np.empty_like(nima_sub)
+            n_pct[n_o] = np.arange(len(nima_sub)) / max(1, len(nima_sub) - 1) * 100.0
+            a_o = np.argsort(ap_sub)
+            a_pct = np.empty_like(ap_sub)
+            a_pct[a_o] = np.arange(len(ap_sub)) / max(1, len(ap_sub) - 1) * 100.0
+            c_pct = (n_pct + a_pct) / 2.0
+            id_to_c = dict(zip(ids_c.tolist(), c_pct.tolist()))
+            c_upvote_pcts = [id_to_c[uid] for uid in upvoted_ids if uid in id_to_c]
+            out["combined"] = {
+                "median_upvote_percentile": (
+                    float(np.median(c_upvote_pcts)) if c_upvote_pcts else None
+                ),
+                "n_scored_upvotes": len(c_upvote_pcts),
+            }
+
+        return {"models": out, "n_upvotes": len(upvoted_ids)}
+
+    @app.post("/api/calibrate/retrain")
+    def calibrate_retrain():
+        """Train a personalized aesthetic signal from upvotes only.
+
+        Method: unit-vector centroid of the SigLIP embeddings of all upvoted
+        photos. personal_score for any photo = cosine similarity to that
+        centroid. This is a one-class learner — it captures "what your
+        upvotes look like" without treating non-upvotes as negative examples.
+
+        Final story curation uses personal_score as a correction on top of
+        NIMA+AP combined, not as a replacement.
+        """
+        import numpy as np
+
+        with session_scope(Session) as s:
+            upvoted = (
+                s.query(PhotoRating.photo_id, Embedding.siglip)
+                .join(Embedding, Embedding.photo_id == PhotoRating.photo_id)
+                .filter(PhotoRating.rating == 1)
+                .all()
+            )
+            if len(upvoted) < 3:
+                raise HTTPException(
+                    400,
+                    detail=f"need at least 3 upvotes; have {len(upvoted)}.",
+                )
+
+            X_pos = np.stack([
+                np.frombuffer(r[1], dtype=np.float16).astype(np.float32)
+                for r in upvoted
+            ])
+            X_pos = X_pos / (np.linalg.norm(X_pos, axis=1, keepdims=True) + 1e-9)
+            centroid = X_pos.mean(axis=0)
+            centroid = centroid / (np.linalg.norm(centroid) + 1e-9)
+
+            all_rows = s.query(Embedding.photo_id, Embedding.siglip).all()
+            X_all = np.stack([
+                np.frombuffer(r[1], dtype=np.float16).astype(np.float32)
+                for r in all_rows
+            ])
+            X_all = X_all / (np.linalg.norm(X_all, axis=1, keepdims=True) + 1e-9)
+            sims = X_all @ centroid  # [N], range [-1, 1]
+
+            for (pid, _), sim in zip(all_rows, sims):
+                existing = s.get(AestheticScore, pid)
+                if existing:
+                    existing.personal_score = float(sim)
+                else:
+                    s.add(AestheticScore(photo_id=pid, personal_score=float(sim)))
+
+            mean_pos_sim = float((X_pos @ centroid).mean())
+
+        return {
+            "ok": True,
+            "method": "centroid_cosine",
+            "n_positive": len(upvoted),
+            "n_scored": len(all_rows),
+            "mean_positive_similarity": mean_pos_sim,
+        }
+
+    @app.get("/api/calibrate/dashboard")
+    def calibrate_dashboard():
+        """Return all photos with all 4 scores + user rating (if any) for the dashboard grid."""
+        with session_scope(Session) as s:
+            rows = (
+                s.query(
+                    Photo.id, Photo.sha256, Photo.taken_at,
+                    Embedding.aesthetic_iqa,
+                    AestheticScore.nima_score, AestheticScore.ap25_score,
+                    AestheticScore.personal_score,
+                    PhotoRating.rating,
+                )
+                .join(Embedding, Embedding.photo_id == Photo.id)
+                .outerjoin(AestheticScore, AestheticScore.photo_id == Photo.id)
+                .outerjoin(PhotoRating, PhotoRating.photo_id == Photo.id)
+                .all()
+            )
+        return {
+            "photos": [
+                {
+                    "photo_id": r[0],
+                    "sha256": r[1],
+                    "taken_at": r[2].isoformat() if r[2] else None,
+                    "thumb_url": f"/api/thumb/{r[1]}",
+                    "preview_url": f"/api/preview/{r[1]}",
+                    "scores": {
+                        "iqa": r[3],
+                        "nima": r[4],
+                        "ap25": r[5],
+                        "personal": r[6],
+                    },
+                    "rating": r[7],
+                }
+                for r in rows
+            ]
+        }
+
+
+    # ── Best-Of / curated facets ─────────────────────────────────────────────
+    @app.get("/api/curate")
+    def curate_scope(
+        facet: str = Query(..., description="day|place|person|category"),
+        value: str = Query(..., description="facet value"),
+        limit: int = Query(200, ge=1, le=1000),
+        scope_pct: float = Query(None, description="override per-scope percentile gate"),
+        library_pct: float = Query(None, description="override library-wide percentile floor"),
+    ):
+        """Return a curated ranked set of photos for a Best-Of facet.
+
+        Pipeline: scope filter → library-wide top-25% aesthetic gate →
+        burst dedup → sort by combined_aesthetic desc.
+
+        Facets:
+          - day=YYYY-MM-DD
+          - place=NAME           (matches Visit.name)
+          - person=N             (Person.id)
+          - category=landscape|portrait|object|unclassified
+        """
+        from travelcull.ml.curation import curate
+
+        with session_scope(Session) as s:
+            # Resolve the scope to a set of photo IDs
+            if facet == "day":
+                from sqlalchemy import text as _text
+                scope_ids = [
+                    row[0]
+                    for row in s.execute(
+                        _text("SELECT id FROM photos WHERE strftime('%Y-%m-%d', taken_at) = :d"),
+                        {"d": value},
+                    ).fetchall()
+                ]
+            elif facet == "place":
+                # photos at any Visit with this name — by overlapping taken_at
+                visits = s.query(Visit).filter(Visit.name == value).all()
+                if not visits:
+                    return {"facet": facet, "value": value, "total": 0, "photos": []}
+                # Photos taken between any visit's arrived_at and departed_at
+                scope_ids = []
+                for v in visits:
+                    rows = (
+                        s.query(Photo.id)
+                        .filter(Photo.taken_at >= v.arrived_at)
+                        .filter(Photo.taken_at <= v.departed_at)
+                        .all()
+                    )
+                    scope_ids.extend(r[0] for r in rows)
+                scope_ids = list(set(scope_ids))
+            elif facet == "person":
+                try:
+                    pid_int = int(value)
+                except ValueError:
+                    raise HTTPException(400, detail="person value must be an integer id")
+                rows = s.query(PhotoPerson.photo_id).filter(PhotoPerson.person_id == pid_int).all()
+                scope_ids = [r[0] for r in rows]
+            elif facet == "category":
+                if value not in ("landscape", "portrait", "object", "unclassified"):
+                    raise HTTPException(400, detail="unknown category")
+                rows = (
+                    s.query(PhotoCategory.photo_id)
+                    .filter(PhotoCategory.primary_category == value)
+                    .all()
+                )
+                scope_ids = [r[0] for r in rows]
+            else:
+                raise HTTPException(400, detail=f"unknown facet '{facet}'")
+
+            if not scope_ids:
+                return {"facet": facet, "value": value, "total": 0, "photos": []}
+
+            eff_scope = scope_pct if scope_pct is not None else cfg.aesthetic_per_scope_pct
+            eff_library = library_pct if library_pct is not None else cfg.aesthetic_library_pct
+            curated_list = curate(
+                s, scope_ids,
+                sort="score",
+                ap_w=cfg.ap_weight, nima_w=cfg.nima_weight,
+                pct_floor=eff_scope,
+                library_pct_floor=eff_library,
+            )
+            curated_list = curated_list[:limit]
+
+            return {
+                "facet": facet,
+                "value": value,
+                "total": len(curated_list),
+                "photos": [
+                    {
+                        "photo_id": c.photo_id,
+                        "sha256": c.sha256,
+                        "taken_at": c.taken_at,
+                        "thumb_url": f"/api/thumb/{c.sha256}",
+                        "preview_url": f"/api/preview/{c.sha256}",
+                        "combined": c.combined,
+                        "ap25": c.ap25,
+                        "nima": c.nima,
+                        "moment_id": c.moment_id,
+                        "moment_size": c.moment_size,
+                    }
+                    for c in curated_list
+                ],
+            }
+
+    @app.patch("/api/moments/{moment_id}/primary")
+    def set_moment_primary(moment_id: int, payload: dict = Body(...)):
+        """Set the top-of-stack photo for a moment.
+
+        Body: {photo_id: int}
+
+        Persists the user's choice so subsequent curated views surface this
+        photo as the visible member of the burst stack.
+        """
+        photo_id = payload.get("photo_id")
+        if not isinstance(photo_id, int):
+            raise HTTPException(400, detail="photo_id must be an int")
+
+        with session_scope(Session) as s:
+            mom = s.get(Moment, moment_id)
+            if mom is None:
+                raise HTTPException(404, detail="moment not found")
+            member = (
+                s.query(MomentMember)
+                .filter(MomentMember.moment_id == moment_id)
+                .filter(MomentMember.photo_id == photo_id)
+                .first()
+            )
+            if member is None:
+                raise HTTPException(
+                    400, detail=f"photo_id {photo_id} is not a member of moment {moment_id}",
+                )
+            mom.primary_photo_id = photo_id
+
+            # Re-order MomentMember.rank so the chosen photo is rank 0
+            all_members = (
+                s.query(MomentMember)
+                .filter(MomentMember.moment_id == moment_id)
+                .order_by(MomentMember.rank)
+                .all()
+            )
+            # Pull the chosen one to the front, keep others in their existing order
+            new_order = [mm for mm in all_members if mm.photo_id == photo_id]
+            new_order.extend(mm for mm in all_members if mm.photo_id != photo_id)
+            for rank, mm in enumerate(new_order):
+                mm.rank = rank
+
+        return {"ok": True, "moment_id": moment_id, "primary_photo_id": photo_id}
+
+    @app.get("/api/curate/facets")
+    def curate_facets():
+        """Return available facet values for the Best-Of dropdown."""
+        with session_scope(Session) as s:
+            # Days with at least one photo
+            from sqlalchemy import text as _text
+            day_rows = s.execute(_text(
+                "SELECT strftime('%Y-%m-%d', taken_at) d, COUNT(*) n FROM photos "
+                "WHERE taken_at IS NOT NULL GROUP BY d ORDER BY d"
+            )).fetchall()
+            # Places: distinct Visit.name with count
+            place_rows = (
+                s.query(Visit.name, Visit.photo_count)
+                .order_by(Visit.photo_count.desc())
+                .all()
+            )
+            # Aggregate place by name
+            place_agg: dict[str, int] = {}
+            for name, n in place_rows:
+                place_agg[name] = place_agg.get(name, 0) + (n or 0)
+            # Persons
+            from travelcull.db.models import Person
+            persons = s.query(Person.id, Person.label, Person.photo_count).all()
+            # Categories
+            cat_rows = s.execute(_text(
+                "SELECT primary_category, COUNT(*) FROM photo_categories "
+                "GROUP BY primary_category"
+            )).fetchall()
+            return {
+                "days": [{"value": d, "count": n} for d, n in day_rows if d],
+                "places": [
+                    {"value": k, "count": v}
+                    for k, v in sorted(place_agg.items(), key=lambda kv: -kv[1])
+                ],
+                "persons": [
+                    {"value": str(pid), "label": label or f"P{pid}", "count": n}
+                    for pid, label, n in sorted(persons, key=lambda p: -(p[2] or 0))
+                ],
+                "categories": [
+                    {"value": cat, "count": n}
+                    for cat, n in cat_rows if cat
+                ],
+            }
 
 
 def _serve_image_for(cfg: FolderConfig, sha256: str, kind: str):
