@@ -135,7 +135,8 @@ class PhotoTag(Base):
 
     Primary key: (photo_id, tag, source) — supports same tag from different sources.
     For backward compat with existing tables that have PK (photo_id, tag), the
-    _migrate_add_source_column() function in ram_tags.py handles the schema upgrade.
+    Alembic revision 'add source to photo_tags PK' (run by init_db) upgrades the
+    schema on first open.
     """
 
     __tablename__ = "photo_tags"
@@ -146,8 +147,8 @@ class PhotoTag(Base):
     tag: Mapped[str] = mapped_column(String(128), primary_key=True)
     score: Mapped[float] = mapped_column(Float, nullable=False)
     # source is part of the PK — allows same tag name from different sources.
-    # Migration (_migrate_add_source_column) recreates the table with this PK
-    # on first run against an existing database.
+    # An Alembic migration recreates the table with this PK on first open of an
+    # existing (pre-source) database.
     source: Mapped[Optional[str]] = mapped_column(String(16), nullable=True, primary_key=True)
 
     __table_args__ = (
