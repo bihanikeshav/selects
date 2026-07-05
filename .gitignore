@@ -32,6 +32,11 @@ htmlcov/
 frontend/node_modules/
 frontend/dist/
 
+# Packaging
+travelcull/server/static/
+packaging/dist/
+packaging/build/
+
 # Tooling state
 .claude/
 .playwright-mcp/

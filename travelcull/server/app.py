@@ -1,19 +1,73 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from travelcull.config import FolderConfig
 
+from .fs_routes import register_fs_routes
 from .libraries import register_libraries
 from .library_manager import ActiveConfigProxy, LibraryManager
+from .models_routes import register_model_routes
 from .pipeline_runner import run_pipeline_stages
 from .routes import register_routes
 from .ws import progress_bus, register_ws
+
+log = logging.getLogger("travelcull.server")
+
+
+def _find_static_dir() -> Optional[Path]:
+    """Locate the built frontend (``dist``) directory.
+
+    Prefers the packaged location (``travelcull/server/static``) used by
+    PyInstaller builds, then falls back to ``<repo>/frontend/dist`` for dev.
+    Returns ``None`` if neither contains an ``index.html``.
+    """
+    pkg_static = Path(__file__).resolve().parent / "static"
+    if (pkg_static / "index.html").is_file():
+        return pkg_static
+    # travelcull/server/app.py -> parents[2] == repo root
+    repo_dist = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+    if (repo_dist / "index.html").is_file():
+        return repo_dist
+    return None
+
+
+def _mount_frontend(app: FastAPI) -> None:
+    """Serve the built SPA with a deep-link fallback to ``index.html``.
+
+    Registered *after* all API/WS routes so those always win; the catch-all
+    only handles GET paths that are not ``/api`` or ``/ws``.
+    """
+    static_dir = _find_static_dir()
+    if static_dir is None:
+        log.warning(
+            "No built frontend found; UI will not be served. "
+            "Run `npm run build` in frontend/ (or `python packaging/build.py`)."
+        )
+        return
+
+    index_html = static_dir / "index.html"
+    assets_dir = static_dir / "assets"
+    if assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+
+    @app.get("/{full_path:path}")
+    async def spa_fallback(full_path: str):
+        if full_path.startswith(("api/", "ws/")) or full_path in ("api", "ws"):
+            return FileResponse(index_html, status_code=404)
+        candidate = static_dir / full_path
+        if full_path and candidate.is_file() and candidate.resolve().is_relative_to(static_dir):
+            return FileResponse(candidate)
+        return FileResponse(index_html)
 
 
 def build_app(
@@ -78,5 +132,8 @@ def build_app(
 
     register_routes(app, proxy)
     register_libraries(app, manager, publish)
+    register_model_routes(app, publish)
+    register_fs_routes(app)
     register_ws(app)
+    _mount_frontend(app)
     return app
