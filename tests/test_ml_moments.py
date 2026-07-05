@@ -170,7 +170,7 @@ def test_run_moment_stage_no_photos(tmp_path):
 
 
 def test_run_moment_stage_creates_moments(tmp_path):
-    """Two very similar photos taken <60s apart become one moment."""
+    """Two very similar photos taken <TIME_GAP_S apart become one moment."""
     from travelcull.db import init_db, session_scope
     from travelcull.db.models import Embedding, Moment, MomentMember, Photo, PipelineState
 
@@ -179,7 +179,7 @@ def test_run_moment_stage_creates_moments(tmp_path):
 
     emb_blob = SHARED_EMB.astype(np.float16).tobytes()
     t0 = BASE_TIME
-    t1 = BASE_TIME + timedelta(seconds=30)
+    t1 = BASE_TIME + timedelta(seconds=TIME_GAP_S - 7)
 
     with session_scope(Session) as s:
         for i, t in enumerate([t0, t1]):

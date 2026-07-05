@@ -325,3 +325,52 @@ class Swipe(Base):
     photo_id: Mapped[int] = mapped_column(Integer, ForeignKey("photos.id"), primary_key=True)
     decision: Mapped[str] = mapped_column(Text)  # "keep" | "reject" | "silver" | "skip"
     swiped_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class AestheticScore(Base):
+    """Alternative aesthetic-quality scores from off-the-shelf and personalized models.
+
+    Held separate from Embedding so we can backfill / re-score without touching
+    the SigLIP blob column. The CLIP-IQA score remains on Embedding.aesthetic_iqa
+    for backward compat.
+    """
+
+    __tablename__ = "aesthetic_scores"
+
+    photo_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("photos.id", ondelete="CASCADE"), primary_key=True
+    )
+    nima_score: Mapped[Optional[float]] = mapped_column(Float, default=None)
+    ap25_score: Mapped[Optional[float]] = mapped_column(Float, default=None)
+    personal_score: Mapped[Optional[float]] = mapped_column(Float, default=None)
+
+
+class PhotoRating(Base):
+    """User aesthetic rating used to train the personalized score.
+
+    rating: +1 = thumbs up, -1 = thumbs down, 0 = skip (not used for training).
+    """
+
+    __tablename__ = "photo_ratings"
+
+    photo_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("photos.id", ondelete="CASCADE"), primary_key=True
+    )
+    rating: Mapped[int] = mapped_column(Integer, nullable=False)
+    rated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class PhotoCategory(Base):
+    """Zero-shot SigLIP category probes — populates Best-Of facets for
+    landscape, portrait, and object (still-life) photo subsets.
+    """
+
+    __tablename__ = "photo_categories"
+
+    photo_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("photos.id", ondelete="CASCADE"), primary_key=True
+    )
+    landscape_sim: Mapped[Optional[float]] = mapped_column(Float, default=None)
+    portrait_sim: Mapped[Optional[float]] = mapped_column(Float, default=None)
+    object_sim: Mapped[Optional[float]] = mapped_column(Float, default=None)
+    primary_category: Mapped[Optional[str]] = mapped_column(String(16), default=None)

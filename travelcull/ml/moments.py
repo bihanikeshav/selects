@@ -21,9 +21,12 @@ from travelcull.db.models import (
 
 log = logging.getLogger(__name__)
 
-TIME_GAP_S = 60
+# A "burst" is a tightly-shot rapid sequence — same scene, seconds apart,
+# nearly-identical framing. Earlier defaults (60s window, 0.90 sim) folded in
+# unrelated nearby shots. These are the real burst-camera-roll defaults.
+TIME_GAP_S = 12               # was 60 — bursts happen within seconds, not a minute
 GPS_THRESH_DEG = 0.0002       # ~22 metres
-VISUAL_SIM_THRESH = 0.90
+VISUAL_SIM_THRESH = 0.96      # tightened from 0.94 — only near-duplicate framings count as a burst
 FACE_SIM_THRESH = 0.55
 
 

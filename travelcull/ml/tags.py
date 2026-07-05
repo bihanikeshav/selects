@@ -15,24 +15,35 @@ from .embed import encode_text_prompts
 
 log = logging.getLogger(__name__)
 
+# Minimum z-score (standard deviations above dataset mean) for a tag to be assigned.
+# Photos that don't clear this threshold for any tag are left untagged (uncategorized).
+DEFAULT_MIN_Z: float = 0.5
+
 # Default taxonomy for travel photos. Each tag has a list of prompts —
 # we mean-pool across prompts for richer concept coverage.
 DEFAULT_TAG_PROMPTS: dict[str, list[str]] = {
-    "landscape":    ["a scenic landscape photograph", "mountains and valleys", "a panoramic view of nature"],
-    "mountain":     ["snow-capped mountains", "a high mountain peak", "a rugged mountain range"],
-    "sky":          ["a sky full of clouds", "a vivid sunset", "stars in the night sky"],
-    "monastery":    ["a Buddhist monastery", "a temple with prayer flags", "religious architecture"],
-    "architecture": ["a building or structure", "traditional architecture", "an arched doorway"],
-    "portrait":     ["a portrait of a person", "a person's face", "a close-up of someone"],
-    "people":       ["a group of people", "people interacting", "candid people on a trip"],
-    "food":         ["a plate of food", "a meal on a table", "local cuisine"],
-    "transit":      ["a road through mountains", "a vehicle on a journey", "travel in transit"],
-    "interior":     ["the inside of a room", "an interior space", "indoor lighting"],
-    "water":        ["a river or lake", "flowing water", "a reflection on water"],
-    "night":        ["a photograph taken at night", "low-light scene", "city lights at night"],
-    "animal":       ["an animal", "wildlife in nature", "a domesticated animal"],
-    "abstract":     ["an abstract pattern", "a close-up texture", "a minimalist composition"],
-    "documents":    ["a document or sign", "text on a page", "a screenshot or receipt"],
+    "landscape":      ["a scenic landscape photograph", "mountains and valleys", "a panoramic view of nature"],
+    "mountain":       ["snow-capped mountains", "a high mountain peak", "a rugged mountain range"],
+    "sky":            ["a sky full of clouds", "a vivid sunset", "stars in the night sky"],
+    "monastery":      ["a Buddhist monastery", "a temple with prayer flags", "religious architecture"],
+    "architecture":   ["a building or structure", "traditional architecture", "an arched doorway"],
+    "portrait":       ["a portrait of a person", "a person's face", "a close-up of someone"],
+    "people":         ["a group of people", "people interacting", "candid people on a trip"],
+    "food":           ["a plate of food", "a meal on a table", "local cuisine"],
+    "transit":        ["a road through mountains", "a vehicle on a journey", "travel in transit"],
+    "interior":       ["the inside of a room", "an interior space", "indoor lighting"],
+    "water":          ["a river or lake", "flowing water", "a reflection on water"],
+    "night":          ["a photograph taken at night", "low-light scene", "city lights at night"],
+    "animal":         ["an animal", "wildlife in nature", "a domesticated animal"],
+    "abstract":       ["an abstract pattern", "a close-up texture", "a minimalist composition"],
+    "documents":      ["a document or sign", "text on a page", "a screenshot or receipt"],
+    # New tags to break up the over-dominant "mountain" cluster
+    "prayer_flags":   ["colorful Tibetan prayer flags", "prayer flags strung across the sky", "rows of prayer flags"],
+    "barren_terrain": ["a barren rocky desert", "a high-altitude cold desert", "dusty arid terrain"],
+    "village":        ["a small village in the mountains", "a remote settlement", "stone houses in a valley"],
+    "yak":            ["a yak", "a hairy bovine animal in the highlands"],
+    "shrine":         ["a small wayside shrine", "a stupa", "a small religious altar"],
+    "close_up":       ["a close-up detail shot", "macro photography", "a focused detail"],
 }
 
 
@@ -41,13 +52,19 @@ def run_tag_stage(
     on_progress: Callable[[int, int, str], None] | None = None,
     top_k: int = 3,
     min_score: float = 0.0,
+    min_z: float = DEFAULT_MIN_Z,
     tag_prompts: dict[str, list[str]] | None = None,
 ) -> int:
     """For each photo with an embedding, compute cosine-sim against tag prompts and store top-k.
 
+    Uses per-tag z-score normalization so that tags are assigned based on *relative* unusualness
+    rather than raw similarity.  A photo only gets tagged if its z-score for at least one tag
+    exceeds min_z (default 0.5 SD above the dataset mean for that tag).  Photos that clear no
+    threshold are left untagged and will appear as "uncategorized" in the cluster view.
+
     Note: SigLIP-SO400M raw cosine similarities between images and text tend to be in the
-    range 0.0-0.15, which is much lower than CLIP models. min_score defaults to 0.0 to store
-    all top-k tags; downstream consumers can filter by rank rather than absolute score.
+    range 0.0-0.15, which is much lower than CLIP models. min_score is kept for API compat
+    but min_z is the operative filter when using z-score mode.
 
     Returns the number of photos tagged.
     """
@@ -96,33 +113,47 @@ def run_tag_stage(
     feats = torch.from_numpy(feats_np).float().to(device)   # same device as text features
     feats = torch.nn.functional.normalize(feats, dim=-1)
 
-    # Batch photo-vs-tag similarity to avoid OOM on large folders
+    # Compute full [N, T] similarity matrix in chunks (avoid OOM on large folders)
     chunk = 1024
-    all_top_indices: list[np.ndarray] = []
-    all_top_scores: list[np.ndarray] = []
+    all_sims: list[torch.Tensor] = []
     for start in range(0, total, chunk):
         sub = feats[start:start + chunk]
-        sims = sub @ tag_feats.T                               # [chunk, T]
-        top_v, top_i = torch.topk(sims, k=min(top_k, n_tags), dim=-1)
-        all_top_indices.append(top_i.cpu().numpy())
-        all_top_scores.append(top_v.cpu().numpy())
+        all_sims.append(sub @ tag_feats.T)                    # [chunk, T]
+    sims = torch.cat(all_sims, dim=0)                         # [N, T]
 
-    top_indices = np.concatenate(all_top_indices, axis=0)     # [N, k]
-    top_scores  = np.concatenate(all_top_scores,  axis=0)     # [N, k]
+    # --- Per-tag z-score normalization ---
+    # Subtract each tag's dataset-mean similarity so that only photos that match a tag
+    # *unusually well* (relative to the whole dataset) get assigned to it.
+    # This prevents generic background concepts (e.g. "mountain" for every Ladakh photo)
+    # from winning everywhere.
+    tag_means = sims.mean(dim=0, keepdim=True)                       # [1, T]
+    # correction=0 avoids NaN when N=1 (Bessel's correction would give inf/NaN for single sample)
+    tag_std   = sims.std(dim=0, keepdim=True, correction=0).clamp(min=1e-6)  # [1, T]
+    sims_z    = (sims - tag_means) / tag_std                         # [N, T] — z-scores
 
-    # Write tags — idempotent: wipe existing rows first, then rewrite
+    # Top-k by z-score; we store z-scores as "score" in photo_tags
+    k = min(top_k, n_tags)
+    top_v, top_i = torch.topk(sims_z, k=k, dim=-1)           # [N, k]
+    top_indices = top_i.cpu().numpy()
+    top_scores  = top_v.cpu().numpy()
+
+    # Write tags — idempotent: wipe this stage's existing rows first, then rewrite.
+    # Bulk query delete (not ORM s.delete) because source is a nullable PK column
+    # the ORM can't address; scoped to source IS NULL so ram/posting/lookback
+    # tags from other stages are untouched.
     with session_scope(Session) as s:
-        for pid in ids:
-            for old in s.query(PhotoTag).filter(PhotoTag.photo_id == pid).all():
-                s.delete(old)
+        s.query(PhotoTag).filter(
+            PhotoTag.photo_id.in_(ids), PhotoTag.source.is_(None)
+        ).delete(synchronize_session=False)
         s.flush()
 
-        for k, pid in enumerate(ids):
+        for k_idx, pid in enumerate(ids):
             for j in range(top_indices.shape[1]):
-                score = float(top_scores[k, j])
-                if score < min_score:
+                z_score = float(top_scores[k_idx, j])
+                # Apply both legacy min_score guard (kept for API compat) and min_z threshold
+                if z_score < min_z:
                     continue
-                t = PhotoTag(photo_id=pid, tag=tag_names[top_indices[k, j]], score=score)
+                t = PhotoTag(photo_id=pid, tag=tag_names[top_indices[k_idx, j]], score=z_score)
                 s.add(t)
 
         # Mark pipeline state as vl_done

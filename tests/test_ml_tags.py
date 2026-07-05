@@ -62,13 +62,14 @@ class TestRunTagStage:
         monkeypatch.setattr(tags_mod, "encode_text_prompts", _fake_encode_text)
         monkeypatch.setattr(tags_mod, "init_db", lambda _path: session_factory)
 
-        n = run_tag_stage(cfg, min_score=0.0)
+        # Use min_z=0.0 so single-photo datasets (where z-score is always 0) still get tags.
+        n = run_tag_stage(cfg, min_score=0.0, min_z=0.0)
         assert n == 1
 
         with session_scope(session_factory) as s:
             tags = s.query(PhotoTag).filter(PhotoTag.photo_id == photo_id).all()
 
-        # Should have at least 1 tag (top_k=3 by default, min_score=0.0)
+        # Should have at least 1 tag (top_k=3 by default, min_z=0.0)
         assert len(tags) >= 1
         for pt in tags:
             assert pt.tag in DEFAULT_TAG_PROMPTS
@@ -84,7 +85,7 @@ class TestRunTagStage:
         monkeypatch.setattr(tags_mod, "encode_text_prompts", _fake_encode_text)
         monkeypatch.setattr(tags_mod, "init_db", lambda _path: session_factory)
 
-        run_tag_stage(cfg, min_score=0.0)
+        run_tag_stage(cfg, min_score=0.0, min_z=0.0)
 
         with session_scope(session_factory) as s:
             ps = s.get(PipelineState, photo_id)
@@ -102,11 +103,11 @@ class TestRunTagStage:
         monkeypatch.setattr(tags_mod, "encode_text_prompts", _fake_encode_text)
         monkeypatch.setattr(tags_mod, "init_db", lambda _path: session_factory)
 
-        run_tag_stage(cfg, min_score=0.0)
+        run_tag_stage(cfg, min_score=0.0, min_z=0.0)
         with session_scope(session_factory) as s:
             count_after_first = s.query(PhotoTag).filter(PhotoTag.photo_id == photo_id).count()
 
-        run_tag_stage(cfg, min_score=0.0)
+        run_tag_stage(cfg, min_score=0.0, min_z=0.0)
         with session_scope(session_factory) as s:
             count_after_second = s.query(PhotoTag).filter(PhotoTag.photo_id == photo_id).count()
 
@@ -121,5 +122,5 @@ class TestRunTagStage:
         monkeypatch.setattr(tags_mod, "encode_text_prompts", _fake_encode_text)
         monkeypatch.setattr(tags_mod, "init_db", lambda _path: session_factory)
 
-        n = run_tag_stage(cfg, min_score=0.0)
+        n = run_tag_stage(cfg, min_score=0.0, min_z=0.0)
         assert n == 0
