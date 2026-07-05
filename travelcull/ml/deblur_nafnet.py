@@ -219,10 +219,10 @@ def _ensure_weights(cfg) -> Optional[Path]:
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists() and target.stat().st_size > 1_000_000:
         return target
-    import urllib.request
+    from travelcull.ml.model_assets import download_file
     log.info("nafnet: downloading weights (~70 MB) from %s", WEIGHTS_URL)
     try:
-        urllib.request.urlretrieve(WEIGHTS_URL, target)
+        download_file(WEIGHTS_URL, target)
         return target
     except Exception as exc:
         log.warning("nafnet: weight download failed: %s", exc)

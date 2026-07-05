@@ -102,12 +102,12 @@ def _ensure_weights(cfg) -> Optional[Path]:
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists() and target.stat().st_size > 10_000:
         return target
-    import urllib.request
+    from travelcull.ml.model_assets import download_file
 
     for url in WEIGHTS_URL_CANDIDATES:
         try:
             log.info("csrnet: trying weights from %s", url)
-            urllib.request.urlretrieve(url, target)
+            download_file(url, target)
             if target.exists() and target.stat().st_size > 10_000:
                 log.info("csrnet: weights cached to %s", target)
                 return target
