@@ -26,6 +26,18 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+ml = [
+  "torch>=2.2",
+  "transformers>=4.40",
+  "insightface>=0.7",
+  "onnxruntime>=1.17",
+  "scikit-learn>=1.4",
+  "hdbscan>=0.8.33",
+  "umap-learn>=0.5.5",
+  "requests>=2.31",
+  # RAM++ (recognize-anything) has no PyPI release; installed from source.
+  "ram @ git+https://github.com/xinyu1205/recognize-anything.git",
+]
 dev = [
   "pytest>=8.0",
   "pytest-asyncio>=0.23",

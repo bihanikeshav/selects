@@ -49,3 +49,10 @@ desktop.ini
 # Misc
 *.log
 *.tmp
+
+# Ad-hoc report artifacts at repo root (not frontend/docs html)
+/iqa_calibration.html
+/personal_performance.html
+/score_comparison.html
+/test_enhanced.jpg
+/*.jpg
