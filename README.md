@@ -20,7 +20,29 @@ machine; the only network calls are optional reverse-geocoding lookups for place
 - React/Vite web UI for reviewing clusters, people, stories, and doing burst culling
 - CLI for headless indexing and running individual pipeline stages
 
-## Quickstart
+## Install
+
+**Desktop app (recommended).** Download the bundle for your OS from the
+[latest release](https://github.com/bihanikeshav/selects/releases) and run it — no Python
+required. The app downloads its AI models on first launch, with progress.
+
+**Via pip** (needs Python 3.11+):
+
+```bash
+pip install selects          # app + web GUI + CLI
+pip install "selects[ml]"    # add the on-device AI (torch, insightface, …)
+selects serve                # open the web UI
+selects index /path/to/trip  # or run headless from the CLI
+```
+
+RAM++ tagging installs separately (no PyPI release):
+`pip install git+https://github.com/xinyu1205/recognize-anything.git`
+
+> **GPU acceleration is coming soon.** These builds run on **CPU** — they work on any machine,
+> just slower. GPU-accelerated builds (Apple Silicon and NVIDIA first, AMD to follow) are next up.
+> The pipeline already detects your hardware and will use it once the accelerated packages ship.
+
+## Quickstart (from source)
 
 Requires Python 3.11+ and Node 18+.
 

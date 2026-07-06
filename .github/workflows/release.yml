@@ -56,6 +56,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Build frontend into packaged static dir
+        run: |
+          npm --prefix frontend ci
+          npm --prefix frontend run build
+          rm -rf selects/server/static
+          cp -r frontend/dist selects/server/static
       - name: Build sdist + wheel
         run: |
           pip install build
