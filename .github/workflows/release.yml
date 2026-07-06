@@ -30,7 +30,7 @@ jobs:
       - name: Install package (CPU torch) + PyInstaller
         run: |
           pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install -e . pyinstaller
+          pip install . pyinstaller  # non-editable: avoids PEP 660 editable-hook issues
       - name: Build bundle
         run: python packaging/build.py
       - name: Zip bundle
