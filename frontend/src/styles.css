@@ -844,8 +844,8 @@ img { display: block; max-width: 100%; }
 .kbd-footer {
   display: flex;
   align-items: center;
-  gap: 28px;
-  padding: 0 32px;
+  gap: 14px;
+  padding: 9px 24px;
   background: var(--md-surface-c-low);
   border-top: 1px solid var(--md-outline-var);
   color: var(--md-on-surface-var);
@@ -855,11 +855,27 @@ img { display: block; max-width: 100%; }
 }
 .kbd-footer::-webkit-scrollbar { display: none; }
 
+/* Logical clusters of shortcuts, separated by a thin divider. */
+.kbd-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  flex: 0 0 auto;
+}
+.kbd-divider {
+  width: 1px;
+  align-self: stretch;
+  min-height: 16px;
+  background: var(--md-outline-var);
+  flex: 0 0 auto;
+}
+
 .kbd-action {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   white-space: nowrap;
+  flex: 0 0 auto;   /* never shrink/wrap — the row scrolls instead of clipping */
 }
 
 .kbd {
