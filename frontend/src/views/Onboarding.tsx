@@ -9,6 +9,13 @@ import {
   startModelsDownload,
 } from "../api/client";
 import type { ModelInfo } from "../api/types";
+import { getSystem, type SystemInfo } from "../api/system";
+import {
+  estimateRemainingSeconds,
+  estimateTotalSeconds,
+  fmtDuration,
+  type Backend,
+} from "../lib/eta";
 import FolderPicker from "../components/FolderPicker";
 
 type Stage = "models" | "index" | "classical" | "embed" | "tag" | "story" | "done";
@@ -70,12 +77,28 @@ export default function Onboarding() {
   const [downloading, setDownloading] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const libIdRef = useRef<string | null>(null);
+  const [sys, setSys] = useState<SystemInfo | null>(null);
+  const [nPhotos, setNPhotos] = useState(0);
+  const [, setTick] = useState(0);
+  const stageStartRef = useRef<{ stage: string; at: number }>({ stage: "", at: 0 });
 
   useEffect(() => {
     return () => {
       wsRef.current?.close();
     };
   }, []);
+
+  // Detect CPU vs GPU once so the indexing screen can set expectations.
+  useEffect(() => {
+    getSystem().then(setSys).catch(() => {});
+  }, []);
+
+  // Tick every second while indexing so the "time remaining" estimate updates.
+  useEffect(() => {
+    if (phase !== "indexing") return;
+    const id = window.setInterval(() => setTick((t) => t + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [phase]);
 
   // One socket is shared between the models download and the indexing run.
   // Messages are routed by `stage`: "models" frames drive the download gate
@@ -97,6 +120,17 @@ export default function Onboarding() {
           return;
         }
         setProgress(msg);
+        // Record when each stage started (for live ETA) and learn the photo
+        // count from the per-photo stages (their total == number of photos).
+        if (stageStartRef.current.stage !== msg.stage) {
+          stageStartRef.current = { stage: msg.stage, at: Date.now() };
+        }
+        if (
+          msg.total > 0 &&
+          (msg.stage === "classical" || msg.stage === "embed" || msg.stage === "tag")
+        ) {
+          setNPhotos((prev) => Math.max(prev, msg.total));
+        }
         if (msg.stage === "done") {
           setPhase("done");
           ws.close();
@@ -182,6 +216,20 @@ export default function Onboarding() {
       ? Math.min(100, Math.round((progress.current / progress.total) * 100))
       : 0;
   const activeStage = progress?.stage ?? "index";
+  const mode: Backend = sys?.backend === "gpu" ? "gpu" : "cpu";
+  const stageElapsedSec = stageStartRef.current.at
+    ? (Date.now() - stageStartRef.current.at) / 1000
+    : 0;
+  const remainingSec = progress
+    ? estimateRemainingSeconds({
+        n: nPhotos,
+        mode,
+        stage: progress.stage,
+        current: progress.current,
+        total: progress.total,
+        stageElapsedSec,
+      })
+    : estimateTotalSeconds(nPhotos, mode);
   const mpct =
     modelProgress && modelProgress.total > 0
       ? Math.min(100, Math.round((modelProgress.current / modelProgress.total) * 100))
@@ -324,6 +372,51 @@ export default function Onboarding() {
                   }`}
               {progress?.message ? ` · ${progress.message}` : ""}
             </p>
+
+            {phase !== "done" && (
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  fontSize: 13,
+                  color: "#5f6368",
+                  margin: "2px 0 10px",
+                }}
+              >
+                <span>
+                  {sys
+                    ? sys.backend === "gpu"
+                      ? `GPU · ${sys.device_name ?? "CUDA"}`
+                      : "Running on CPU"
+                    : "…"}
+                </span>
+                <span style={{ fontVariantNumeric: "tabular-nums" }}>
+                  {fmtDuration(remainingSec)} remaining
+                </span>
+              </div>
+            )}
+
+            {phase !== "done" && mode === "cpu" && nPhotos > 0 && (
+              <div
+                style={{
+                  fontSize: 13,
+                  lineHeight: 1.5,
+                  color: "#3c4043",
+                  background: "rgba(251,188,4,0.12)",
+                  border: "1px solid rgba(251,188,4,0.35)",
+                  borderRadius: 10,
+                  padding: "10px 12px",
+                  margin: "0 0 12px",
+                }}
+              >
+                <strong>Heads up:</strong> {nPhotos.toLocaleString()} photos on CPU
+                take about {fmtDuration(estimateTotalSeconds(nPhotos, "cpu"))}. An
+                NVIDIA GPU would cut this to roughly{" "}
+                {fmtDuration(estimateTotalSeconds(nPhotos, "gpu"))}. You can leave
+                this running — it keeps going in the background.
+              </div>
+            )}
 
             <ol className="onb-stage-list">
               {STAGE_ORDER.map((st) => {
