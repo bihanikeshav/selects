@@ -357,6 +357,12 @@ img { display: block; max-width: 100%; }
   gap: 12px;
 }
 
+.topbar-folder .topbar-logo {
+  width: 15px;
+  height: 15px;
+  align-self: center;
+  margin-right: 2px;
+}
 .topbar-folder .crumb-sep { color: var(--md-outline); font-weight: 300; }
 .topbar-folder .crumb-folder { color: var(--md-on-surface); }
 .topbar-folder .crumb-context {

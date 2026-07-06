@@ -58,8 +58,13 @@ const STEPS = [
   },
 ];
 
-function gb(mb: number): string {
-  return (mb / 1024).toFixed(1);
+/** Human-friendly model size: MB under a gigabyte, GB above (so a 1 MB model
+ *  never renders as a misleading "0.0 GB"). */
+function fmtSize(mb: number): string {
+  if (mb <= 0) return "0 MB";
+  if (mb < 1) return "<1 MB";
+  if (mb < 1024) return `${Math.round(mb)} MB`;
+  return `${(mb / 1024).toFixed(1)} GB`;
 }
 
 type Phase = "form" | "models" | "indexing" | "done";
@@ -74,6 +79,8 @@ export default function Onboarding() {
   const [modelProgress, setModelProgress] = useState<ProgressMsg | null>(null);
   const [missing, setMissing] = useState<ModelInfo[]>([]);
   const [missingMb, setMissingMb] = useState(0);
+  const [installedCount, setInstalledCount] = useState(0);
+  const [installedMb, setInstalledMb] = useState(0);
   const [downloading, setDownloading] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const libIdRef = useRef<string | null>(null);
@@ -127,7 +134,10 @@ export default function Onboarding() {
         }
         if (
           msg.total > 0 &&
-          (msg.stage === "classical" || msg.stage === "embed" || msg.stage === "tag")
+          (msg.stage === "index" ||
+            msg.stage === "classical" ||
+            msg.stage === "embed" ||
+            msg.stage === "tag")
         ) {
           setNPhotos((prev) => Math.max(prev, msg.total));
         }
@@ -174,6 +184,9 @@ export default function Onboarding() {
       // Gate on model weights before indexing.
       const status = await modelsStatus();
       const miss = status.models.filter((m) => !m.present);
+      const have = status.models.filter((m) => m.present);
+      setInstalledCount(have.length);
+      setInstalledMb(have.reduce((s, m) => s + m.approx_size_mb, 0));
       if (miss.length === 0) {
         connectProgress();
         beginIndexing();
@@ -314,8 +327,9 @@ export default function Onboarding() {
               <>
                 <h2>Download AI models</h2>
                 <p className="onb-progress-caption">
-                  selects needs a few model files for AI scoring, tags and
-                  stories. They download once and stay on your machine.
+                  {installedCount > 0
+                    ? `${missing.length} model${missing.length === 1 ? "" : "s"} left to download — the rest are already on your machine. They power AI scoring, tags, stories and enhancement.`
+                    : "selects needs these model files for AI scoring, tags, stories and enhancement. They download once and stay on your machine."}
                 </p>
                 <ul className="onb-models-list">
                   {missing.map((m) => (
@@ -325,11 +339,20 @@ export default function Onboarding() {
                         <span className="onb-model-for">{m.required_for}</span>
                       </div>
                       <span className="onb-model-size">
-                        {gb(m.approx_size_mb)} GB
+                        {fmtSize(m.approx_size_mb)}
                       </span>
                     </li>
                   ))}
                 </ul>
+                {installedCount > 0 && (
+                  <p
+                    className="onb-models-note"
+                    style={{ marginTop: 0, color: "var(--md-tertiary, #1a7f37)" }}
+                  >
+                    ✓ Already installed: {installedCount} model
+                    {installedCount === 1 ? "" : "s"} ({fmtSize(installedMb)})
+                  </p>
+                )}
                 {err && <p className="onb-error">{err}</p>}
                 <div className="onb-models-actions">
                   <button
@@ -337,7 +360,7 @@ export default function Onboarding() {
                     type="button"
                     onClick={onDownloadModels}
                   >
-                    Download models ({gb(missingMb)} GB)
+                    Download models ({fmtSize(missingMb)})
                   </button>
                   <button
                     className="btn btn-text"
@@ -392,7 +415,9 @@ export default function Onboarding() {
                     : "…"}
                 </span>
                 <span style={{ fontVariantNumeric: "tabular-nums" }}>
-                  {fmtDuration(remainingSec)} remaining
+                  {nPhotos > 0 || (progress && progress.total > 0)
+                    ? `${fmtDuration(remainingSec)} remaining`
+                    : "estimating…"}
                 </span>
               </div>
             )}
@@ -415,6 +440,31 @@ export default function Onboarding() {
                 NVIDIA GPU would cut this to roughly{" "}
                 {fmtDuration(estimateTotalSeconds(nPhotos, "gpu"))}. You can leave
                 this running — it keeps going in the background.
+                <details style={{ marginTop: 8 }}>
+                  <summary style={{ cursor: "pointer", fontWeight: 600 }}>
+                    Have an NVIDIA GPU? Enable it
+                  </summary>
+                  <div style={{ marginTop: 6, fontSize: 12.5 }}>
+                    Install a CUDA build of PyTorch, then restart selects — it
+                    detects the GPU automatically on the next launch:
+                    <code
+                      style={{
+                        display: "block",
+                        marginTop: 6,
+                        padding: "6px 8px",
+                        borderRadius: 6,
+                        background: "rgba(0,0,0,0.06)",
+                        fontFamily: "var(--font-mono)",
+                        fontSize: 12,
+                        whiteSpace: "pre-wrap",
+                        wordBreak: "break-all",
+                      }}
+                    >
+                      pip install torch --index-url
+                      https://download.pytorch.org/whl/cu124
+                    </code>
+                  </div>
+                </details>
               </div>
             )}
 

@@ -130,7 +130,7 @@ export default function Curated() {
 
         <div
           style={{
-            padding: "10px 24px",
+            padding: "12px 24px",
             display: "flex",
             alignItems: "center",
             gap: 12,
@@ -142,13 +142,14 @@ export default function Curated() {
               style={{
                 margin: 0,
                 fontFamily: "var(--font-display)",
-                fontSize: 22,
-                fontWeight: 500,
+                fontSize: 32,
+                fontWeight: 400,
+                letterSpacing: "-0.01em",
               }}
             >
               Curated
             </h1>
-            <div style={{ color: "var(--md-on-surface-var)", fontSize: 12 }}>
+            <div style={{ color: "var(--md-on-surface-var)", fontSize: 14 }}>
               {loading
                 ? "Loading…"
                 : `${photos.length} liked photos · ready to edit & post · press F on a thumb to remove`}
