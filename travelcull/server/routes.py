@@ -1577,46 +1577,93 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
         return out
 
 
-    def _find_darktable() -> Optional[str]:
-        """Return the path to darktable executable. Falls back to common
-        Windows install locations if shutil.which doesn't find it.
+    def _detached_popen_kwargs() -> dict:
+        """subprocess.Popen kwargs to fully detach a launched GUI editor.
+
+        Windows: DETACHED_PROCESS (no console window, survives parent exit).
+        POSIX (macOS/Linux): start_new_session puts the child in its own
+        session so it isn't tied to the server process/terminal.
         """
+        import subprocess
+        import sys
+
+        if sys.platform == "win32":
+            return {"creationflags": getattr(subprocess, "DETACHED_PROCESS", 0)}
+        return {"start_new_session": True}
+
+    def _find_editor_binary(
+        names: list[str], windows_candidates: list[Path]
+    ) -> Optional[str]:
+        """Locate an external editor binary across Windows/macOS/Linux.
+
+        Tries ``shutil.which`` for each of ``names`` first (works on every
+        OS when the binary is on PATH), then falls back to well-known
+        per-platform install locations:
+
+          * Windows: caller-supplied ``windows_candidates`` (e.g. the usual
+            "Program Files" layouts).
+          * macOS: ``/Applications/<app>.app/Contents/MacOS/<name>``.
+          * Linux: ``/usr/bin``, ``/usr/local/bin``, and — best-effort — the
+            Flatpak export path for darktable.
+        """
+        import platform
         import shutil
-        from pathlib import Path as _P
 
-        # Honour PATH first
-        found = shutil.which("darktable")
-        if found:
-            return found
+        for name in names:
+            found = shutil.which(name)
+            if found:
+                return found
 
-        # Common Windows install locations
-        candidates = [
-            r"C:\Program Files\darktable\bin\darktable.exe",
-            r"C:\Program Files (x86)\darktable\bin\darktable.exe",
-            r"C:\Program Files\darktable\darktable.exe",
-            r"C:\darktable\bin\darktable.exe",
-        ]
-        for c in candidates:
-            if _P(c).exists():
-                return c
+        system = platform.system()
+        candidates: list[Path] = []
+        if system == "Windows":
+            candidates.extend(windows_candidates)
+        elif system == "Darwin":
+            for name in names:
+                # darktable and darktable-cli both live inside darktable.app;
+                # take the part before the first "-" as the app bundle name.
+                app_name = name.split("-")[0]
+                candidates.append(
+                    Path("/Applications")
+                    / f"{app_name}.app" / "Contents" / "MacOS" / name
+                )
+        else:  # Linux and other POSIX systems
+            for base in (Path("/usr/bin"), Path("/usr/local/bin")):
+                for name in names:
+                    candidates.append(base / name)
+            if any(n.startswith("darktable") for n in names):
+                # Flatpak exports use the app's reverse-DNS id rather than
+                # the raw binary name; best-effort guess.
+                candidates.append(
+                    Path("/var/lib/flatpak/exports/bin/org.darktable.Darktable")
+                )
+
+        for cand in candidates:
+            if cand.exists():
+                return str(cand)
         return None
+
+    def _find_darktable() -> Optional[str]:
+        """Return the path to the darktable executable, if discoverable."""
+        return _find_editor_binary(
+            ["darktable"],
+            windows_candidates=[
+                Path(r"C:\Program Files\darktable\bin\darktable.exe"),
+                Path(r"C:\Program Files (x86)\darktable\bin\darktable.exe"),
+                Path(r"C:\Program Files\darktable\darktable.exe"),
+                Path(r"C:\darktable\bin\darktable.exe"),
+            ],
+        )
 
     def _find_darktable_cli() -> Optional[str]:
-        """Same auto-discovery for darktable-cli (ships next to darktable.exe)."""
-        import shutil
-        from pathlib import Path as _P
-
-        found = shutil.which("darktable-cli")
-        if found:
-            return found
-        candidates = [
-            r"C:\Program Files\darktable\bin\darktable-cli.exe",
-            r"C:\Program Files (x86)\darktable\bin\darktable-cli.exe",
-        ]
-        for c in candidates:
-            if _P(c).exists():
-                return c
-        return None
+        """Same auto-discovery for darktable-cli (ships next to darktable)."""
+        return _find_editor_binary(
+            ["darktable-cli"],
+            windows_candidates=[
+                Path(r"C:\Program Files\darktable\bin\darktable-cli.exe"),
+                Path(r"C:\Program Files (x86)\darktable\bin\darktable-cli.exe"),
+            ],
+        )
 
     @app.post("/api/edit/darktable")
     def launch_darktable(payload: dict = Body(...)):
@@ -1642,7 +1689,9 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
                 detail=(
                     "darktable not found. Install it from "
                     "https://www.darktable.org/install/ — the launcher checks "
-                    "PATH plus C:\\Program Files\\darktable\\bin\\darktable.exe."
+                    "PATH plus common per-OS install locations "
+                    "(e.g. Program Files on Windows, /Applications on macOS, "
+                    "/usr/bin or Flatpak on Linux)."
                 ),
             )
 
@@ -1661,11 +1710,7 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
 
         cmd = [editor_cmd, "--library", str(library_path), *paths]
         try:
-            subprocess.Popen(
-                cmd,
-                creationflags=getattr(subprocess, "DETACHED_PROCESS", 0),
-                close_fds=True,
-            )
+            subprocess.Popen(cmd, close_fds=True, **_detached_popen_kwargs())
         except Exception as exc:
             raise HTTPException(500, detail=f"failed to launch darktable: {exc}")
 
@@ -1772,9 +1817,7 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
 
         try:
             subprocess.Popen(
-                [editor_cmd, *paths],
-                creationflags=getattr(subprocess, "DETACHED_PROCESS", 0),
-                close_fds=True,
+                [editor_cmd, *paths], close_fds=True, **_detached_popen_kwargs()
             )
         except Exception as exc:
             raise HTTPException(500, detail=f"failed to launch {editor}: {exc}")

@@ -124,6 +124,10 @@ exe = EXE(
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
+    # TODO(macOS): unsigned builds will be Gatekeeper-blocked on other
+    # machines. Set codesign_identity + entitlements_file (and staple a
+    # notarization ticket) before distributing a macOS build. Out of scope
+    # for this pass.
     codesign_identity=None,
     entitlements_file=None,
 )
