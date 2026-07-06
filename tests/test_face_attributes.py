@@ -388,8 +388,12 @@ def test_fresh_db_stamped_at_new_head(tmp_path: Path) -> None:
 
     cfg = Config()
     cfg.set_main_option("script_location", str(_MIGRATIONS_DIR))
-    head = ScriptDirectory.from_config(cfg).get_current_head()
-    assert head == "c3d4e5f6a7b8"
+    script = ScriptDirectory.from_config(cfg)
+    head = script.get_current_head()
+    # Head advances as later features chain migrations; what matters here is
+    # that this feature's revision is an ancestor of the current head.
+    assert "c3d4e5f6a7b8" in {rev.revision for rev in script.walk_revisions()}
+    assert head == "d4e5f6a7b8c9"
 
     conn = sqlite3.connect(str(db_path))
     try:

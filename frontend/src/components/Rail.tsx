@@ -120,6 +120,20 @@ export default function Rail() {
       </NavLink>
 
       <NavLink
+        to="/videos"
+        className={({ isActive }) => "rail-item" + (isActive ? " is-active" : "")}
+        title="Videos — frame quality, dead footage & highlights"
+      >
+        <span className="icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="2" y="5" width="20" height="14" rx="2" />
+            <path d="m10 9 5 3-5 3z" />
+          </svg>
+        </span>
+        Videos
+      </NavLink>
+
+      <NavLink
         to="/duplicates"
         className={({ isActive }) => "rail-item" + (isActive ? " is-active" : "")}
         title="Duplicates — cross-library duplicate report"
