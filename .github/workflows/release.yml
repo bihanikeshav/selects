@@ -3,6 +3,7 @@ name: Release builds
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch: {}  # allow manual runs from the Actions tab
 
 jobs:
   build:
@@ -71,6 +72,8 @@ jobs:
           python -m build
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true  # don't fail if this version is already on PyPI
 
   release:
     needs: build
