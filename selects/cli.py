@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import webbrowser
 from pathlib import Path
 
 import click
@@ -152,13 +151,11 @@ def serve(folder: Path | None, port: int, host: str, no_browser: bool, no_backgr
     url = f"http://{'127.0.0.1' if host == '0.0.0.0' else host}:{port}"
 
     if not no_browser:
-        def _open_browser():
-            import time
+        from selects.launcher import open_ui
 
-            time.sleep(1.5)
-            webbrowser.open(url)
-
-        threading.Thread(target=_open_browser, daemon=True).start()
+        # open_ui polls until the server answers, then opens an app window —
+        # more reliable than a fixed sleep + webbrowser.open when double-clicked.
+        threading.Thread(target=open_ui, args=(url,), daemon=True).start()
 
     click.echo(f"selects serving at {url}")
     uvicorn.run(app, host=host, port=port, log_level="warning")
