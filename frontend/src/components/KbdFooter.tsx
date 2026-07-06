@@ -1,48 +1,58 @@
 /**
- * Bottom keyboard hint bar. Mirrors the actual keys handled in BurstCull.tsx
- * (its own handler + the useCullKeys layer).
- * Updated 2026-07-06: keyboard-first culling — X/C decisions, undo, zoom,
- * burst jump and compare selection.
+ * Bottom keyboard hint bar. Mirrors the keys handled in BurstCull.tsx and the
+ * useCullKeys layer, as one consistent single-line chip row grouped by
+ * decisions / edit / view / navigation. Kept to a single line so it never wraps
+ * and clips against the fixed-height footer; scrolls horizontally if too narrow.
  */
+type Chip = { keys: string[]; label: string; tone?: "positive" | "danger" | "primary" };
+
+const GROUPS: Chip[][] = [
+  [
+    { keys: ["C"], label: "keep", tone: "positive" },
+    { keys: ["X"], label: "reject", tone: "danger" },
+    { keys: ["L"], label: "silver" },
+  ],
+  [
+    { keys: ["F"], label: "like" },
+    { keys: ["D"], label: "discard" },
+    { keys: ["E"], label: "enhance" },
+    { keys: ["S"], label: "straighten" },
+  ],
+  [
+    { keys: ["Z"], label: "zoom" },
+    { keys: ["V"], label: "compare", tone: "primary" },
+    { keys: ["U"], label: "undo" },
+  ],
+  [
+    { keys: ["↑", "↓"], label: "prev / next" },
+    { keys: ["Tab"], label: "next burst" },
+    { keys: ["[", "]"], label: "burst cycle" },
+  ],
+];
+
 export default function KbdFooter() {
   return (
     <footer className="kbd-footer">
-      <span className="kbd-action is-positive">
-        <span className="kbd">C</span> <span className="kbd">→</span>{" "}
-        <span className="kbd">Space</span> keep
-      </span>
-      <span className="kbd-action is-danger">
-        <span className="kbd">X</span> <span className="kbd">←</span> reject
-      </span>
-      <span className="kbd-action">
-        <span className="kbd">U</span> undo
-      </span>
-      <span className="kbd-action">
-        <span className="kbd">Z</span> zoom 100%
-      </span>
-      <span className="kbd-action is-primary">
-        <span className="kbd">V</span> compare 2–4
-      </span>
-      <span className="kbd-action">
-        <span className="kbd">Tab</span> next burst
-      </span>
-      <span className="kbd-action">
-        <span className="kbd">[</span> <span className="kbd">]</span> burst cycle
-      </span>
-      <span className="kbd-action">
-        <span className="kbd">↑</span> <span className="kbd">↓</span> prev / next
-      </span>
-
-      <div className="kbd-footer-spacer"></div>
-
-      <span className="kbd-help">
-        <span className="kbd">F</span> like ·
-        <span className="kbd" style={{ marginLeft: 6 }}>D</span> discard ·
-        <span className="kbd" style={{ marginLeft: 6 }}>E</span> enhance ·
-        <span className="kbd" style={{ marginLeft: 6 }}>S</span> straighten ·
-        <span className="kbd" style={{ marginLeft: 6 }}>J</span>/
-        <span className="kbd">K</span>/<span className="kbd">L</span> reject / keep / silver
-      </span>
+      {GROUPS.map((group, gi) => (
+        <div className="kbd-group" key={gi}>
+          {group.map((chip) => (
+            <span
+              className={`kbd-action${chip.tone ? ` is-${chip.tone}` : ""}`}
+              key={chip.label}
+            >
+              {chip.keys.map((k) => (
+                <span className="kbd" key={k}>
+                  {k}
+                </span>
+              ))}
+              {chip.label}
+            </span>
+          ))}
+          {gi < GROUPS.length - 1 && (
+            <span className="kbd-divider" aria-hidden="true" />
+          )}
+        </div>
+      ))}
     </footer>
   );
 }
