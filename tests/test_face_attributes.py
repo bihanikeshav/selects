@@ -21,12 +21,12 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from travelcull.config import get_folder_config
-from travelcull.db import _ENGINES, _ENGINES_LOCK, init_db, session_scope
-from travelcull.db.models import (
+from selects.config import get_folder_config
+from selects.db import _ENGINES, _ENGINES_LOCK, init_db, session_scope
+from selects.db.models import (
     AestheticScore, FaceEmbedding, Moment, MomentMember, Photo,
 )
-from travelcull.ml.face_attributes import (
+from selects.ml.face_attributes import (
     EYES_CLOSED_THRESHOLD,
     PENALTY_CAP,
     FaceAttrs,
@@ -226,7 +226,7 @@ def _seed_burst(tmp_path: Path, *, combined_a: float, combined_b: float):
 
 
 def test_curate_prefers_eyes_open_among_near_equal(tmp_path: Path) -> None:
-    from travelcull.ml.curation import curate
+    from selects.ml.curation import curate
 
     # A slightly better aesthetically (7.0 vs 6.9) but eyes closed.
     Session, (a_id, b_id) = _seed_burst(tmp_path, combined_a=7.0, combined_b=6.9)
@@ -237,7 +237,7 @@ def test_curate_prefers_eyes_open_among_near_equal(tmp_path: Path) -> None:
 
 
 def test_curate_does_not_override_big_aesthetic_gap(tmp_path: Path) -> None:
-    from travelcull.ml.curation import curate
+    from selects.ml.curation import curate
 
     # A is much better (8.0 vs 6.5); the bounded penalty must not flip it.
     Session, (a_id, b_id) = _seed_burst(tmp_path, combined_a=8.0, combined_b=6.5)
@@ -251,7 +251,7 @@ def test_curate_does_not_override_big_aesthetic_gap(tmp_path: Path) -> None:
 
 @pytest.fixture
 def fq_app(tmp_path):
-    from travelcull.server.faces2_routes import register_faces2_routes
+    from selects.server.faces2_routes import register_faces2_routes
 
     cfg = get_folder_config(tmp_path)
     Session = init_db(cfg.db_path)
@@ -325,7 +325,7 @@ def _face_embeddings_columns(db_path: Path) -> set[str]:
 def test_legacy_db_gains_face_attribute_columns(tmp_path: Path) -> None:
     """A pre-Alembic DB whose face_embeddings table lacks the attribute
     columns is upgraded in place; existing rows survive with NULL attrs."""
-    db_path = tmp_path / ".travelcull" / "index.db"
+    db_path = tmp_path / ".selects" / "index.db"
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path))
     try:
@@ -378,9 +378,9 @@ def test_fresh_db_stamped_at_new_head(tmp_path: Path) -> None:
     from alembic.config import Config
     from alembic.script import ScriptDirectory
 
-    from travelcull.db import _MIGRATIONS_DIR
+    from selects.db import _MIGRATIONS_DIR
 
-    db_path = tmp_path / ".travelcull" / "index.db"
+    db_path = tmp_path / ".selects" / "index.db"
     init_db(db_path)
 
     cols = _face_embeddings_columns(db_path)

@@ -1,4 +1,4 @@
-"""Tests for travelcull.db (models + session)."""
+"""Tests for selects.db (models + session)."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from travelcull.db import init_db, session_scope
-from travelcull.db.models import ClassicalScore, Photo, PipelineState, Video
+from selects.db import init_db, session_scope
+from selects.db.models import ClassicalScore, Photo, PipelineState, Video
 
 
 @pytest.fixture()

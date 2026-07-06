@@ -19,8 +19,8 @@ from PIL import Image
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("ap25")
 
-DB = Path("Z:/Ladakh/Photos/.travelcull/index.db")
-STATE = Path("Z:/Ladakh/Photos/.travelcull")
+DB = Path("Z:/Ladakh/Photos/.selects/index.db")
+STATE = Path("Z:/Ladakh/Photos/.selects")
 
 
 def main() -> int:

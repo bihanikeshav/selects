@@ -15,8 +15,8 @@ import json
 import sqlite3
 from pathlib import Path
 
-DB = "Z:/Ladakh/Photos/.travelcull/index.db"
-STATE = "Z:/Ladakh/Photos/.travelcull"
+DB = "Z:/Ladakh/Photos/.selects/index.db"
+STATE = "Z:/Ladakh/Photos/.selects"
 OUT = "Z:/travel_post/personal_performance.html"
 
 

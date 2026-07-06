@@ -37,7 +37,7 @@ const STEPS = [
   {
     n: 1,
     title: "Point at a folder",
-    body: "Give travelcull the folder that holds a trip's photos. Everything stays on your machine.",
+    body: "Give selects the folder that holds a trip's photos. Everything stays on your machine.",
   },
   {
     n: 2,
@@ -192,7 +192,7 @@ export default function Onboarding() {
       <div className="onb-inner">
         <header className="onb-hero">
           <div className="onb-brand">
-            <span className="dot" aria-hidden="true"></span>travelcull
+            <span className="dot" aria-hidden="true"></span>selects
           </div>
           <p className="onb-pitch">
             Cull your travel photos locally with AI — nothing leaves your machine.
@@ -266,7 +266,7 @@ export default function Onboarding() {
               <>
                 <h2>Download AI models</h2>
                 <p className="onb-progress-caption">
-                  travelcull needs a few model files for AI scoring, tags and
+                  selects needs a few model files for AI scoring, tags and
                   stories. They download once and stay on your machine.
                 </p>
                 <ul className="onb-models-list">

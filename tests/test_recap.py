@@ -1,4 +1,4 @@
-"""Tests for travelcull.recap: self-contained trip-recap HTML generation."""
+"""Tests for selects.recap: self-contained trip-recap HTML generation."""
 from __future__ import annotations
 
 from datetime import datetime, timedelta
@@ -7,10 +7,10 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from travelcull.config import get_folder_config
-from travelcull.db import init_db, session_scope
-from travelcull.db.models import AestheticScore, Embedding, Photo, Story, StoryItem, Visit
-from travelcull.recap import RecapError, generate_recap, recap_output_path
+from selects.config import get_folder_config
+from selects.db import init_db, session_scope
+from selects.db.models import AestheticScore, Embedding, Photo, Story, StoryItem, Visit
+from selects.recap import RecapError, generate_recap, recap_output_path
 
 
 def _make_preview(cfg, sha: str, color=(120, 80, 40)) -> str:

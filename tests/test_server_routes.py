@@ -4,11 +4,11 @@ from pathlib import Path
 import pytest
 from httpx import AsyncClient, ASGITransport
 
-from travelcull.config import get_folder_config
-from travelcull.db import init_db
-from travelcull.indexer.orchestrator import index_folder
-from travelcull.pipeline import run_classical_stage
-from travelcull.server.app import build_app
+from selects.config import get_folder_config
+from selects.db import init_db
+from selects.indexer.orchestrator import index_folder
+from selects.pipeline import run_classical_stage
+from selects.server.app import build_app
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 

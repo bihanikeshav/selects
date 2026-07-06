@@ -3,7 +3,7 @@ import sqlite3
 from collections import defaultdict
 from pathlib import Path
 
-DB = Path(r"Z:\Ladakh\Photos\.travelcull\index.db")
+DB = Path(r"Z:\Ladakh\Photos\.selects\index.db")
 c = sqlite3.connect(str(DB)).cursor()
 
 print("="*80)

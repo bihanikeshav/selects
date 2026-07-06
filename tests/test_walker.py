@@ -1,11 +1,11 @@
-"""Tests for travelcull.indexer.walker."""
+"""Tests for selects.indexer.walker."""
 from __future__ import annotations
 
 from pathlib import Path
 
 import pytest
 
-from travelcull.indexer.walker import FileKind, classify, sha256_of, walk_supported
+from selects.indexer.walker import FileKind, classify, sha256_of, walk_supported
 
 
 class TestClassify:
@@ -65,10 +65,10 @@ class TestWalkSupported:
         # Should find img001.jpg, img002.HEIC, sub/img003.jpeg, clip001.mp4
         assert len(found) == 4
 
-    def test_skips_travelcull_dir(self, populated_folder: Path) -> None:
+    def test_skips_selects_dir(self, populated_folder: Path) -> None:
         found = list(walk_supported(populated_folder))
         paths = [str(p) for p, _ in found]
-        assert not any(".travelcull" in p for p in paths)
+        assert not any(".selects" in p for p in paths)
 
     def test_skips_git_dir(self, populated_folder: Path) -> None:
         found = list(walk_supported(populated_folder))

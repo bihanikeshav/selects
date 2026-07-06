@@ -1,6 +1,6 @@
 import numpy as np
 
-from travelcull.classical.faces import detect_faces
+from selects.classical.faces import detect_faces
 
 
 def test_detect_returns_list_for_random_image():

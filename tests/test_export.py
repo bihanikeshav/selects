@@ -1,4 +1,4 @@
-"""Tests for travelcull.export: file export (copy/zip) + XMP rating write-back."""
+"""Tests for selects.export: file export (copy/zip) + XMP rating write-back."""
 from __future__ import annotations
 
 import zipfile
@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from travelcull.export import (
+from selects.export import (
     ExportItem,
     export_photos,
     plan_xmp_write,

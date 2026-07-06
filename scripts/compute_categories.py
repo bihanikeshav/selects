@@ -18,7 +18,7 @@ import numpy as np
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("categories")
 
-DB = Path("Z:/Ladakh/Photos/.travelcull/index.db")
+DB = Path("Z:/Ladakh/Photos/.selects/index.db")
 
 # Three category prompts.
 PROMPTS = {
@@ -35,7 +35,7 @@ PRIMARY_MIN_SIM = 0.02
 
 
 def main() -> int:
-    from travelcull.ml.embed import encode_text_prompts
+    from selects.ml.embed import encode_text_prompts
 
     log.info("encoding %d category prompts via SigLIP text head", len(PROMPTS))
     prompt_keys = list(PROMPTS.keys())

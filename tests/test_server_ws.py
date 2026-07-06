@@ -1,6 +1,6 @@
 import asyncio
 
-from travelcull.server.ws import ProgressBus
+from selects.server.ws import ProgressBus
 
 
 async def test_progress_bus_publishes():

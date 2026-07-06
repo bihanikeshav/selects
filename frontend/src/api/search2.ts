@@ -1,5 +1,5 @@
 // Hybrid discovery search API (SigLIP semantic + RAM++ tag matches + filters).
-// Talks to /api/search2 (own new endpoint — see travelcull/server/search2_routes.py).
+// Talks to /api/search2 (own new endpoint — see selects/server/search2_routes.py).
 // Mirrors the fetch style of ./client.ts.
 
 const BASE = "/api";

@@ -1,4 +1,4 @@
-"""Tests for taste personalization (travelcull/ml/taste.py + curation blend)."""
+"""Tests for taste personalization (selects/ml/taste.py + curation blend)."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -6,11 +6,11 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from travelcull.config import get_folder_config
-from travelcull.db import init_db, session_scope
-from travelcull.db.models import AestheticScore, Embedding, Photo, Swipe
-from travelcull.ml import taste
-from travelcull.ml.curation import curate
+from selects.config import get_folder_config
+from selects.db import init_db, session_scope
+from selects.db.models import AestheticScore, Embedding, Photo, Swipe
+from selects.ml import taste
+from selects.ml.curation import curate
 
 
 DIM = 64

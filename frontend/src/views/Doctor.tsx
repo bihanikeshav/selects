@@ -121,7 +121,7 @@ export default function Doctor() {
           overflow: "hidden",
         }}
       >
-        <Topbar folder="travelcull" context="image doctor" />
+        <Topbar folder="selects" context="image doctor" />
 
         <div
           style={{

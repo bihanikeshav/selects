@@ -286,7 +286,7 @@ function StoryCard({ story }: { story: StoryEntry }) {
             className="btn btn-tonal"
             onClick={exportStory}
             disabled={exporting || story.items.length === 0}
-            title="Copy this story's photos to .travelcull/exports/stories/<title>/ in carousel order"
+            title="Copy this story's photos to .selects/exports/stories/<title>/ in carousel order"
           >
             {ExportIcon}
             {exporting ? "Exporting…" : "Export"}
@@ -1017,7 +1017,7 @@ export default function Stories() {
     <div className="app">
       <Rail />
       <div className="workspace">
-        <Topbar folder="travelcull" context={likedOnly ? "curated · stories" : "stories"} />
+        <Topbar folder="selects" context={likedOnly ? "curated · stories" : "stories"} />
         <ModeViewBar />
         <StatusRow details={statusDetails} />
 
@@ -1068,7 +1068,7 @@ export default function Stories() {
                     borderRadius: 4,
                   }}
                 >
-                  travelcull index &lt;folder&gt; --pass story
+                  selects index &lt;folder&gt; --pass story
                 </code>{" "}
                 to build narrative sequences
               </div>

@@ -52,7 +52,7 @@ export default function Persons() {
     <div className="app">
       <Rail />
       <div className="workspace">
-        <Topbar folder="travelcull" context="persons" />
+        <Topbar folder="selects" context="persons" />
         <StatusRow
           pos={`${persons.length} identities`}
           keepersCount={persons.filter(p => p.label).length}

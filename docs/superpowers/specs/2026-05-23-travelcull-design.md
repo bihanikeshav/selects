@@ -1,8 +1,8 @@
-# travelcull — design spec
+# selects — design spec
 
 **Status:** ready to build
 **Date:** 2026-05-23
-**Working name:** `travelcull` (placeholder, rename pre-1.0)
+**Working name:** `selects` (placeholder, rename pre-1.0)
 **Validation dataset:** `Z:\Ladakh\Photos` — 1065 files (537 JPG, 465 HEIC, 63 MP4, 9-day trip Mar 28–Apr 6 2026)
 
 ## Success criterion
@@ -16,7 +16,7 @@ Three-process local app:
 - **ML Worker** (Python + CUDA) — long-running, holds GPU, runs the 6-stage pipeline.
 - **Web Server** (FastAPI) — serves the Material 3 React UI at `localhost:5173`.
 
-Data: SQLite sidecar at folder root (`.travelcull.db`) + previews in `.travelcull/thumbs/`. Originals never modified.
+Data: SQLite sidecar at folder root (`.selects.db`) + previews in `.selects/thumbs/`. Originals never modified.
 
 ## Pipeline (photos)
 
@@ -27,13 +27,13 @@ Data: SQLite sidecar at folder root (`.travelcull.db`) + previews in `.travelcul
 | 3. Burst clustering | NumPy/sklearn — adjacent in time + cosine ≥0.85 | CPU | instant |
 | 4. Smart pass | Qwen3-VL-4B AWQ-int4 + logit-readout rubric ("Next Token Is Enough" 2-digit extension) + constrained-JSON tagging | ~5GB | 1.5–3/s |
 | 5. Narrative ordering | Qwen3-VL-8B AWQ-int4 — interleaved-MRoPE multi-image | ~7GB | 1 cluster / 10–30s |
-| 6. Personalization | Logistic regression on SigLIP embeddings (sklearn) — hybrid per-folder seeded from `%APPDATA%\travelcull\global_taste.pkl` | negligible | refits in <1s every 10 swipes |
+| 6. Personalization | Logistic regression on SigLIP embeddings (sklearn) — hybrid per-folder seeded from `%APPDATA%\selects\global_taste.pkl` | negligible | refits in <1s every 10 swipes |
 
 **Model lifecycle:** SigLIP → unload → Qwen3-VL-4B → unload → Qwen3-VL-8B. Peak VRAM ~7GB. Fits 8GB cards.
 
 **Axis rubric** (per photo, logit-readout): composition, lighting, subject, sharpness, memory_value. Five forward passes per photo, visual encoder runs once.
 
-**Tag taxonomy** — fixed default + user-extensible via `.travelcull/tags.toml`:
+**Tag taxonomy** — fixed default + user-extensible via `.selects/tags.toml`:
 - Photo tags: food / landscape / portrait / street / architecture / night / nature / wildlife / interior / vehicles / abstract / document / sky / water / mountain
 - Video buckets: vlog / action / landscape / food / people / transit / timelapse
 
@@ -70,7 +70,7 @@ Following user directive ("always GPU when possible, NVDEC/NVENC much faster"):
 ## Output formats
 
 - **JSON manifest** — primary output, contains everything (paths, scores, tags, story orderings, decisions).
-- **XMP sidecars** — write `IMG_4781.HEIC.xmp` next to each photo with: star rating (derived from `final_score`), color label (cluster category), keywords, picked/rejected flag, custom `travelcull:*` namespace for round-tripping our scores. Standard format consumed by **darktable** (primary integration target), RawTherapee, Lightroom.
+- **XMP sidecars** — write `IMG_4781.HEIC.xmp` next to each photo with: star rating (derived from `final_score`), color label (cluster category), keywords, picked/rejected flag, custom `selects:*` namespace for round-tripping our scores. Standard format consumed by **darktable** (primary integration target), RawTherapee, Lightroom.
 - **Symlink folder** — `<folder>/keepers/` organized by cluster or by story.
 - **Flat JPEG copy** — for sharing; HEIC transcoded via NVENC where applicable.
 - **Per-story carousel** — sequentially numbered JPEGs ready for Instagram drag-drop.
@@ -95,7 +95,7 @@ Top app bar, status row with view-tab pills, navigation rail on left, keyboard h
 
 ## Personalization
 
-Hybrid model — each folder gets its own `~/.travelcull/models/<folder-hash>.pkl`, **seeded from** `%APPDATA%\travelcull\global_taste.pkl` so a new folder doesn't start from scratch. Re-fits in <1s every 10 swipes via sklearn. Trained on positive (keep/silver) vs negative (reject) labels over SigLIP embeddings.
+Hybrid model — each folder gets its own `~/.selects/models/<folder-hash>.pkl`, **seeded from** `%APPDATA%\selects\global_taste.pkl` so a new folder doesn't start from scratch. Re-fits in <1s every 10 swipes via sklearn. Trained on positive (keep/silver) vs negative (reject) labels over SigLIP embeddings.
 
 Final ranking:
 ```
@@ -106,7 +106,7 @@ final_score = 0.4 * aesthetic_v25_norm
 
 ## Data model
 
-SQLite sidecar at `.travelcull.db`. Eight core tables: `photo`, `video`, `video_shot`, `classical_score`, `embedding`, `burst`, `burst_member`, `vl_score`, `photo_tag`, `swipe`, `pipeline_state`. Schema is content-hash keyed for instant re-runs.
+SQLite sidecar at `.selects.db`. Eight core tables: `photo`, `video`, `video_shot`, `classical_score`, `embedding`, `burst`, `burst_member`, `vl_score`, `photo_tag`, `swipe`, `pipeline_state`. Schema is content-hash keyed for instant re-runs.
 
 Storage budget for Ladakh dataset (1065 files): ~30MB SQLite, ~180MB thumbnails+previews. Originals untouched.
 
@@ -121,7 +121,7 @@ Storage budget for Ladakh dataset (1065 files): ~30MB SQLite, ~180MB thumbnails+
 - XMP sidecar writer + darktable launch action
 - Watch-folder mode
 - Three speed modes
-- Windows-only, `pip install travelcull`
+- Windows-only, `pip install selects`
 - MIT license
 
 **Out of scope:**

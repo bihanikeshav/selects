@@ -28,8 +28,8 @@ sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="repla
 import torch
 from transformers import AutoProcessor, AutoModelForImageTextToText, Qwen3VLForConditionalGeneration
 
-DB_PATH    = r"Z:\Ladakh\Photos\.travelcull\index.db"
-PREV_BASE  = r"Z:\Ladakh\Photos\.travelcull\previews"
+DB_PATH    = r"Z:\Ladakh\Photos\.selects\index.db"
+PREV_BASE  = r"Z:\Ladakh\Photos\.selects\previews"
 CLUSTER    = "monastery hillside"   # 11 photos, clearly distinctive
 N_PHOTOS   = 5
 

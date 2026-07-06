@@ -1,8 +1,8 @@
-# travelcull M1: Indexer + UI Shell — Implementation Plan
+# selects M1: Indexer + UI Shell — Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build the foundation of travelcull — a Python package that walks a folder, generates GPU-decoded thumbnails for HEIC/JPG/RAW/MP4, runs classical reject signals (blur, exposure, faces, eyes-open), persists everything in a SQLite sidecar, and serves a Material 3 React UI at `localhost:5173` that displays the indexed photos in a burst-cull view. End-state: `travelcull index Z:\Ladakh\Photos && travelcull serve` opens a browser showing all 1065 Ladakh files with auto-reject flags visible.
+**Goal:** Build the foundation of selects — a Python package that walks a folder, generates GPU-decoded thumbnails for HEIC/JPG/RAW/MP4, runs classical reject signals (blur, exposure, faces, eyes-open), persists everything in a SQLite sidecar, and serves a Material 3 React UI at `localhost:5173` that displays the indexed photos in a burst-cull view. End-state: `selects index Z:\Ladakh\Photos && selects serve` opens a browser showing all 1065 Ladakh files with auto-reject flags visible.
 
 **Architecture:** Three-process Python app — `Indexer` walks files and writes DB rows + previews, `Worker` runs classical Stage 1 signals (M1 only — ML stages come in M2/M3), `Server` (FastAPI) serves the React UI and exposes REST + WebSocket APIs. SQLite sidecar at folder root. GPU-first decode via nvImageCodec (JPEG) + pillow-heif (HEIC, CPU upload) + rawpy embedded preview (RAW) + torchcodec/PyAV with `-hwaccel cuda` (video). All frames stay GPU-resident through preprocessing where possible.
 
@@ -12,9 +12,9 @@
 
 ## Stolen patterns (from OSS competitor audit)
 
-- **Multi-pass CLI** (Facet): `travelcull index --pass classical|embed|vl` so users can budget GPU time.
+- **Multi-pass CLI** (Facet): `selects index --pass classical|embed|vl` so users can budget GPU time.
 - **Multi-tier preview cache** (PhotoSort): 256² thumb + 1024² preview, both written once at index time, never re-decoded.
-- **Diagnostic command** (Facet `--doctor`): `travelcull doctor` reports CUDA/NVDEC/nvImageCodec capability and what falls back to CPU.
+- **Diagnostic command** (Facet `--doctor`): `selects doctor` reports CUDA/NVDEC/nvImageCodec capability and what falls back to CPU.
 - **Idempotent re-runs** (Facet `--upgrade-db`): every file is keyed by SHA256; re-running on the same folder is a no-op for unchanged files.
 - **Orientation-partitioned clustering** (PhotoSort): when burst grouping arrives in M2, cluster portrait+landscape separately.
 
@@ -34,9 +34,9 @@ Z:\travel_post\
 ├── pyproject.toml                          # package metadata, deps, ruff/pytest config
 ├── .gitignore
 ├── README.md                                # quickstart only; full docs later
-├── travelcull/                              # Python package
+├── selects/                              # Python package
 │   ├── __init__.py                          # __version__
-│   ├── __main__.py                          # python -m travelcull → cli.main()
+│   ├── __main__.py                          # python -m selects → cli.main()
 │   ├── cli.py                               # click commands: index, serve, doctor
 │   ├── config.py                            # pydantic Settings (paths, devices, ports)
 │   ├── db/
@@ -119,7 +119,7 @@ Z:\travel_post\
     └── test_integration_ladakh.py           # gated by env var, real-data smoke
 ```
 
-Test fixtures (`tests/fixtures/`) are small files committed to the repo; the Ladakh test is gated by `TRAVELCULL_LADAKH_PATH` env var so CI doesn't need 1065 files.
+Test fixtures (`tests/fixtures/`) are small files committed to the repo; the Ladakh test is gated by `SELECTS_LADAKH_PATH` env var so CI doesn't need 1065 files.
 
 ---
 
@@ -128,7 +128,7 @@ Test fixtures (`tests/fixtures/`) are small files committed to the repo; the Lad
 **Files:**
 - Create: `Z:\travel_post\pyproject.toml`
 - Create: `Z:\travel_post\.gitignore`
-- Create: `Z:\travel_post\travelcull\__init__.py`
+- Create: `Z:\travel_post\selects\__init__.py`
 - Create: `Z:\travel_post\tests\__init__.py`
 - Create: `Z:\travel_post\tests\conftest.py`
 
@@ -140,7 +140,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "travelcull"
+name = "selects"
 version = "0.1.0"
 description = "Local AI-assisted travel photo and video culling"
 requires-python = ">=3.11"
@@ -180,10 +180,10 @@ dev = [
 ]
 
 [project.scripts]
-travelcull = "travelcull.cli:main"
+selects = "selects.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["travelcull"]
+packages = ["selects"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -212,15 +212,15 @@ dist/
 build/
 node_modules/
 frontend/dist/
-.travelcull/
-.travelcull.db
+.selects/
+.selects.db
 .env
 .env.local
 ```
 
 - [ ] **Step 3: Create package __init__**
 
-`Z:\travel_post\travelcull\__init__.py`:
+`Z:\travel_post\selects\__init__.py`:
 ```python
 __version__ = "0.1.0"
 ```
@@ -263,15 +263,15 @@ Expected: install succeeds. If `nvidia-nvimgcodec-cu12` fails, note it — we'll
 
 - [ ] **Step 6: Verify package imports**
 
-Run: `python -c "import travelcull; print(travelcull.__version__)"`
+Run: `python -c "import selects; print(selects.__version__)"`
 Expected: `0.1.0`
 
 - [ ] **Step 7: Commit**
 
 ```powershell
 git init
-git add pyproject.toml .gitignore travelcull/__init__.py tests/__init__.py tests/conftest.py
-git commit -m "chore: scaffold travelcull package and pytest config"
+git add pyproject.toml .gitignore selects/__init__.py tests/__init__.py tests/conftest.py
+git commit -m "chore: scaffold selects package and pytest config"
 ```
 
 ---
@@ -279,7 +279,7 @@ git commit -m "chore: scaffold travelcull package and pytest config"
 ## Task 2: Config (pydantic Settings)
 
 **Files:**
-- Create: `Z:\travel_post\travelcull\config.py`
+- Create: `Z:\travel_post\selects\config.py`
 - Test: `Z:\travel_post\tests\test_config.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -289,20 +289,20 @@ git commit -m "chore: scaffold travelcull package and pytest config"
 import os
 from pathlib import Path
 
-from travelcull.config import FolderConfig, get_folder_config
+from selects.config import FolderConfig, get_folder_config
 
 
 def test_default_config_uses_folder_path(tmp_path):
     cfg = get_folder_config(tmp_path)
     assert cfg.folder == tmp_path
-    assert cfg.db_path == tmp_path / ".travelcull.db"
-    assert cfg.thumbs_dir == tmp_path / ".travelcull" / "thumbs"
-    assert cfg.previews_dir == tmp_path / ".travelcull" / "previews"
+    assert cfg.db_path == tmp_path / ".selects.db"
+    assert cfg.thumbs_dir == tmp_path / ".selects" / "thumbs"
+    assert cfg.previews_dir == tmp_path / ".selects" / "previews"
     assert cfg.web_port == 5173
 
 
 def test_config_respects_env_override(tmp_path, monkeypatch):
-    monkeypatch.setenv("TRAVELCULL_WEB_PORT", "8080")
+    monkeypatch.setenv("SELECTS_WEB_PORT", "8080")
     cfg = get_folder_config(tmp_path)
     assert cfg.web_port == 8080
 ```
@@ -314,7 +314,7 @@ Expected: ImportError (module not yet created).
 
 - [ ] **Step 3: Write config module**
 
-`travelcull/config.py`:
+`selects/config.py`:
 ```python
 from pathlib import Path
 
@@ -323,9 +323,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class FolderConfig(BaseSettings):
-    """Per-folder configuration. Reads env vars prefixed TRAVELCULL_."""
+    """Per-folder configuration. Reads env vars prefixed SELECTS_."""
 
-    model_config = SettingsConfigDict(env_prefix="TRAVELCULL_", extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="SELECTS_", extra="ignore")
 
     folder: Path
     web_port: int = 5173
@@ -336,11 +336,11 @@ class FolderConfig(BaseSettings):
 
     @property
     def state_dir(self) -> Path:
-        return self.folder / ".travelcull"
+        return self.folder / ".selects"
 
     @property
     def db_path(self) -> Path:
-        return self.folder / ".travelcull.db"
+        return self.folder / ".selects.db"
 
     @property
     def thumbs_dir(self) -> Path:
@@ -363,7 +363,7 @@ Expected: 2 passed.
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add travelcull/config.py tests/test_config.py
+git add selects/config.py tests/test_config.py
 git commit -m "feat(config): per-folder pydantic Settings with env override"
 ```
 
@@ -372,8 +372,8 @@ git commit -m "feat(config): per-folder pydantic Settings with env override"
 ## Task 3: Database models + session
 
 **Files:**
-- Create: `Z:\travel_post\travelcull\db\__init__.py`
-- Create: `Z:\travel_post\travelcull\db\models.py`
+- Create: `Z:\travel_post\selects\db\__init__.py`
+- Create: `Z:\travel_post\selects\db\models.py`
 - Test: `Z:\travel_post\tests\test_db.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -383,9 +383,9 @@ git commit -m "feat(config): per-folder pydantic Settings with env override"
 from datetime import datetime
 from pathlib import Path
 
-from travelcull.config import get_folder_config
-from travelcull.db import init_db, session_scope
-from travelcull.db.models import Photo, PipelineState
+from selects.config import get_folder_config
+from selects.db import init_db, session_scope
+from selects.db.models import Photo, PipelineState
 
 
 def test_init_db_creates_tables(tmp_path):
@@ -437,7 +437,7 @@ Expected: ImportError.
 
 - [ ] **Step 3: Write models**
 
-`travelcull/db/models.py`:
+`selects/db/models.py`:
 ```python
 from __future__ import annotations
 
@@ -529,7 +529,7 @@ Index("idx_pipeline_pending", PipelineState.classical_done, PipelineState.embedd
 
 - [ ] **Step 4: Write session factory**
 
-`travelcull/db/__init__.py`:
+`selects/db/__init__.py`:
 ```python
 from contextlib import contextmanager
 from typing import Iterator
@@ -537,7 +537,7 @@ from typing import Iterator
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from travelcull.config import FolderConfig
+from selects.config import FolderConfig
 
 from .models import Base
 
@@ -575,7 +575,7 @@ Expected: 3 passed.
 - [ ] **Step 6: Commit**
 
 ```powershell
-git add travelcull/db tests/test_db.py
+git add selects/db tests/test_db.py
 git commit -m "feat(db): SQLAlchemy models for photo, video, classical_score, pipeline_state"
 ```
 
@@ -584,14 +584,14 @@ git commit -m "feat(db): SQLAlchemy models for photo, video, classical_score, pi
 ## Task 4: GPU capability detection
 
 **Files:**
-- Create: `Z:\travel_post\travelcull\gpu.py`
+- Create: `Z:\travel_post\selects\gpu.py`
 - Test: `Z:\travel_post\tests\test_gpu.py`
 
 - [ ] **Step 1: Write the failing test**
 
 `tests/test_gpu.py`:
 ```python
-from travelcull.gpu import GpuCapabilities, detect_capabilities
+from selects.gpu import GpuCapabilities, detect_capabilities
 
 
 def test_detect_returns_dataclass():
@@ -615,7 +615,7 @@ Expected: ImportError.
 
 - [ ] **Step 3: Write gpu.py**
 
-`travelcull/gpu.py`:
+`selects/gpu.py`:
 ```python
 from __future__ import annotations
 
@@ -692,7 +692,7 @@ Expected: 2 passed.
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add travelcull/gpu.py tests/test_gpu.py
+git add selects/gpu.py tests/test_gpu.py
 git commit -m "feat(gpu): detect CUDA, NVDEC, nvImageCodec, cv2.cuda capabilities"
 ```
 
@@ -701,8 +701,8 @@ git commit -m "feat(gpu): detect CUDA, NVDEC, nvImageCodec, cv2.cuda capabilitie
 ## Task 5: File walker + hashing
 
 **Files:**
-- Create: `Z:\travel_post\travelcull\indexer\__init__.py` (empty)
-- Create: `Z:\travel_post\travelcull\indexer\walker.py`
+- Create: `Z:\travel_post\selects\indexer\__init__.py` (empty)
+- Create: `Z:\travel_post\selects\indexer\walker.py`
 - Test: `Z:\travel_post\tests\test_walker.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -711,7 +711,7 @@ git commit -m "feat(gpu): detect CUDA, NVDEC, nvImageCodec, cv2.cuda capabilitie
 ```python
 from pathlib import Path
 
-from travelcull.indexer.walker import FileKind, classify, sha256_of, walk_supported
+from selects.indexer.walker import FileKind, classify, sha256_of, walk_supported
 
 
 def test_classify_extensions():
@@ -737,9 +737,9 @@ def test_walk_supported_finds_files(tmp_path):
     assert found == ["a.jpg", "b.HEIC", "c.mp4"]
 
 
-def test_walker_skips_travelcull_dir(tmp_path):
+def test_walker_skips_selects_dir(tmp_path):
     (tmp_path / "a.jpg").write_bytes(b"x")
-    state = tmp_path / ".travelcull"
+    state = tmp_path / ".selects"
     state.mkdir()
     (state / "thumb.jpg").write_bytes(b"y")
 
@@ -763,7 +763,7 @@ Expected: ImportError.
 
 - [ ] **Step 3: Write walker**
 
-`travelcull/indexer/walker.py`:
+`selects/indexer/walker.py`:
 ```python
 from __future__ import annotations
 
@@ -785,7 +785,7 @@ _HEIC_EXTS = {".heic", ".heif"}
 _RAW_EXTS = {".dng", ".cr2", ".cr3", ".nef", ".arw", ".raf", ".orf", ".rw2", ".pef"}
 _VIDEO_EXTS = {".mp4", ".mov", ".m4v", ".mkv"}
 
-_SKIP_DIRS = {".travelcull", ".git", "__pycache__", "node_modules"}
+_SKIP_DIRS = {".selects", ".git", "__pycache__", "node_modules"}
 
 
 def classify(path: Path) -> FileKind | None:
@@ -835,7 +835,7 @@ Expected: 4 passed.
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add travelcull/indexer/__init__.py travelcull/indexer/walker.py tests/test_walker.py
+git add selects/indexer/__init__.py selects/indexer/walker.py tests/test_walker.py
 git commit -m "feat(indexer): file walker with HEIC/JPEG/RAW/MP4 classification + sha256"
 ```
 
@@ -844,7 +844,7 @@ git commit -m "feat(indexer): file walker with HEIC/JPEG/RAW/MP4 classification 
 ## Task 6: EXIF reader
 
 **Files:**
-- Create: `Z:\travel_post\travelcull\indexer\exif.py`
+- Create: `Z:\travel_post\selects\indexer\exif.py`
 - Test: `Z:\travel_post\tests\test_exif.py`
 
 We use **pyexiv2** because it reads HEIC, JPEG, and most RAW formats from a single API.
@@ -855,7 +855,7 @@ We use **pyexiv2** because it reads HEIC, JPEG, and most RAW formats from a sing
 ```python
 from pathlib import Path
 
-from travelcull.indexer.exif import ExifData, read_exif
+from selects.indexer.exif import ExifData, read_exif
 
 
 def test_read_exif_returns_dataclass(fixtures_dir):
@@ -883,7 +883,7 @@ Expected: ImportError.
 
 - [ ] **Step 3: Write exif module**
 
-`travelcull/indexer/exif.py`:
+`selects/indexer/exif.py`:
 ```python
 from __future__ import annotations
 
@@ -975,7 +975,7 @@ Expected: 3 passed.
 - [ ] **Step 6: Commit**
 
 ```powershell
-git add travelcull/indexer/exif.py tests/test_exif.py tests/fixtures/small.jpg
+git add selects/indexer/exif.py tests/test_exif.py tests/fixtures/small.jpg
 git commit -m "feat(indexer): EXIF reader via pyexiv2 with HEIC + JPEG + RAW support"
 ```
 
@@ -984,8 +984,8 @@ git commit -m "feat(indexer): EXIF reader via pyexiv2 with HEIC + JPEG + RAW sup
 ## Task 7: JPEG decode (nvImageCodec, with PIL fallback)
 
 **Files:**
-- Create: `Z:\travel_post\travelcull\decode\__init__.py`
-- Create: `Z:\travel_post\travelcull\decode\jpeg.py`
+- Create: `Z:\travel_post\selects\decode\__init__.py`
+- Create: `Z:\travel_post\selects\decode\jpeg.py`
 - Test: `Z:\travel_post\tests\test_decode_jpeg.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -994,7 +994,7 @@ git commit -m "feat(indexer): EXIF reader via pyexiv2 with HEIC + JPEG + RAW sup
 ```python
 import numpy as np
 
-from travelcull.decode.jpeg import decode_jpeg
+from selects.decode.jpeg import decode_jpeg
 
 
 def test_decode_jpeg_returns_hwc_uint8(fixtures_dir):
@@ -1017,13 +1017,13 @@ Expected: ImportError.
 
 - [ ] **Step 3: Write decode/__init__.py facade**
 
-`travelcull/decode/__init__.py`:
+`selects/decode/__init__.py`:
 ```python
 from pathlib import Path
 
 import numpy as np
 
-from travelcull.indexer.walker import FileKind
+from selects.indexer.walker import FileKind
 
 from .heic import decode_heic
 from .jpeg import decode_jpeg
@@ -1043,7 +1043,7 @@ def decode(path: Path, kind: FileKind) -> np.ndarray:
 
 - [ ] **Step 4: Write JPEG decoder**
 
-`travelcull/decode/jpeg.py`:
+`selects/decode/jpeg.py`:
 ```python
 from __future__ import annotations
 
@@ -1096,7 +1096,7 @@ Expected: 2 passed.
 - [ ] **Step 6: Commit**
 
 ```powershell
-git add travelcull/decode tests/test_decode_jpeg.py
+git add selects/decode tests/test_decode_jpeg.py
 git commit -m "feat(decode): JPEG decoder with nvImageCodec GPU path + PIL fallback"
 ```
 
@@ -1105,7 +1105,7 @@ git commit -m "feat(decode): JPEG decoder with nvImageCodec GPU path + PIL fallb
 ## Task 8: HEIC decode
 
 **Files:**
-- Create: `Z:\travel_post\travelcull\decode\heic.py`
+- Create: `Z:\travel_post\selects\decode\heic.py`
 - Test: `Z:\travel_post\tests\test_decode_heic.py`
 - Generate: `tests/fixtures/small.heic`
 
@@ -1121,7 +1121,7 @@ python -c "from PIL import Image; from pillow_heif import register_heif_opener; 
 ```python
 import numpy as np
 
-from travelcull.decode.heic import decode_heic
+from selects.decode.heic import decode_heic
 
 
 def test_decode_heic_returns_uint8_rgb(fixtures_dir):
@@ -1139,7 +1139,7 @@ Expected: ImportError.
 
 - [ ] **Step 4: Write HEIC decoder**
 
-`travelcull/decode/heic.py`:
+`selects/decode/heic.py`:
 ```python
 from __future__ import annotations
 
@@ -1167,7 +1167,7 @@ Expected: 1 passed.
 - [ ] **Step 6: Commit**
 
 ```powershell
-git add travelcull/decode/heic.py tests/test_decode_heic.py tests/fixtures/small.heic
+git add selects/decode/heic.py tests/test_decode_heic.py tests/fixtures/small.heic
 git commit -m "feat(decode): HEIC decoder via pillow-heif"
 ```
 
@@ -1176,7 +1176,7 @@ git commit -m "feat(decode): HEIC decoder via pillow-heif"
 ## Task 9: RAW embedded preview decode
 
 **Files:**
-- Create: `Z:\travel_post\travelcull\decode\raw.py`
+- Create: `Z:\travel_post\selects\decode\raw.py`
 - Test: `Z:\travel_post\tests\test_decode_raw.py`
 
 Skip the test if no DNG fixture is available — generating one synthetically is hard. We mark the test with a skip-if-missing guard.
@@ -1190,7 +1190,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from travelcull.decode.raw import decode_raw_preview
+from selects.decode.raw import decode_raw_preview
 
 DNG = Path(__file__).parent / "fixtures" / "small.dng"
 
@@ -1211,7 +1211,7 @@ Expected: ImportError (the module itself).
 
 - [ ] **Step 3: Write RAW decoder**
 
-`travelcull/decode/raw.py`:
+`selects/decode/raw.py`:
 ```python
 from __future__ import annotations
 
@@ -1251,7 +1251,7 @@ Expected: 1 skipped (no fixture) OR 1 passed if user dropped a DNG into fixtures
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add travelcull/decode/raw.py tests/test_decode_raw.py
+git add selects/decode/raw.py tests/test_decode_raw.py
 git commit -m "feat(decode): RAW embedded preview extraction via rawpy"
 ```
 
@@ -1260,7 +1260,7 @@ git commit -m "feat(decode): RAW embedded preview extraction via rawpy"
 ## Task 10: Video first-frame decode via NVDEC
 
 **Files:**
-- Create: `Z:\travel_post\travelcull\decode\video.py`
+- Create: `Z:\travel_post\selects\decode\video.py`
 - Test: `Z:\travel_post\tests\test_decode_video.py`
 - Generate: `tests/fixtures/small.mp4`
 
@@ -1276,7 +1276,7 @@ ffmpeg -y -f lavfi -i color=c=gray:s=640x480:d=2 -c:v libx264 -pix_fmt yuv420p t
 ```python
 import numpy as np
 
-from travelcull.decode.video import VideoMeta, decode_first_frame, probe
+from selects.decode.video import VideoMeta, decode_first_frame, probe
 
 
 def test_probe_returns_meta(fixtures_dir):
@@ -1301,7 +1301,7 @@ Expected: ImportError.
 
 - [ ] **Step 4: Write video decoder**
 
-`travelcull/decode/video.py`:
+`selects/decode/video.py`:
 ```python
 from __future__ import annotations
 
@@ -1387,7 +1387,7 @@ Expected: 2 passed.
 - [ ] **Step 6: Commit**
 
 ```powershell
-git add travelcull/decode/video.py tests/test_decode_video.py tests/fixtures/small.mp4
+git add selects/decode/video.py tests/test_decode_video.py tests/fixtures/small.mp4
 git commit -m "feat(decode): video first-frame decode via torchcodec (NVDEC) with ffmpeg fallback"
 ```
 
@@ -1396,7 +1396,7 @@ git commit -m "feat(decode): video first-frame decode via torchcodec (NVDEC) wit
 ## Task 11: Preview / thumbnail generator
 
 **Files:**
-- Create: `Z:\travel_post\travelcull\indexer\preview.py`
+- Create: `Z:\travel_post\selects\indexer\preview.py`
 - Test: `Z:\travel_post\tests\test_preview.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -1407,7 +1407,7 @@ from pathlib import Path
 
 import numpy as np
 
-from travelcull.indexer.preview import write_previews
+from selects.indexer.preview import write_previews
 
 
 def test_write_previews_creates_two_files(tmp_path):
@@ -1449,7 +1449,7 @@ Expected: ImportError.
 
 - [ ] **Step 3: Write preview module**
 
-`travelcull/indexer/preview.py`:
+`selects/indexer/preview.py`:
 ```python
 from __future__ import annotations
 
@@ -1502,7 +1502,7 @@ Expected: 3 passed.
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add travelcull/indexer/preview.py tests/test_preview.py
+git add selects/indexer/preview.py tests/test_preview.py
 git commit -m "feat(indexer): write 256px thumbnail + 1024px preview JPEGs"
 ```
 
@@ -1511,17 +1511,17 @@ git commit -m "feat(indexer): write 256px thumbnail + 1024px preview JPEGs"
 ## Task 12: Indexer orchestrator
 
 **Files:**
-- Create: `Z:\travel_post\travelcull\indexer\orchestrator.py`
+- Create: `Z:\travel_post\selects\indexer\orchestrator.py`
 - Test: `Z:\travel_post\tests\test_indexer_orchestrator.py`
 
 - [ ] **Step 1: Write the failing test**
 
 `tests/test_indexer_orchestrator.py`:
 ```python
-from travelcull.config import get_folder_config
-from travelcull.db import init_db, session_scope
-from travelcull.db.models import Photo, Video
-from travelcull.indexer.orchestrator import index_folder
+from selects.config import get_folder_config
+from selects.db import init_db, session_scope
+from selects.db.models import Photo, Video
+from selects.indexer.orchestrator import index_folder
 
 
 def test_index_folder_creates_photo_rows(populated_folder):
@@ -1567,21 +1567,21 @@ Expected: ImportError.
 
 - [ ] **Step 3: Write orchestrator**
 
-`travelcull/indexer/orchestrator.py`:
+`selects/indexer/orchestrator.py`:
 ```python
 from __future__ import annotations
 
 import logging
 from typing import Callable
 
-from travelcull.config import FolderConfig
-from travelcull.db import session_scope
-from travelcull.db.models import PipelineState, Photo, Video
-from travelcull.decode import decode
-from travelcull.decode.video import decode_first_frame, probe
-from travelcull.indexer.exif import read_exif
-from travelcull.indexer.preview import write_previews
-from travelcull.indexer.walker import FileKind, sha256_of, walk_supported
+from selects.config import FolderConfig
+from selects.db import session_scope
+from selects.db.models import PipelineState, Photo, Video
+from selects.decode import decode
+from selects.decode.video import decode_first_frame, probe
+from selects.indexer.exif import read_exif
+from selects.indexer.preview import write_previews
+from selects.indexer.walker import FileKind, sha256_of, walk_supported
 
 log = logging.getLogger(__name__)
 ProgressCb = Callable[[int, int, str], None] | None
@@ -1679,7 +1679,7 @@ Expected: 4 passed.
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add travelcull/indexer/orchestrator.py tests/test_indexer_orchestrator.py
+git add selects/indexer/orchestrator.py tests/test_indexer_orchestrator.py
 git commit -m "feat(indexer): orchestrator walks folder, decodes, writes previews, persists rows"
 ```
 
@@ -1688,8 +1688,8 @@ git commit -m "feat(indexer): orchestrator walks folder, decodes, writes preview
 ## Task 13: Classical signals — blur
 
 **Files:**
-- Create: `Z:\travel_post\travelcull\classical\__init__.py` (empty)
-- Create: `Z:\travel_post\travelcull\classical\blur.py`
+- Create: `Z:\travel_post\selects\classical\__init__.py` (empty)
+- Create: `Z:\travel_post\selects\classical\blur.py`
 - Test: `Z:\travel_post\tests\test_classical_blur.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -1698,7 +1698,7 @@ git commit -m "feat(indexer): orchestrator walks folder, decodes, writes preview
 ```python
 import numpy as np
 
-from travelcull.classical.blur import laplacian_variance
+from selects.classical.blur import laplacian_variance
 
 
 def test_blur_high_variance_for_sharp_image():
@@ -1721,7 +1721,7 @@ Expected: ImportError.
 
 - [ ] **Step 3: Write blur module**
 
-`travelcull/classical/blur.py`:
+`selects/classical/blur.py`:
 ```python
 from __future__ import annotations
 
@@ -1760,7 +1760,7 @@ Expected: 2 passed.
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add travelcull/classical/__init__.py travelcull/classical/blur.py tests/test_classical_blur.py
+git add selects/classical/__init__.py selects/classical/blur.py tests/test_classical_blur.py
 git commit -m "feat(classical): Laplacian variance blur metric with cv2.cuda path"
 ```
 
@@ -1769,7 +1769,7 @@ git commit -m "feat(classical): Laplacian variance blur metric with cv2.cuda pat
 ## Task 14: Classical signals — exposure
 
 **Files:**
-- Create: `Z:\travel_post\travelcull\classical\exposure.py`
+- Create: `Z:\travel_post\selects\classical\exposure.py`
 - Test: `Z:\travel_post\tests\test_classical_exposure.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -1778,7 +1778,7 @@ git commit -m "feat(classical): Laplacian variance blur metric with cv2.cuda pat
 ```python
 import numpy as np
 
-from travelcull.classical.exposure import exposure_score
+from selects.classical.exposure import exposure_score
 
 
 def test_balanced_image_scores_high():
@@ -1809,7 +1809,7 @@ Expected: ImportError.
 
 - [ ] **Step 3: Write exposure module**
 
-`travelcull/classical/exposure.py`:
+`selects/classical/exposure.py`:
 ```python
 from __future__ import annotations
 
@@ -1848,7 +1848,7 @@ Expected: 3 passed.
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add travelcull/classical/exposure.py tests/test_classical_exposure.py
+git add selects/classical/exposure.py tests/test_classical_exposure.py
 git commit -m "feat(classical): exposure score from gray histogram clipping"
 ```
 
@@ -1857,7 +1857,7 @@ git commit -m "feat(classical): exposure score from gray histogram clipping"
 ## Task 15: Classical signals — face detection (SCRFD)
 
 **Files:**
-- Create: `Z:\travel_post\travelcull\classical\faces.py`
+- Create: `Z:\travel_post\selects\classical\faces.py`
 - Test: `Z:\travel_post\tests\test_classical_faces.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -1866,7 +1866,7 @@ git commit -m "feat(classical): exposure score from gray histogram clipping"
 ```python
 import numpy as np
 
-from travelcull.classical.faces import detect_faces
+from selects.classical.faces import detect_faces
 
 
 def test_detect_returns_list_for_random_image():
@@ -1888,7 +1888,7 @@ Expected: ImportError.
 
 - [ ] **Step 3: Write faces module**
 
-`travelcull/classical/faces.py`:
+`selects/classical/faces.py`:
 ```python
 from __future__ import annotations
 
@@ -1941,7 +1941,7 @@ Expected: 2 passed. (First run downloads buffalo_l weights, ~250MB — slow.)
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add travelcull/classical/faces.py tests/test_classical_faces.py
+git add selects/classical/faces.py tests/test_classical_faces.py
 git commit -m "feat(classical): face detection via insightface buffalo_l (CUDA)"
 ```
 
@@ -1950,7 +1950,7 @@ git commit -m "feat(classical): face detection via insightface buffalo_l (CUDA)"
 ## Task 16: Classical signals — auto-reject combiner
 
 **Files:**
-- Create: `Z:\travel_post\travelcull\classical\auto_reject.py`
+- Create: `Z:\travel_post\selects\classical\auto_reject.py`
 - Test: `Z:\travel_post\tests\test_auto_reject.py`
 
 We skip the explicit eyes-open detector for M1 (it's noisy; defer to M2 when we have a richer feature set). For M1, auto-reject triggers from blur + exposure only.
@@ -1959,7 +1959,7 @@ We skip the explicit eyes-open detector for M1 (it's noisy; defer to M2 when we 
 
 `tests/test_auto_reject.py`:
 ```python
-from travelcull.classical.auto_reject import RejectInput, evaluate_reject
+from selects.classical.auto_reject import RejectInput, evaluate_reject
 
 
 def test_sharp_balanced_image_not_rejected():
@@ -1990,7 +1990,7 @@ Expected: ImportError.
 
 - [ ] **Step 3: Write auto_reject**
 
-`travelcull/classical/auto_reject.py`:
+`selects/classical/auto_reject.py`:
 ```python
 from __future__ import annotations
 
@@ -2031,7 +2031,7 @@ Expected: 3 passed.
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add travelcull/classical/auto_reject.py tests/test_auto_reject.py
+git add selects/classical/auto_reject.py tests/test_auto_reject.py
 git commit -m "feat(classical): auto-reject rule for severe blur / blown-out / all-black"
 ```
 
@@ -2040,18 +2040,18 @@ git commit -m "feat(classical): auto-reject rule for severe blur / blown-out / a
 ## Task 17: Stage 1 pipeline runner
 
 **Files:**
-- Create: `Z:\travel_post\travelcull\pipeline.py`
+- Create: `Z:\travel_post\selects\pipeline.py`
 - Test: `Z:\travel_post\tests\test_pipeline_stage1.py`
 
 - [ ] **Step 1: Write the failing test**
 
 `tests/test_pipeline_stage1.py`:
 ```python
-from travelcull.config import get_folder_config
-from travelcull.db import init_db, session_scope
-from travelcull.db.models import ClassicalScore, PipelineState
-from travelcull.indexer.orchestrator import index_folder
-from travelcull.pipeline import run_classical_stage
+from selects.config import get_folder_config
+from selects.db import init_db, session_scope
+from selects.db.models import ClassicalScore, PipelineState
+from selects.indexer.orchestrator import index_folder
+from selects.pipeline import run_classical_stage
 
 
 def test_stage1_writes_classical_scores(populated_folder):
@@ -2082,7 +2082,7 @@ Expected: ImportError.
 
 - [ ] **Step 3: Write pipeline module**
 
-`travelcull/pipeline.py`:
+`selects/pipeline.py`:
 ```python
 from __future__ import annotations
 
@@ -2092,13 +2092,13 @@ from typing import Callable
 import numpy as np
 from PIL import Image
 
-from travelcull.classical.auto_reject import RejectInput, evaluate_reject
-from travelcull.classical.blur import laplacian_variance
-from travelcull.classical.exposure import exposure_score
-from travelcull.classical.faces import detect_faces
-from travelcull.config import FolderConfig
-from travelcull.db import session_scope
-from travelcull.db.models import ClassicalScore, PipelineState, Photo
+from selects.classical.auto_reject import RejectInput, evaluate_reject
+from selects.classical.blur import laplacian_variance
+from selects.classical.exposure import exposure_score
+from selects.classical.faces import detect_faces
+from selects.config import FolderConfig
+from selects.db import session_scope
+from selects.db.models import ClassicalScore, PipelineState, Photo
 
 log = logging.getLogger(__name__)
 ProgressCb = Callable[[int, int, str], None] | None
@@ -2166,7 +2166,7 @@ Expected: 2 passed.
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add travelcull/pipeline.py tests/test_pipeline_stage1.py
+git add selects/pipeline.py tests/test_pipeline_stage1.py
 git commit -m "feat(pipeline): Stage 1 runs classical signals + auto-reject, idempotent"
 ```
 
@@ -2175,8 +2175,8 @@ git commit -m "feat(pipeline): Stage 1 runs classical signals + auto-reject, ide
 ## Task 18: FastAPI app skeleton
 
 **Files:**
-- Create: `Z:\travel_post\travelcull\server\__init__.py` (empty)
-- Create: `Z:\travel_post\travelcull\server\app.py`
+- Create: `Z:\travel_post\selects\server\__init__.py` (empty)
+- Create: `Z:\travel_post\selects\server\app.py`
 - Test: `Z:\travel_post\tests\test_server_app.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -2185,9 +2185,9 @@ git commit -m "feat(pipeline): Stage 1 runs classical signals + auto-reject, ide
 ```python
 from httpx import AsyncClient
 
-from travelcull.config import get_folder_config
-from travelcull.db import init_db
-from travelcull.server.app import build_app
+from selects.config import get_folder_config
+from selects.db import init_db
+from selects.server.app import build_app
 
 
 async def test_health_endpoint(tmp_path):
@@ -2207,20 +2207,20 @@ Expected: ImportError.
 
 - [ ] **Step 3: Write app builder**
 
-`travelcull/server/app.py`:
+`selects/server/app.py`:
 ```python
 from __future__ import annotations
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from travelcull.config import FolderConfig
+from selects.config import FolderConfig
 
 from .routes import register_routes
 
 
 def build_app(cfg: FolderConfig) -> FastAPI:
-    app = FastAPI(title="travelcull", version="0.1.0")
+    app = FastAPI(title="selects", version="0.1.0")
 
     app.add_middleware(
         CORSMiddleware,
@@ -2240,11 +2240,11 @@ def build_app(cfg: FolderConfig) -> FastAPI:
 
 - [ ] **Step 4: Create empty routes module**
 
-`travelcull/server/routes.py`:
+`selects/server/routes.py`:
 ```python
 from fastapi import FastAPI
 
-from travelcull.config import FolderConfig
+from selects.config import FolderConfig
 
 
 def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
@@ -2260,7 +2260,7 @@ Expected: 1 passed.
 - [ ] **Step 6: Commit**
 
 ```powershell
-git add travelcull/server tests/test_server_app.py
+git add selects/server tests/test_server_app.py
 git commit -m "feat(server): FastAPI app skeleton with CORS + health endpoint"
 ```
 
@@ -2269,7 +2269,7 @@ git commit -m "feat(server): FastAPI app skeleton with CORS + health endpoint"
 ## Task 19: Photo list + thumbnail endpoints
 
 **Files:**
-- Modify: `Z:\travel_post\travelcull\server\routes.py`
+- Modify: `Z:\travel_post\selects\server\routes.py`
 - Test: `Z:\travel_post\tests\test_server_routes.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -2278,11 +2278,11 @@ git commit -m "feat(server): FastAPI app skeleton with CORS + health endpoint"
 ```python
 from httpx import AsyncClient
 
-from travelcull.config import get_folder_config
-from travelcull.db import init_db
-from travelcull.indexer.orchestrator import index_folder
-from travelcull.pipeline import run_classical_stage
-from travelcull.server.app import build_app
+from selects.config import get_folder_config
+from selects.db import init_db
+from selects.indexer.orchestrator import index_folder
+from selects.pipeline import run_classical_stage
+from selects.server.app import build_app
 
 
 async def test_list_photos_returns_indexed_files(populated_folder):
@@ -2324,7 +2324,7 @@ Expected: 404 on the endpoints.
 
 - [ ] **Step 3: Implement routes**
 
-Replace `travelcull/server/routes.py`:
+Replace `selects/server/routes.py`:
 ```python
 from __future__ import annotations
 
@@ -2335,9 +2335,9 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from travelcull.config import FolderConfig
-from travelcull.db import session_scope
-from travelcull.db.models import ClassicalScore, Photo
+from selects.config import FolderConfig
+from selects.db import session_scope
+from selects.db.models import ClassicalScore, Photo
 
 
 class PhotoOut(BaseModel):
@@ -2426,7 +2426,7 @@ Expected: 2 passed.
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add travelcull/server/routes.py tests/test_server_routes.py
+git add selects/server/routes.py tests/test_server_routes.py
 git commit -m "feat(server): /api/photos list + /api/thumb/{sha} + /api/preview/{sha}"
 ```
 
@@ -2435,8 +2435,8 @@ git commit -m "feat(server): /api/photos list + /api/thumb/{sha} + /api/preview/
 ## Task 20: WebSocket progress channel
 
 **Files:**
-- Create: `Z:\travel_post\travelcull\server\ws.py`
-- Modify: `Z:\travel_post\travelcull\server\app.py` to wire it in
+- Create: `Z:\travel_post\selects\server\ws.py`
+- Modify: `Z:\travel_post\selects\server\app.py` to wire it in
 - Test: `Z:\travel_post\tests\test_server_ws.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -2445,10 +2445,10 @@ git commit -m "feat(server): /api/photos list + /api/thumb/{sha} + /api/preview/
 ```python
 from httpx import AsyncClient
 
-from travelcull.config import get_folder_config
-from travelcull.db import init_db
-from travelcull.server.app import build_app
-from travelcull.server.ws import progress_bus
+from selects.config import get_folder_config
+from selects.db import init_db
+from selects.server.app import build_app
+from selects.server.ws import progress_bus
 
 
 async def test_progress_bus_publishes(tmp_path):
@@ -2476,7 +2476,7 @@ Expected: ImportError.
 
 - [ ] **Step 3: Write the WS bus**
 
-`travelcull/server/ws.py`:
+`selects/server/ws.py`:
 ```python
 from __future__ import annotations
 
@@ -2530,7 +2530,7 @@ def register_ws(app: FastAPI) -> None:
 
 - [ ] **Step 4: Wire into app**
 
-Modify `travelcull/server/app.py` — add at the end of `build_app` before return:
+Modify `selects/server/app.py` — add at the end of `build_app` before return:
 ```python
     from .ws import register_ws
 
@@ -2546,7 +2546,7 @@ Expected: 1 passed.
 - [ ] **Step 6: Commit**
 
 ```powershell
-git add travelcull/server/ws.py travelcull/server/app.py tests/test_server_ws.py
+git add selects/server/ws.py selects/server/app.py tests/test_server_ws.py
 git commit -m "feat(server): WebSocket /ws/progress with in-process pub-sub bus"
 ```
 
@@ -2555,8 +2555,8 @@ git commit -m "feat(server): WebSocket /ws/progress with in-process pub-sub bus"
 ## Task 21: CLI commands (index, serve, doctor)
 
 **Files:**
-- Create: `Z:\travel_post\travelcull\cli.py`
-- Create: `Z:\travel_post\travelcull\__main__.py`
+- Create: `Z:\travel_post\selects\cli.py`
+- Create: `Z:\travel_post\selects\__main__.py`
 - Test: `Z:\travel_post\tests\test_cli.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -2565,7 +2565,7 @@ git commit -m "feat(server): WebSocket /ws/progress with in-process pub-sub bus"
 ```python
 from click.testing import CliRunner
 
-from travelcull.cli import main
+from selects.cli import main
 
 
 def test_doctor_runs_and_reports():
@@ -2590,7 +2590,7 @@ Expected: ImportError.
 
 - [ ] **Step 3: Write CLI**
 
-`travelcull/cli.py`:
+`selects/cli.py`:
 ```python
 from __future__ import annotations
 
@@ -2599,16 +2599,16 @@ from pathlib import Path
 
 import click
 
-from travelcull.config import get_folder_config
-from travelcull.db import init_db
-from travelcull.gpu import detect_capabilities
-from travelcull.indexer.orchestrator import index_folder
-from travelcull.pipeline import run_classical_stage
+from selects.config import get_folder_config
+from selects.db import init_db
+from selects.gpu import detect_capabilities
+from selects.indexer.orchestrator import index_folder
+from selects.pipeline import run_classical_stage
 
 
 @click.group()
 def main():
-    """travelcull — local AI-assisted travel photo & video culling."""
+    """selects — local AI-assisted travel photo & video culling."""
 
 
 @main.command()
@@ -2643,13 +2643,13 @@ def serve(folder: Path, port: int, no_browser: bool):
     cfg = get_folder_config(folder)
     init_db(cfg)
 
-    from travelcull.server.app import build_app
+    from selects.server.app import build_app
 
     app = build_app(cfg)
     url = f"http://127.0.0.1:{port}"
     if not no_browser:
         webbrowser.open(url)
-    click.echo(f"travelcull serving at {url}")
+    click.echo(f"selects serving at {url}")
     uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
 
 
@@ -2667,9 +2667,9 @@ def doctor():
 
 - [ ] **Step 4: Write __main__**
 
-`travelcull/__main__.py`:
+`selects/__main__.py`:
 ```python
-from travelcull.cli import main
+from selects.cli import main
 
 if __name__ == "__main__":
     main()
@@ -2683,7 +2683,7 @@ Expected: 2 passed.
 - [ ] **Step 6: Commit**
 
 ```powershell
-git add travelcull/cli.py travelcull/__main__.py tests/test_cli.py
+git add selects/cli.py selects/__main__.py tests/test_cli.py
 git commit -m "feat(cli): index, serve, doctor commands via click"
 ```
 
@@ -2705,7 +2705,7 @@ git commit -m "feat(cli): index, serve, doctor commands via click"
 `frontend/package.json`:
 ```json
 {
-  "name": "travelcull-frontend",
+  "name": "selects-frontend",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -2792,7 +2792,7 @@ Replace the proxy block in `vite.config.ts`:
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>travelcull</title>
+  <title>selects</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Google+Sans+Display:wght@400;500;700&family=Google+Sans+Code:wght@400;500&family=Roboto+Flex:opsz,wght@8..144,300;8..144,400;8..144,500;8..144,600&display=swap" rel="stylesheet" />
@@ -2829,7 +2829,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
 `frontend/src/App.tsx` — minimal placeholder that we expand in Task 24:
 ```tsx
 export default function App() {
-  return <div style={{ padding: 24, fontFamily: "var(--font-display)" }}>travelcull</div>;
+  return <div style={{ padding: 24, fontFamily: "var(--font-display)" }}>selects</div>;
 }
 ```
 
@@ -2840,7 +2840,7 @@ cd frontend
 npm install
 npm run dev
 ```
-Expected: Vite reports "Local: http://localhost:5173/" and the page renders "travelcull".
+Expected: Vite reports "Local: http://localhost:5173/" and the page renders "selects".
 
 - [ ] **Step 8: Commit**
 
@@ -3173,8 +3173,8 @@ export default function App() {
 
 In one shell:
 ```powershell
-travelcull index Z:\Ladakh\Photos
-travelcull serve Z:\Ladakh\Photos --port 8000 --no-browser
+selects index Z:\Ladakh\Photos
+selects serve Z:\Ladakh\Photos --port 8000 --no-browser
 ```
 In another:
 ```powershell
@@ -3195,8 +3195,8 @@ git commit -m "feat(frontend): BurstCull view wired to real /api/photos data"
 ## Task 25: Indexing progress in the UI
 
 **Files:**
-- Modify: `Z:\travel_post\travelcull\cli.py` — emit progress to the bus
-- Modify: `Z:\travel_post\travelcull\server\app.py` — kick off indexer in background on startup
+- Modify: `Z:\travel_post\selects\cli.py` — emit progress to the bus
+- Modify: `Z:\travel_post\selects\server\app.py` — kick off indexer in background on startup
 - Modify: `Z:\travel_post\frontend\src\components\StatusRow.tsx` — show progress chip
 
 - [ ] **Step 1: Modify cli.py to publish to ProgressBus**
@@ -3211,7 +3211,7 @@ No code change needed for Step 1 — note this in a code comment in `cli.py`:
 
 - [ ] **Step 2: Add background indexing on `serve`**
 
-Modify `travelcull/server/app.py`:
+Modify `selects/server/app.py`:
 ```python
 import asyncio
 from contextlib import asynccontextmanager
@@ -3219,9 +3219,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from travelcull.config import FolderConfig
-from travelcull.indexer.orchestrator import index_folder
-from travelcull.pipeline import run_classical_stage
+from selects.config import FolderConfig
+from selects.indexer.orchestrator import index_folder
+from selects.pipeline import run_classical_stage
 
 from .routes import register_routes
 from .ws import progress_bus, register_ws
@@ -3252,7 +3252,7 @@ def build_app(cfg: FolderConfig) -> FastAPI:
         yield
         task.cancel()
 
-    app = FastAPI(title="travelcull", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="selects", version="0.1.0", lifespan=lifespan)
 
     app.add_middleware(
         CORSMiddleware,
@@ -3317,9 +3317,9 @@ export function StatusRow({ pos, keepers, details, activeTab }: Props) {
 - [ ] **Step 4: Verify end-to-end**
 
 ```powershell
-Remove-Item Z:\Ladakh\Photos\.travelcull -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item Z:\Ladakh\Photos\.travelcull.db -Force -ErrorAction SilentlyContinue
-travelcull serve Z:\Ladakh\Photos --port 8000 --no-browser
+Remove-Item Z:\Ladakh\Photos\.selects -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item Z:\Ladakh\Photos\.selects.db -Force -ErrorAction SilentlyContinue
+selects serve Z:\Ladakh\Photos --port 8000 --no-browser
 # in another shell:
 cd frontend && npm run dev
 ```
@@ -3328,7 +3328,7 @@ Open `http://localhost:5173`. Expected: progress chip ticks up as indexing runs;
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add travelcull/server/app.py travelcull/cli.py frontend/src/components/StatusRow.tsx
+git add selects/server/app.py selects/cli.py frontend/src/components/StatusRow.tsx
 git commit -m "feat: background index+classical with /ws/progress live updates"
 ```
 
@@ -3351,13 +3351,13 @@ from pathlib import Path
 
 import pytest
 
-from travelcull.config import get_folder_config
-from travelcull.db import init_db, session_scope
-from travelcull.db.models import ClassicalScore, Photo, Video
-from travelcull.indexer.orchestrator import index_folder
-from travelcull.pipeline import run_classical_stage
+from selects.config import get_folder_config
+from selects.db import init_db, session_scope
+from selects.db.models import ClassicalScore, Photo, Video
+from selects.indexer.orchestrator import index_folder
+from selects.pipeline import run_classical_stage
 
-LADAKH = os.environ.get("TRAVELCULL_LADAKH_PATH", r"Z:\Ladakh\Photos")
+LADAKH = os.environ.get("SELECTS_LADAKH_PATH", r"Z:\Ladakh\Photos")
 
 
 @pytest.mark.skipif(not Path(LADAKH).exists(), reason="Ladakh fixture missing")
@@ -3401,7 +3401,7 @@ def test_index_ladakh_end_to_end():
 - [ ] **Step 2: Run the test**
 
 ```powershell
-$env:TRAVELCULL_LADAKH_PATH = "Z:\Ladakh\Photos"
+$env:SELECTS_LADAKH_PATH = "Z:\Ladakh\Photos"
 pytest tests/test_integration_ladakh.py -v -s
 ```
 Expected: passes, prints timing + reject rate. Reject rate should be 0–20% on a typical phone roll. If it's outside this range, investigate the auto-reject thresholds before moving to M2.
@@ -3424,7 +3424,7 @@ git commit -m "test: end-to-end indexing + classical against Ladakh photos (env-
 
 `README.md`:
 ````markdown
-# travelcull
+# selects
 
 Local AI-assisted travel photo and video culling. GPU-first, runs entirely on your machine.
 
@@ -3456,12 +3456,12 @@ cd ..
 
 Index a folder and run the classical stage:
 ```powershell
-travelcull index Z:\Ladakh\Photos
+selects index Z:\Ladakh\Photos
 ```
 
 Start the web UI:
 ```powershell
-travelcull serve Z:\Ladakh\Photos --port 8000
+selects serve Z:\Ladakh\Photos --port 8000
 # in another shell:
 cd frontend
 npm run dev
@@ -3471,7 +3471,7 @@ Open http://localhost:5173.
 ## Diagnostics
 
 ```powershell
-travelcull doctor
+selects doctor
 ```
 Reports CUDA, NVDEC, nvImageCodec, and cv2.cuda availability.
 
@@ -3482,13 +3482,13 @@ pytest -ra
 ```
 End-to-end Ladakh test (requires that folder on disk):
 ```powershell
-$env:TRAVELCULL_LADAKH_PATH = "Z:\Ladakh\Photos"
+$env:SELECTS_LADAKH_PATH = "Z:\Ladakh\Photos"
 pytest tests/test_integration_ladakh.py -v -s
 ```
 
 ## Architecture
 
-See `docs/superpowers/specs/2026-05-23-travelcull-design.md`.
+See `docs/superpowers/specs/2026-05-23-selects-design.md`.
 ````
 
 - [ ] **Step 2: Commit**
@@ -3502,7 +3502,7 @@ git commit -m "docs: quickstart README"
 
 ## Self-review
 
-**Spec coverage** (vs `2026-05-23-travelcull-design.md`):
+**Spec coverage** (vs `2026-05-23-selects-design.md`):
 
 - ✅ Three-process architecture (Indexer, Worker, Server) — Tasks 5–25
 - ✅ SQLite sidecar at folder root — Task 3
@@ -3533,7 +3533,7 @@ git commit -m "docs: quickstart README"
 
 ## Execution Handoff
 
-Plan complete and saved to `Z:\travel_post\docs\superpowers\plans\2026-05-23-travelcull-m1-indexer-and-ui-shell.md`. Two execution options:
+Plan complete and saved to `Z:\travel_post\docs\superpowers\plans\2026-05-23-selects-m1-indexer-and-ui-shell.md`. Two execution options:
 
 **1. Subagent-Driven (recommended)** — I dispatch a fresh subagent per task, review between tasks, fast iteration. Best for a plan this large because each task is bounded and you can interject when something looks wrong.
 

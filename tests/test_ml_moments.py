@@ -1,4 +1,4 @@
-"""Tests for travelcull.ml.moments: _matches() and run_moment_stage()."""
+"""Tests for selects.ml.moments: _matches() and run_moment_stage()."""
 from __future__ import annotations
 
 from datetime import datetime, timedelta
@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import numpy as np
 import pytest
 
-from travelcull.ml.moments import _matches, run_moment_stage, TIME_GAP_S, VISUAL_SIM_THRESH
+from selects.ml.moments import _matches, run_moment_stage, TIME_GAP_S, VISUAL_SIM_THRESH
 
 
 # ---------------------------------------------------------------------------
@@ -155,14 +155,14 @@ class TestMatches:
 # ---------------------------------------------------------------------------
 
 def _make_cfg(tmp_path):
-    from travelcull.config import get_folder_config
+    from selects.config import get_folder_config
     cfg = get_folder_config(tmp_path)
     return cfg
 
 
 def test_run_moment_stage_no_photos(tmp_path):
     """Stage returns 0 when there are no embeddings."""
-    from travelcull.db import init_db
+    from selects.db import init_db
     cfg = _make_cfg(tmp_path)
     init_db(cfg.db_path)
     n = run_moment_stage(cfg)
@@ -171,8 +171,8 @@ def test_run_moment_stage_no_photos(tmp_path):
 
 def test_run_moment_stage_creates_moments(tmp_path):
     """Two very similar photos taken <TIME_GAP_S apart become one moment."""
-    from travelcull.db import init_db, session_scope
-    from travelcull.db.models import Embedding, Moment, MomentMember, Photo, PipelineState
+    from selects.db import init_db, session_scope
+    from selects.db.models import Embedding, Moment, MomentMember, Photo, PipelineState
 
     cfg = _make_cfg(tmp_path)
     Session = init_db(cfg.db_path)
@@ -207,8 +207,8 @@ def test_run_moment_stage_creates_moments(tmp_path):
 
 def test_run_moment_stage_dissimilar_photos_no_moments(tmp_path):
     """Photos with low visual similarity stay as singletons (no moments)."""
-    from travelcull.db import init_db, session_scope
-    from travelcull.db.models import Embedding, Moment, Photo, PipelineState
+    from selects.db import init_db, session_scope
+    from selects.db.models import Embedding, Moment, Photo, PipelineState
 
     cfg = _make_cfg(tmp_path)
     Session = init_db(cfg.db_path)
@@ -241,8 +241,8 @@ def test_run_moment_stage_dissimilar_photos_no_moments(tmp_path):
 
 def test_run_moment_stage_time_gap_prevents_linking(tmp_path):
     """Photos >60s apart must not form a moment even if visually identical."""
-    from travelcull.db import init_db, session_scope
-    from travelcull.db.models import Embedding, Moment, Photo, PipelineState
+    from selects.db import init_db, session_scope
+    from selects.db.models import Embedding, Moment, Photo, PipelineState
 
     cfg = _make_cfg(tmp_path)
     Session = init_db(cfg.db_path)

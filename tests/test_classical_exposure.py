@@ -1,6 +1,6 @@
 import numpy as np
 
-from travelcull.classical.exposure import exposure_score
+from selects.classical.exposure import exposure_score
 
 
 def test_balanced_image_scores_high():

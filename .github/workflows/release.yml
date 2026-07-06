@@ -11,11 +11,11 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            artifact: travelcull-windows-x64
+            artifact: selects-windows-x64
           - os: macos-latest
-            artifact: travelcull-macos-arm64
+            artifact: selects-macos-arm64
           - os: ubuntu-latest
-            artifact: travelcull-linux-x64
+            artifact: selects-linux-x64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -37,9 +37,9 @@ jobs:
         run: |
           cd dist
           if [ "$RUNNER_OS" = "Windows" ]; then
-            7z a ../${{ matrix.artifact }}.zip travelcull
+            7z a ../${{ matrix.artifact }}.zip selects
           else
-            zip -qr ../${{ matrix.artifact }}.zip travelcull
+            zip -qr ../${{ matrix.artifact }}.zip selects
           fi
       - uses: actions/upload-artifact@v4
         with:

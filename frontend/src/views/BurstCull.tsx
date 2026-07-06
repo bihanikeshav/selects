@@ -442,7 +442,7 @@ export default function BurstCull() {
   // Use a consistent folder label across all views so the Topbar doesn't
   // change shape when switching modes. The actual folder shows up in the
   // status row context only.
-  const folderName = "travelcull";
+  const folderName = "selects";
 
   const hasMoment = Boolean(currentPhoto?.moment_id && (currentPhoto?.moment_size ?? 0) > 1);
 
@@ -890,7 +890,7 @@ export default function BurstCull() {
                 Indexer not running
               </div>
               <div style={{ fontFamily: "var(--font-mono)", fontSize: 13, background: "var(--md-surface-c)", padding: "8px 16px", borderRadius: "var(--r-md)", display: "inline-block" }}>
-                travelcull serve Z:\Ladakh\Photos
+                selects serve Z:\Ladakh\Photos
               </div>
               <div style={{ marginTop: 8, fontSize: 13 }}>
                 Run that in another terminal, then refresh.
@@ -906,7 +906,7 @@ export default function BurstCull() {
                 No photos indexed yet
               </div>
               <div style={{ fontSize: 13 }}>
-                Point travelcull at a folder to get started.
+                Point selects at a folder to get started.
               </div>
             </div>
           </section>

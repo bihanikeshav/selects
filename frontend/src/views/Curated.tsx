@@ -125,7 +125,7 @@ export default function Curated() {
           overflow: "hidden",
         }}
       >
-        <Topbar folder="travelcull" context="curated" />
+        <Topbar folder="selects" context="curated" />
         <ModeViewBar />
 
         <div

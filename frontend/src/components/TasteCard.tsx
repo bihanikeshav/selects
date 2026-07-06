@@ -77,7 +77,7 @@ export default function TasteCard() {
       )}
 
       <p className="taste-explain">
-        Every keep or reject teaches travelcull what you like. The learned taste
+        Every keep or reject teaches selects what you like. The learned taste
         gently re-ranks curated picks — it ramps up with more decisions but never
         outweighs the aesthetic models (40% max).
       </p>

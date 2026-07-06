@@ -1,6 +1,6 @@
 import numpy as np
 
-from travelcull.classical.blur import laplacian_variance
+from selects.classical.blur import laplacian_variance
 
 
 def test_blur_high_variance_for_sharp_image():

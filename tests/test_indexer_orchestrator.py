@@ -3,10 +3,10 @@ from pathlib import Path
 
 import pytest
 
-from travelcull.config import get_folder_config
-from travelcull.db import init_db, session_scope
-from travelcull.db.models import Photo, Video
-from travelcull.indexer.orchestrator import index_folder
+from selects.config import get_folder_config
+from selects.db import init_db, session_scope
+from selects.db.models import Photo, Video
+from selects.indexer.orchestrator import index_folder
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 

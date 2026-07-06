@@ -2,7 +2,7 @@
 import sqlite3
 from pathlib import Path
 
-db = Path(r"Z:\Ladakh\Photos\.travelcull\index.db")
+db = Path(r"Z:\Ladakh\Photos\.selects\index.db")
 conn = sqlite3.connect(db)
 c = conn.cursor()
 

@@ -3,9 +3,10 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "travelcull"
+name = "selects"
 version = "0.1.0"
 description = "Local AI-assisted travel photo and video culling"
+readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 dependencies = [
@@ -36,8 +37,9 @@ ml = [
   "hdbscan>=0.8.33",
   "umap-learn>=0.5.5",
   "requests>=2.31",
-  # RAM++ (recognize-anything) has no PyPI release; installed from source.
-  "ram @ git+https://github.com/xinyu1205/recognize-anything.git",
+  # NOTE: RAM++ tagging (recognize-anything) has no PyPI release. Install it
+  # separately for tag features:
+  #   pip install git+https://github.com/xinyu1205/recognize-anything.git
 ]
 dev = [
   "pytest>=8.0",
@@ -47,10 +49,10 @@ dev = [
 ]
 
 [project.scripts]
-travelcull = "travelcull.cli:main"
+selects = "selects.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["travelcull"]
+packages = ["selects"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

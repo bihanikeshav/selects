@@ -138,7 +138,7 @@ export default function BestOf() {
           overflow: "hidden",
         }}
       >
-        <Topbar folder="travelcull" context={`best of: ${facet}=${value}`} />
+        <Topbar folder="selects" context={`best of: ${facet}=${value}`} />
 
         <div
           style={{

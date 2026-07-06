@@ -124,7 +124,7 @@ export default function Search() {
     <div className="app">
       <Rail />
       <div className="workspace">
-        <Topbar folder="travelcull" context="search" />
+        <Topbar folder="selects" context="search" />
         <StatusRow
           pos={hits.length > 0 ? `${hits.length} hits` : "search"}
           keepersCount={0}

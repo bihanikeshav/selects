@@ -1,11 +1,11 @@
-"""Tests for travelcull.indexer.exif."""
+"""Tests for selects.indexer.exif."""
 from __future__ import annotations
 
 from pathlib import Path
 
 import pytest
 
-from travelcull.indexer.exif import ExifData, read_exif
+from selects.indexer.exif import ExifData, read_exif
 
 
 class TestReadExifReturnsExifData:

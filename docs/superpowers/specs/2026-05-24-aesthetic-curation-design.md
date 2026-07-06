@@ -2,7 +2,7 @@
 
 **Status**: Design accepted on 2026-05-24. Implementation pending.
 **Owner**: ankit
-**Related**: [2026-05-23-travelcull-design.md](2026-05-23-travelcull-design.md)
+**Related**: [2026-05-23-selects-design.md](2026-05-23-selects-design.md)
 
 ## Goal
 
@@ -35,7 +35,7 @@ Input: a *scope* — a set of photos to curate. Examples: photos on day 2026-04-
    keepers should show nothing, not its top quarter of mediocre shots.)
 3. Burst-dedup within the surviving set:
      • Group survivors by moment_id (existing Moment table from
-       travelcull.ml.moments).
+       selects.ml.moments).
      • For each moment with 2+ survivors, keep only the highest
        combined_aesthetic member; drop the rest.
      • Survivors with moment_id = NULL pass through unchanged.
@@ -143,7 +143,7 @@ A revisit is worth doing once we have either (a) more rating signal across a bro
 | `AESTHETIC_PCT_FLOOR` | 75     | `cfg`            | top-25% gate; >= p75 keeps the photo |
 | `PROBE_MIN_SIM` | 0.18         | `cfg`            | min cosine sim to assign category  |
 
-All four are config-only and tunable per-folder via `TRAVELCULL_*` env vars.
+All four are config-only and tunable per-folder via `SELECTS_*` env vars.
 
 ## Now in scope (added 2026-05-24)
 
@@ -154,5 +154,5 @@ All four are config-only and tunable per-folder via `TRAVELCULL_*` env vars.
 
 ## Locked decisions (2026-05-24)
 
-- **Aesthetic gate**: library-wide top 25% by `combined_aesthetic`, **tunable per folder** via `TRAVELCULL_AESTHETIC_PCT_FLOOR`. No auto-target-story-length.
+- **Aesthetic gate**: library-wide top 25% by `combined_aesthetic`, **tunable per folder** via `SELECTS_AESTHETIC_PCT_FLOOR`. No auto-target-story-length.
 - **Best-Of facets are pure ranked grids** — no chronological mini-stories. Each grid sorts by `combined_aesthetic` descending.

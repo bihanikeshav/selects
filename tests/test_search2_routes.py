@@ -8,12 +8,12 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from travelcull.config import get_folder_config
-from travelcull.db import init_db, session_scope
-from travelcull.db.models import (
+from selects.config import get_folder_config
+from selects.db import init_db, session_scope
+from selects.db.models import (
     AestheticScore, Embedding, FaceEmbedding, Person, Photo, PhotoPerson, PhotoTag,
 )
-from travelcull.server.search2_routes import register_search2_routes
+from selects.server.search2_routes import register_search2_routes
 
 
 def _siglip_blob(vec: np.ndarray) -> bytes:
@@ -72,7 +72,7 @@ def app_and_ids(tmp_path, monkeypatch):
     # Query vector aligned with photo a's direction -> highest raw semantic score.
     query_vec = np.zeros(dim, dtype=np.float32)
     query_vec[0] = 1.0
-    monkeypatch.setattr("travelcull.ml.search.embed_query", lambda q: query_vec)
+    monkeypatch.setattr("selects.ml.search.embed_query", lambda q: query_vec)
 
     app = FastAPI()
     register_search2_routes(app, cfg)

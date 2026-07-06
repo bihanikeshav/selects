@@ -1,4 +1,4 @@
-// travelcull mockup — view nav, keyboard shortcuts, theme toggle, burst promote
+// selects mockup — view nav, keyboard shortcuts, theme toggle, burst promote
 (() => {
   const root = document.documentElement;
 

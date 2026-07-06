@@ -300,7 +300,7 @@ export default function Clusters() {
     <div className="app">
       <Rail />
       <div className="workspace">
-        <Topbar folder="travelcull" context={mode === "curated" ? "curated · clusters" : "clusters by theme"} />
+        <Topbar folder="selects" context={mode === "curated" ? "curated · clusters" : "clusters by theme"} />
         <ModeViewBar />
         <StatusRow
           details={loading ? "loading…" : error ? "error loading clusters" : `${clusters.length} ${source === "lookback" ? "themes" : "groups"} · ${total} photos`}
@@ -319,7 +319,7 @@ export default function Clusters() {
                 Clusters not yet available
               </div>
               <div style={{ color: "var(--md-on-surface-var)", fontSize: 13 }}>
-                Run <code style={{ fontFamily: "var(--font-mono)", background: "var(--md-surface-c)", padding: "2px 6px", borderRadius: 4 }}>travelcull index &lt;folder&gt; --pass embed</code> then{" "}
+                Run <code style={{ fontFamily: "var(--font-mono)", background: "var(--md-surface-c)", padding: "2px 6px", borderRadius: 4 }}>selects index &lt;folder&gt; --pass embed</code> then{" "}
                 <code style={{ fontFamily: "var(--font-mono)", background: "var(--md-surface-c)", padding: "2px 6px", borderRadius: 4 }}>--pass smart_tag</code>
               </div>
             </div>

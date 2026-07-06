@@ -3,11 +3,11 @@ from pathlib import Path
 
 import pytest
 
-from travelcull.config import get_folder_config
-from travelcull.db import init_db, session_scope
-from travelcull.db.models import ClassicalScore, PipelineState
-from travelcull.indexer.orchestrator import index_folder
-from travelcull.pipeline import run_classical_stage
+from selects.config import get_folder_config
+from selects.db import init_db, session_scope
+from selects.db.models import ClassicalScore, PipelineState
+from selects.indexer.orchestrator import index_folder
+from selects.pipeline import run_classical_stage
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 

@@ -38,7 +38,7 @@ export default function Rail() {
 
   return (
     <nav className="rail" aria-label="Primary">
-      <div className="rail-brand" title="travelcull">
+      <div className="rail-brand" title="selects">
         <span className="dot" aria-hidden="true"></span>tc
       </div>
 

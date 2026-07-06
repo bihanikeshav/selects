@@ -33,7 +33,7 @@ frontend/node_modules/
 frontend/dist/
 
 # Packaging
-travelcull/server/static/
+selects/server/static/
 packaging/dist/
 packaging/build/
 
@@ -44,7 +44,7 @@ screenshots/
 *.png
 
 # Project state
-.travelcull/
+.selects/
 
 # OS
 .DS_Store

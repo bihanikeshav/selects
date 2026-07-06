@@ -1,4 +1,4 @@
-"""Tests for Alembic-backed schema management in travelcull.db.init_db.
+"""Tests for Alembic-backed schema management in selects.db.init_db.
 
 Covers:
   (a) fresh init_db -> alembic_version stamped at head, all tables present;
@@ -15,8 +15,8 @@ from pathlib import Path
 
 from sqlalchemy import inspect
 
-from travelcull.db import _MIGRATIONS_DIR, _ENGINES, _ENGINES_LOCK, init_db
-from travelcull.db.models import Base
+from selects.db import _MIGRATIONS_DIR, _ENGINES, _ENGINES_LOCK, init_db
+from selects.db.models import Base
 
 
 def _head_revision() -> str:
@@ -74,7 +74,7 @@ def _forget_engine(db_path: Path) -> None:
 
 
 def test_fresh_init_db_stamps_head_and_creates_all_tables(tmp_path: Path) -> None:
-    db_path = tmp_path / ".travelcull" / "index.db"
+    db_path = tmp_path / ".selects" / "index.db"
 
     init_db(db_path)
 
@@ -131,7 +131,7 @@ def _create_legacy_db(db_path: Path, *, with_source: bool) -> None:
 
 
 def test_legacy_db_without_source_is_upgraded(tmp_path: Path) -> None:
-    db_path = tmp_path / ".travelcull" / "index.db"
+    db_path = tmp_path / ".selects" / "index.db"
     _create_legacy_db(db_path, with_source=False)
 
     # Seed a pre-existing (NULL-source) tag row to prove data survives.
@@ -158,7 +158,7 @@ def test_legacy_db_without_source_is_upgraded(tmp_path: Path) -> None:
 
 
 def test_post_handrolled_db_with_source_stamps_and_preserves_rows(tmp_path: Path) -> None:
-    db_path = tmp_path / ".travelcull" / "index.db"
+    db_path = tmp_path / ".selects" / "index.db"
     _create_legacy_db(db_path, with_source=True)
 
     conn = sqlite3.connect(str(db_path))
@@ -184,7 +184,7 @@ def test_post_handrolled_db_with_source_stamps_and_preserves_rows(tmp_path: Path
 
 
 def test_init_db_is_idempotent(tmp_path: Path) -> None:
-    db_path = tmp_path / ".travelcull" / "index.db"
+    db_path = tmp_path / ".selects" / "index.db"
 
     factory1 = init_db(db_path)
     head = _stamped_revision(db_path)

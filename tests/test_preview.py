@@ -2,7 +2,7 @@ from pathlib import Path
 
 import numpy as np
 
-from travelcull.indexer.preview import write_previews
+from selects.indexer.preview import write_previews
 
 
 def test_write_previews_creates_two_files(tmp_path):

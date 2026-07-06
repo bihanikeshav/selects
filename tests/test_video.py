@@ -1,5 +1,5 @@
-"""Tests for travelcull.video (frame sampling, dead-footage, highlights,
-pipeline stage) and travelcull.server.video_routes."""
+"""Tests for selects.video (frame sampling, dead-footage, highlights,
+pipeline stage) and selects.server.video_routes."""
 from __future__ import annotations
 
 import json
@@ -8,10 +8,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from travelcull.config import get_folder_config
-from travelcull.db import init_db, session_scope
-from travelcull.db.models import Video
-from travelcull.video import (
+from selects.config import get_folder_config
+from selects.db import init_db, session_scope
+from selects.db.models import Video
+from selects.video import (
     FRAME_SAMPLES,
     VideoDecodeError,
     analyze_video,
@@ -126,7 +126,7 @@ class TestAnalyzeVideo:
         assert 0.0 <= analysis.frames[analysis.best_index].quality <= 1.0
 
     def test_detect_highlights_runs(self):
-        from travelcull.video import FrameScore
+        from selects.video import FrameScore
 
         def fs(i: int, good: bool) -> FrameScore:
             return FrameScore(
@@ -164,7 +164,7 @@ class TestRunVideoStage:
         cfg = get_folder_config(tmp_path)
         sha = "a" * 64
         _ingest_video_row(cfg, sharp_video, sha)
-        monkeypatch.setattr("travelcull.video._embed_best_frame", lambda img: b"\x01" * 8)
+        monkeypatch.setattr("selects.video._embed_best_frame", lambda img: b"\x01" * 8)
 
         progress: list[tuple[int, int, str]] = []
         n = run_video_stage(cfg, lambda i, t, name: progress.append((i, t, name)))
@@ -234,12 +234,12 @@ def client_with_videos(tmp_path: Path, sharp_video: Path, black_video: Path, mon
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
-    from travelcull.server.video_routes import register_video_routes
+    from selects.server.video_routes import register_video_routes
 
     cfg = get_folder_config(tmp_path)
     _ingest_video_row(cfg, sharp_video, "a" * 64)
     _ingest_video_row(cfg, black_video, "b" * 64)
-    monkeypatch.setattr("travelcull.video._embed_best_frame", lambda img: None)
+    monkeypatch.setattr("selects.video._embed_best_frame", lambda img: None)
     run_video_stage(cfg)
 
     app = FastAPI()
