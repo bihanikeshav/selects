@@ -24,6 +24,7 @@ from .pipeline_runner import run_pipeline_stages
 from .recap_routes import register_recap_routes
 from .routes import register_routes
 from .search2_routes import register_search2_routes
+from .system_routes import register_system_routes
 from .taste_routes import register_taste_routes
 from .video_routes import register_video_routes
 from .watch_routes import register_watch_routes
@@ -150,6 +151,7 @@ def build_app(
     register_video_routes(app, proxy, publish)
     register_watch_routes(app, manager, publish)
     register_fs_routes(app)
+    register_system_routes(app)
     register_ws(app)
     _mount_frontend(app)
     return app
