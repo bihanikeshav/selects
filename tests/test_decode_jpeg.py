@@ -1,6 +1,6 @@
 import numpy as np
 
-from travelcull.decode.jpeg import decode_jpeg
+from selects.decode.jpeg import decode_jpeg
 
 
 def test_decode_jpeg_returns_hwc_uint8(fixtures_dir):

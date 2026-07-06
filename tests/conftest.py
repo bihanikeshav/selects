@@ -1,4 +1,4 @@
-"""Shared pytest fixtures for travelcull tests."""
+"""Shared pytest fixtures for selects tests."""
 from __future__ import annotations
 
 import shutil
@@ -13,9 +13,9 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 @pytest.fixture(autouse=True)
 def isolate_registry(tmp_path_factory, monkeypatch) -> None:
     """Point the multi-library registry at an isolated temp file for every test
-    so nothing ever touches the real ~/.travelcull/libraries.json."""
+    so nothing ever touches the real ~/.selects/libraries.json."""
     reg = tmp_path_factory.mktemp("registry") / "libraries.json"
-    monkeypatch.setenv("TRAVELCULL_REGISTRY", str(reg))
+    monkeypatch.setenv("SELECTS_REGISTRY", str(reg))
 
 
 @pytest.fixture()
@@ -37,7 +37,7 @@ def populated_folder(tmp_path: Path) -> Path:
     (tmp_path / "photos").mkdir()
     (tmp_path / "photos" / "sub").mkdir()
     (tmp_path / "videos").mkdir()
-    (tmp_path / ".travelcull").mkdir()
+    (tmp_path / ".selects").mkdir()
     (tmp_path / ".git").mkdir()
 
     # Create dummy files
@@ -45,7 +45,7 @@ def populated_folder(tmp_path: Path) -> Path:
     (tmp_path / "photos" / "img002.HEIC").write_bytes(b"\x00" * 100)
     (tmp_path / "photos" / "sub" / "img003.jpeg").write_bytes(b"\xff\xd8\xff" + b"\x00" * 100)
     (tmp_path / "videos" / "clip001.mp4").write_bytes(b"\x00" * 200)
-    (tmp_path / ".travelcull" / "hidden.jpg").write_bytes(b"\xff\xd8\xff" + b"\x00" * 100)
+    (tmp_path / ".selects" / "hidden.jpg").write_bytes(b"\xff\xd8\xff" + b"\x00" * 100)
     (tmp_path / ".git" / "config").write_bytes(b"[core]\n")
     (tmp_path / "readme.txt").write_bytes(b"not a media file")
 

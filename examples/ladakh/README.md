@@ -1,6 +1,6 @@
 # Ladakh example trip data
 
-These files are the original hardcoded, Ladakh-specific data that travelcull
+These files are the original hardcoded, Ladakh-specific data that selects
 once shipped in its Python source. They are kept here as a worked example of how
 to customize a library for a particular trip or region.
 
@@ -23,12 +23,12 @@ to customize a library for a particular trip or region.
 Copy any of these files into your photo folder's hidden state directory:
 
 ```
-<your photo folder>/.travelcull/landmarks.json
-<your photo folder>/.travelcull/keywords.json
-<your photo folder>/.travelcull/tag_prompts.json
+<your photo folder>/.selects/landmarks.json
+<your photo folder>/.selects/keywords.json
+<your photo folder>/.selects/tag_prompts.json
 ```
 
 Each file is optional and independent. If a file is absent (or malformed),
-travelcull falls back to its built-in, travel-generic defaults — for landmarks
+selects falls back to its built-in, travel-generic defaults — for landmarks
 that means relying entirely on Nominatim reverse-geocoding. Re-run the ML stages
 after adding or editing a file to pick up the changes.

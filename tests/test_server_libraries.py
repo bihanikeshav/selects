@@ -3,8 +3,8 @@ from pathlib import Path
 import pytest
 from httpx import AsyncClient, ASGITransport
 
-from travelcull.server.app import build_app
-from travelcull.server.library_manager import LibraryManager
+from selects.server.app import build_app
+from selects.server.library_manager import LibraryManager
 
 
 @pytest.fixture

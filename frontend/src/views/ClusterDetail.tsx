@@ -165,7 +165,7 @@ export default function ClusterDetail() {
     <div className="app">
       <Rail />
       <div className="workspace">
-        <Topbar folder="travelcull" context={`cluster · ${decoded}`} />
+        <Topbar folder="selects" context={`cluster · ${decoded}`} />
         <StatusRow
           pos={`${photos.length} photos`}
           keepersCount={editedCount}

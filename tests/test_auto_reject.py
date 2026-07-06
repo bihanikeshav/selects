@@ -1,4 +1,4 @@
-from travelcull.classical.auto_reject import RejectInput, evaluate_reject
+from selects.classical.auto_reject import RejectInput, evaluate_reject
 
 
 def test_sharp_balanced_image_not_rejected():

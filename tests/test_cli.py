@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from travelcull.cli import main
+from selects.cli import main
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 

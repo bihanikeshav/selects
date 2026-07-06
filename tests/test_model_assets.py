@@ -1,4 +1,4 @@
-"""Tests for travelcull.ml.model_assets and the /api/models/* routes.
+"""Tests for selects.ml.model_assets and the /api/models/* routes.
 
 Never hits the network: HF/insightface presence checks are monkeypatched and
 the url downloader is exercised against a fake ``requests.get``.
@@ -12,8 +12,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from travelcull.ml import model_assets
-from travelcull.server.models_routes import register_model_routes
+from selects.ml import model_assets
+from selects.server.models_routes import register_model_routes
 
 
 # --------------------------------------------------------------------------- #

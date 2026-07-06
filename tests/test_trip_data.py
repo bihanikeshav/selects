@@ -1,4 +1,4 @@
-"""Tests for travelcull.ml.trip_data — per-library data loaders + geo helper."""
+"""Tests for selects.ml.trip_data — per-library data loaders + geo helper."""
 from __future__ import annotations
 
 import json
@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from travelcull.config import get_folder_config
-from travelcull.ml import trip_data
-from travelcull.ml.trip_data import (
+from selects.config import get_folder_config
+from selects.ml import trip_data
+from selects.ml.trip_data import (
     DEFAULT_KEYWORDS,
     DEFAULT_TAG_PROMPTS,
     km_per_deg_lon,
@@ -31,7 +31,7 @@ def _cfg(folder: Path):
 
 
 def _write_state(folder: Path, name: str, content: str) -> None:
-    state = folder / ".travelcull"
+    state = folder / ".selects"
     state.mkdir(parents=True, exist_ok=True)
     (state / name).write_text(content, encoding="utf-8")
 

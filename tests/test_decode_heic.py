@@ -1,6 +1,6 @@
 import numpy as np
 
-from travelcull.decode.heic import decode_heic
+from selects.decode.heic import decode_heic
 
 
 def test_decode_heic_returns_uint8_rgb(fixtures_dir):

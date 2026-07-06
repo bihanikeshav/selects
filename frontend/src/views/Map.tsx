@@ -103,7 +103,7 @@ export default function MapView() {
     <div className="app">
       <Rail />
       <div className="workspace">
-        <Topbar folder="travelcull" context="map" />
+        <Topbar folder="selects" context="map" />
         <StatusRow
           pos={`${markers.length} locations`}
           keepersCount={totalPhotos}

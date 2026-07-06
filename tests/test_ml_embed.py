@@ -1,4 +1,4 @@
-"""Tests for travelcull.ml.embed — unit tests using CPU/synthetic data."""
+"""Tests for selects.ml.embed — unit tests using CPU/synthetic data."""
 from __future__ import annotations
 
 import struct
@@ -10,9 +10,9 @@ import pytest
 import torch
 from PIL import Image
 
-from travelcull.db import init_db, session_scope
-from travelcull.db.models import Embedding, Photo, PipelineState
-from travelcull.ml.embed import run_embedding_stage
+from selects.db import init_db, session_scope
+from selects.db.models import Embedding, Photo, PipelineState
+from selects.ml.embed import run_embedding_stage
 
 
 DIM = 1152  # SigLIP-SO400M embedding dimension
@@ -41,7 +41,7 @@ def session_factory(tmp_path: Path):
 @pytest.fixture()
 def populated_db(session_factory, tmp_path: Path):
     """Insert 3 photos with preview files and PipelineState(embedding_done=False)."""
-    previews_dir = tmp_path / ".travelcull" / "previews"
+    previews_dir = tmp_path / ".selects" / "previews"
     previews_dir.mkdir(parents=True, exist_ok=True)
 
     photo_ids = []
@@ -73,7 +73,7 @@ def _patch_encode(monkeypatch, n_photos: int):
         iqa = _make_fake_iqa(n)
         return feats, iqa
 
-    import travelcull.ml.embed as embed_mod
+    import selects.ml.embed as embed_mod
     monkeypatch.setattr(embed_mod, "encode_image_batch", fake_encode)
 
 
@@ -82,11 +82,11 @@ class TestRunEmbeddingStage:
         session_factory, folder, photo_ids = populated_db
         _patch_encode(monkeypatch, len(photo_ids))
 
-        from travelcull.config import get_folder_config
+        from selects.config import get_folder_config
         cfg = get_folder_config(folder)
 
         # Also patch init_db inside embed to return our session factory
-        import travelcull.ml.embed as embed_mod
+        import selects.ml.embed as embed_mod
         monkeypatch.setattr(embed_mod, "init_db", lambda _path: session_factory)
 
         n = run_embedding_stage(cfg)
@@ -96,10 +96,10 @@ class TestRunEmbeddingStage:
         session_factory, folder, photo_ids = populated_db
         _patch_encode(monkeypatch, len(photo_ids))
 
-        from travelcull.config import get_folder_config
+        from selects.config import get_folder_config
         cfg = get_folder_config(folder)
 
-        import travelcull.ml.embed as embed_mod
+        import selects.ml.embed as embed_mod
         monkeypatch.setattr(embed_mod, "init_db", lambda _path: session_factory)
 
         run_embedding_stage(cfg)
@@ -116,10 +116,10 @@ class TestRunEmbeddingStage:
         session_factory, folder, photo_ids = populated_db
         _patch_encode(monkeypatch, len(photo_ids))
 
-        from travelcull.config import get_folder_config
+        from selects.config import get_folder_config
         cfg = get_folder_config(folder)
 
-        import travelcull.ml.embed as embed_mod
+        import selects.ml.embed as embed_mod
         monkeypatch.setattr(embed_mod, "init_db", lambda _path: session_factory)
 
         run_embedding_stage(cfg)
@@ -133,10 +133,10 @@ class TestRunEmbeddingStage:
         session_factory, folder, photo_ids = populated_db
         _patch_encode(monkeypatch, len(photo_ids))
 
-        from travelcull.config import get_folder_config
+        from selects.config import get_folder_config
         cfg = get_folder_config(folder)
 
-        import travelcull.ml.embed as embed_mod
+        import selects.ml.embed as embed_mod
         monkeypatch.setattr(embed_mod, "init_db", lambda _path: session_factory)
 
         run_embedding_stage(cfg)
@@ -152,10 +152,10 @@ class TestRunEmbeddingStage:
         session_factory, folder, photo_ids = populated_db
         _patch_encode(monkeypatch, len(photo_ids))
 
-        from travelcull.config import get_folder_config
+        from selects.config import get_folder_config
         cfg = get_folder_config(folder)
 
-        import travelcull.ml.embed as embed_mod
+        import selects.ml.embed as embed_mod
         monkeypatch.setattr(embed_mod, "init_db", lambda _path: session_factory)
 
         run_embedding_stage(cfg)

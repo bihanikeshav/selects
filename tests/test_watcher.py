@@ -1,10 +1,10 @@
-"""Tests for travelcull.watcher: detection, debounce, incremental indexing."""
+"""Tests for selects.watcher: detection, debounce, incremental indexing."""
 from __future__ import annotations
 
 from unittest.mock import patch
 
-from travelcull.config import get_folder_config
-from travelcull.watcher import Debouncer, detect_candidates, run_incremental_index
+from selects.config import get_folder_config
+from selects.watcher import Debouncer, detect_candidates, run_incremental_index
 
 
 def _make_cfg(tmp_path):
@@ -15,7 +15,7 @@ def _make_cfg(tmp_path):
 
 def test_detect_candidates_finds_new_file(tmp_path):
     cfg = _make_cfg(tmp_path)
-    from travelcull.db import init_db
+    from selects.db import init_db
 
     init_db(cfg.db_path)
 
@@ -28,8 +28,8 @@ def test_detect_candidates_finds_new_file(tmp_path):
 
 def test_detect_candidates_ignores_already_indexed(tmp_path):
     cfg = _make_cfg(tmp_path)
-    from travelcull.db import init_db, session_scope
-    from travelcull.db.models import Photo
+    from selects.db import init_db, session_scope
+    from selects.db.models import Photo
 
     Session = init_db(cfg.db_path)
     existing = cfg.folder / "existing.jpg"
@@ -45,7 +45,7 @@ def test_detect_candidates_ignores_already_indexed(tmp_path):
 
 def test_debounce_holds_until_size_stable(tmp_path):
     cfg = _make_cfg(tmp_path)
-    from travelcull.db import init_db
+    from selects.db import init_db
 
     init_db(cfg.db_path)
 
@@ -73,7 +73,7 @@ def test_debounce_holds_until_size_stable(tmp_path):
 
 def test_run_incremental_index_only_indexes_given_paths(tmp_path):
     cfg = _make_cfg(tmp_path)
-    from travelcull.db import init_db
+    from selects.db import init_db
 
     init_db(cfg.db_path)
 
@@ -84,11 +84,11 @@ def test_run_incremental_index_only_indexes_given_paths(tmp_path):
     other_file = cfg.folder / "other.jpg"
     other_file.write_bytes(b"other-data")
 
-    with patch("travelcull.indexer.orchestrator.index_folder") as mock_index, \
-         patch("travelcull.pipeline.run_classical_stage") as mock_classical, \
-         patch("travelcull.ml.embed.run_embedding_stage") as mock_embed, \
-         patch("travelcull.ml.tags.run_tag_stage") as mock_tag, \
-         patch("travelcull.ml.stories.run_story_stage") as mock_story:
+    with patch("selects.indexer.orchestrator.index_folder") as mock_index, \
+         patch("selects.pipeline.run_classical_stage") as mock_classical, \
+         patch("selects.ml.embed.run_embedding_stage") as mock_embed, \
+         patch("selects.ml.tags.run_tag_stage") as mock_tag, \
+         patch("selects.ml.stories.run_story_stage") as mock_story:
         mock_index.return_value = 1
 
         added = run_incremental_index(cfg, [new_file], publish=None)
@@ -104,12 +104,12 @@ def test_run_incremental_index_only_indexes_given_paths(tmp_path):
 
 def test_run_incremental_index_skips_stages_when_nothing_added(tmp_path):
     cfg = _make_cfg(tmp_path)
-    from travelcull.db import init_db
+    from selects.db import init_db
 
     init_db(cfg.db_path)
 
-    with patch("travelcull.indexer.orchestrator.index_folder") as mock_index, \
-         patch("travelcull.pipeline.run_classical_stage") as mock_classical:
+    with patch("selects.indexer.orchestrator.index_folder") as mock_index, \
+         patch("selects.pipeline.run_classical_stage") as mock_classical:
         mock_index.return_value = 0
         added = run_incremental_index(cfg, [], publish=None)
 

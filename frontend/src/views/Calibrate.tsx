@@ -63,7 +63,7 @@ export default function Calibrate() {
     try {
       const res = await fetch(`/api/calibrate/extremes?bucket=worst&n=${BATCH_SIZE}`);
       if (!res.ok) {
-        setToast(`Backend missing /api/calibrate/extremes (HTTP ${res.status}). Restart travelcull serve.`);
+        setToast(`Backend missing /api/calibrate/extremes (HTTP ${res.status}). Restart selects serve.`);
         setPhotos([]);
         return;
       }
@@ -196,7 +196,7 @@ export default function Calibrate() {
           overflow: "hidden",
         }}
       >
-        <Topbar folder="travelcull" context="aesthetic calibration" />
+        <Topbar folder="selects" context="aesthetic calibration" />
 
         {/* Header */}
         <div

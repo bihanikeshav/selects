@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from travelcull.decode.raw import decode_raw_preview
+from selects.decode.raw import decode_raw_preview
 
 DNG = Path(__file__).parent / "fixtures" / "small.dng"
 

@@ -1,18 +1,18 @@
 #!/usr/bin/env python
-"""Build a standalone travelcull desktop bundle with PyInstaller.
+"""Build a standalone selects desktop bundle with PyInstaller.
 
 Steps:
   1. Build the frontend (``npm run build``) if npm is available.
-  2. Copy ``frontend/dist`` -> ``travelcull/server/static`` so the packaged
+  2. Copy ``frontend/dist`` -> ``selects/server/static`` so the packaged
      app can serve the UI same-origin.
-  3. Run PyInstaller (onedir) using ``packaging/travelcull.spec``.
+  3. Run PyInstaller (onedir) using ``packaging/selects.spec``.
 
 Usage:
     python packaging/build.py [--no-frontend] [--ml]
 
     --no-frontend   Skip the npm build (reuse an existing frontend/dist).
     --ml            Bundle the ML stack (torch/transformers/...). Large + slow.
-                    Equivalent to setting TRAVELCULL_BUNDLE_ML=1.
+                    Equivalent to setting SELECTS_BUNDLE_ML=1.
 
 CPU-only torch tip (much smaller than the CUDA wheels):
     pip install torch --index-url https://download.pytorch.org/whl/cpu
@@ -29,8 +29,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_DIR = REPO_ROOT / "frontend"
 FRONTEND_DIST = FRONTEND_DIR / "dist"
-STATIC_DIR = REPO_ROOT / "travelcull" / "server" / "static"
-SPEC = REPO_ROOT / "packaging" / "travelcull.spec"
+STATIC_DIR = REPO_ROOT / "selects" / "server" / "static"
+SPEC = REPO_ROOT / "packaging" / "selects.spec"
 DIST_DIR = REPO_ROOT / "dist"
 BUILD_DIR = REPO_ROOT / "build"
 
@@ -78,7 +78,7 @@ def ensure_pyinstaller() -> None:
 
 
 def run_pyinstaller() -> None:
-    for d in (DIST_DIR / "travelcull", BUILD_DIR / "travelcull"):
+    for d in (DIST_DIR / "selects", BUILD_DIR / "selects"):
         if d.exists():
             shutil.rmtree(d, ignore_errors=True)
     cmd = [sys.executable, "-m", "PyInstaller", "--noconfirm",
@@ -88,11 +88,11 @@ def run_pyinstaller() -> None:
 
 
 def report() -> None:
-    exe = DIST_DIR / "travelcull" / ("travelcull.exe" if os.name == "nt" else "travelcull")
+    exe = DIST_DIR / "selects" / ("selects.exe" if os.name == "nt" else "selects")
     if not exe.exists():
         print("[build] ERROR: expected executable not found:", exe)
         sys.exit(1)
-    total = sum(f.stat().st_size for f in (DIST_DIR / "travelcull").rglob("*") if f.is_file())
+    total = sum(f.stat().st_size for f in (DIST_DIR / "selects").rglob("*") if f.is_file())
     print("\n[build] SUCCESS")
     print(f"[build] executable: {exe}")
     print(f"[build] bundle size: {total / (1024 * 1024):.1f} MB")
@@ -100,13 +100,13 @@ def report() -> None:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Build the travelcull desktop bundle.")
+    ap = argparse.ArgumentParser(description="Build the selects desktop bundle.")
     ap.add_argument("--no-frontend", action="store_true", help="Skip npm build.")
     ap.add_argument("--ml", action="store_true", help="Bundle the ML stack (large).")
     args = ap.parse_args()
 
     if args.ml:
-        os.environ["TRAVELCULL_BUNDLE_ML"] = "1"
+        os.environ["SELECTS_BUNDLE_ML"] = "1"
 
     ensure_pyinstaller()
     if not args.no_frontend:

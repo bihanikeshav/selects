@@ -1,12 +1,12 @@
-"""Tests for travelcull.dedup: cross-library duplicate grouping."""
+"""Tests for selects.dedup: cross-library duplicate grouping."""
 from __future__ import annotations
 
 import numpy as np
 
-from travelcull.config import get_folder_config
-from travelcull.db import init_db, session_scope
-from travelcull.db.models import Embedding, Photo
-from travelcull.dedup import scan_all_libraries
+from selects.config import get_folder_config
+from selects.db import init_db, session_scope
+from selects.db.models import Embedding, Photo
+from selects.dedup import scan_all_libraries
 
 
 def _make_library(tmp_path, name, photos):
@@ -144,8 +144,8 @@ import time
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from travelcull.server.dedup_routes import register_dedup_routes
-from travelcull.server.library_manager import LibraryManager
+from selects.server.dedup_routes import register_dedup_routes
+from selects.server.library_manager import LibraryManager
 
 
 async def test_dedup_report_route_polls_to_completion(tmp_path):

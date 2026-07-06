@@ -1,7 +1,7 @@
-"""Tests for travelcull.gpu capability detection."""
+"""Tests for selects.gpu capability detection."""
 from __future__ import annotations
 
-from travelcull.gpu import GpuCapabilities, detect_capabilities
+from selects.gpu import GpuCapabilities, detect_capabilities
 
 
 class TestDetectCapabilities:

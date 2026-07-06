@@ -1,4 +1,4 @@
-"""Tests for travelcull.ml.tags — unit tests using CPU/synthetic data."""
+"""Tests for selects.ml.tags — unit tests using CPU/synthetic data."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -7,9 +7,9 @@ import numpy as np
 import pytest
 import torch
 
-from travelcull.db import init_db, session_scope
-from travelcull.db.models import Embedding, Photo, PhotoTag, PipelineState
-from travelcull.ml.tags import run_tag_stage, DEFAULT_TAG_PROMPTS
+from selects.db import init_db, session_scope
+from selects.db.models import Embedding, Photo, PhotoTag, PipelineState
+from selects.ml.tags import run_tag_stage, DEFAULT_TAG_PROMPTS
 
 
 DIM = 1152
@@ -55,10 +55,10 @@ class TestRunTagStage:
     def test_populates_photo_tags_for_single_photo(self, embedded_db, monkeypatch):
         session_factory, folder, photo_id = embedded_db
 
-        from travelcull.config import get_folder_config
+        from selects.config import get_folder_config
         cfg = get_folder_config(folder)
 
-        import travelcull.ml.tags as tags_mod
+        import selects.ml.tags as tags_mod
         monkeypatch.setattr(tags_mod, "encode_text_prompts", _fake_encode_text)
         monkeypatch.setattr(tags_mod, "init_db", lambda _path: session_factory)
 
@@ -78,10 +78,10 @@ class TestRunTagStage:
     def test_marks_vl_done(self, embedded_db, monkeypatch):
         session_factory, folder, photo_id = embedded_db
 
-        from travelcull.config import get_folder_config
+        from selects.config import get_folder_config
         cfg = get_folder_config(folder)
 
-        import travelcull.ml.tags as tags_mod
+        import selects.ml.tags as tags_mod
         monkeypatch.setattr(tags_mod, "encode_text_prompts", _fake_encode_text)
         monkeypatch.setattr(tags_mod, "init_db", lambda _path: session_factory)
 
@@ -96,10 +96,10 @@ class TestRunTagStage:
         """Running tag stage twice should not duplicate rows."""
         session_factory, folder, photo_id = embedded_db
 
-        from travelcull.config import get_folder_config
+        from selects.config import get_folder_config
         cfg = get_folder_config(folder)
 
-        import travelcull.ml.tags as tags_mod
+        import selects.ml.tags as tags_mod
         monkeypatch.setattr(tags_mod, "encode_text_prompts", _fake_encode_text)
         monkeypatch.setattr(tags_mod, "init_db", lambda _path: session_factory)
 
@@ -115,10 +115,10 @@ class TestRunTagStage:
 
     def test_returns_zero_when_no_embeddings(self, session_factory, tmp_path, monkeypatch):
         """Tag stage should skip photos without embeddings."""
-        from travelcull.config import get_folder_config
+        from selects.config import get_folder_config
         cfg = get_folder_config(tmp_path)
 
-        import travelcull.ml.tags as tags_mod
+        import selects.ml.tags as tags_mod
         monkeypatch.setattr(tags_mod, "encode_text_prompts", _fake_encode_text)
         monkeypatch.setattr(tags_mod, "init_db", lambda _path: session_factory)
 

@@ -1,6 +1,6 @@
 import numpy as np
 
-from travelcull.decode.video import VideoMeta, decode_first_frame, probe
+from selects.decode.video import VideoMeta, decode_first_frame, probe
 
 
 def test_probe_returns_meta(fixtures_dir):

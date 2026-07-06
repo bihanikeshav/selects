@@ -1,6 +1,6 @@
-# TravelCull
+# Selects
 
-TravelCull is a local-first, AI-assisted photo culling tool for travel photography. Point it at a
+Selects is a local-first, AI-assisted photo culling tool for travel photography. Point it at a
 folder of photos (and videos), and it indexes, scores, clusters, and groups them into stories so
 you can quickly find your keepers — without uploading anything anywhere. All ML inference (image
 embeddings, tagging, face clustering, aesthetic scoring, optional enhancement) runs on your own
@@ -27,7 +27,7 @@ Requires Python 3.11+ and Node 18+.
 ```bash
 # Backend
 pip install -e ".[ml]"        # add the ML stack (torch, transformers, insightface, etc.)
-travelcull serve /path/to/photos
+selects serve /path/to/photos
 
 # Frontend (separate terminal)
 cd frontend
@@ -35,14 +35,14 @@ npm install
 npm run dev
 ```
 
-`travelcull serve` starts the FastAPI backend, opens the web UI in your browser (pass
+`selects serve` starts the FastAPI backend, opens the web UI in your browser (pass
 `--no-browser` to skip), and (unless `--no-background` is passed) kicks off indexing in the
 background. The frontend dev server (`npm run dev`) proxies to the backend for a hot-reloading UI
 during development.
 
 For a single-process run, build the frontend once (`cd frontend && npm run build`) and the backend
 will serve the compiled UI itself at the same origin — no separate `npm run dev` needed. You can
-also run `travelcull serve` with **no folder argument**: it opens the active library from your
+also run `selects serve` with **no folder argument**: it opens the active library from your
 registry, or, if none exists, starts on the onboarding page so you can add your first library from
 the browser.
 
@@ -52,15 +52,15 @@ auto-reject — you can skip the `ml` extra: `pip install -e .`.
 You can also drive the pipeline directly from the CLI:
 
 ```bash
-travelcull index /path/to/photos               # run all default stages
-travelcull index /path/to/photos --pass embed   # run a single named stage
-travelcull doctor                               # report CUDA/GPU capabilities
+selects index /path/to/photos               # run all default stages
+selects index /path/to/photos --pass embed   # run a single named stage
+selects doctor                               # report CUDA/GPU capabilities
 ```
 
 ## How the pipeline works
 
-Each stage reads/writes to a per-folder SQLite database at `<folder>/.travelcull/index.db` and can
-be re-run independently via `travelcull index <folder> --pass <stage>`:
+Each stage reads/writes to a per-folder SQLite database at `<folder>/.selects/index.db` and can
+be re-run independently via `selects index <folder> --pass <stage>`:
 
 1. **index** — walk the folder, hash files, decode previews/thumbnails, read EXIF/GPS
 2. **classical** — blur, exposure, clipped-highlight, and face-count scoring; auto-reject gate
@@ -80,8 +80,8 @@ per-scope and library-wide percentile thresholds — see `ap_weight`, `nima_weig
 ## Configuration
 
 Configuration is per-folder, via `pydantic-settings`. Every field can be overridden with an
-`TRAVELCULL_`-prefixed environment variable (or a `.env` file in the working directory), e.g.
-`TRAVELCULL_WEB_PORT=9000`. Fields (see `travelcull/config.py`):
+`SELECTS_`-prefixed environment variable (or a `.env` file in the working directory), e.g.
+`SELECTS_WEB_PORT=9000`. Fields (see `selects/config.py`):
 
 | Field | Default | Notes |
 |---|---|---|
@@ -95,12 +95,12 @@ Configuration is per-folder, via `pydantic-settings`. Every field can be overrid
 | `aesthetic_library_pct` | `50.0` | Photo must also be in the top `(100 - pct)`% library-wide |
 | `speed_mode` | `full` | `fast` skips some ML stages for a quick preview pass |
 
-Derived, non-configurable paths under `<folder>/.travelcull/`: `index.db`, `thumbs/`, `previews/`.
+Derived, non-configurable paths under `<folder>/.selects/`: `index.db`, `thumbs/`, `previews/`.
 
 ### Per-trip customization
 
 The location and tagging stages ship with travel-generic defaults, but you can tune them per
-library by dropping optional JSON files into `<folder>/.travelcull/`:
+library by dropping optional JSON files into `<folder>/.selects/`:
 
 | File | Purpose |
 |---|---|
@@ -110,19 +110,19 @@ library by dropping optional JSON files into `<folder>/.travelcull/`:
 
 Each file is optional; a missing or malformed file falls back to the built-in defaults. See
 [`examples/ladakh/`](examples/ladakh/) for a complete worked example (the original Ladakh dataset)
-and copy any file into your own `.travelcull/` to customize.
+and copy any file into your own `.selects/` to customize.
 
 ## Hardware notes
 
 The ML stages (embedding, tagging, face recognition, clustering, enhancement) are much faster with
-a CUDA GPU — `travelcull doctor` reports what's available (CUDA, NVDEC via torchcodec,
+a CUDA GPU — `selects doctor` reports what's available (CUDA, NVDEC via torchcodec,
 nvImageCodec, `cv2.cuda`). Everything falls back to CPU, but expect the ML stages to be
 significantly slower, especially the enhancement models (NAFNet/Zero-DCE++/CSRNet) and the VLM
 cluster-naming pass. Classical scoring (blur/exposure/face-detect) and indexing run fine on CPU.
 
 ## Project layout
 
-- `travelcull/` — Python package: CLI, config, pipeline orchestration, DB models
+- `selects/` — Python package: CLI, config, pipeline orchestration, DB models
   - `classical/` — non-ML signal scoring (blur, exposure, face detect, auto-reject, straighten)
   - `decode/` — image/video/RAW decoding
   - `indexer/` — folder walking, EXIF reading, preview generation, orchestration
@@ -143,12 +143,12 @@ ruff check .
 ```
 
 Database schema is managed with Alembic. Migrations ship inside the package at
-`travelcull/db/migrations/` (there is no `alembic.ini`), and `init_db()` brings
+`selects/db/migrations/` (there is no `alembic.ini`), and `init_db()` brings
 each library's SQLite DB up to head automatically on open — fresh DBs are created
 and stamped, pre-existing DBs are stamped at the baseline and upgraded. After
-changing `travelcull/db/models.py`, create a new revision with autogenerate by
+changing `selects/db/models.py`, create a new revision with autogenerate by
 building an in-code `Config` pointing `script_location` at
-`travelcull/db/migrations` and `sqlalchemy.url` at a throwaway SQLite file, then
+`selects/db/migrations` and `sqlalchemy.url` at a throwaway SQLite file, then
 calling `alembic.command.revision(cfg, autogenerate=True, message="...")`. Always
 review the generated script — SQLite ALTERs must go through `render_as_batch`
 (already enabled in `env.py`).
@@ -164,14 +164,14 @@ python packaging/build.py
 ```
 
 The script builds the frontend (`npm run build`), copies `frontend/dist` into
-`travelcull/server/static/` so the packaged app serves the UI same-origin, then runs PyInstaller in
-**onedir** mode using `packaging/travelcull.spec`. The result lands in `dist/travelcull/` — launch
-`dist/travelcull/travelcull.exe` (or `./travelcull` on macOS/Linux).
+`selects/server/static/` so the packaged app serves the UI same-origin, then runs PyInstaller in
+**onedir** mode using `packaging/selects.spec`. The result lands in `dist/selects/` — launch
+`dist/selects/selects.exe` (or `./selects` on macOS/Linux).
 
 By default the ML stack (torch, transformers, insightface, …) is **excluded** to keep the bundle
 small and the build fast — the base app still indexes, previews, and runs the classical auto-reject
 stages. To bundle the ML deps, use `python packaging/build.py --ml` (or set
-`TRAVELCULL_BUNDLE_ML=1`); any ML package that isn't installed is skipped, so the build always
+`SELECTS_BUNDLE_ML=1`); any ML package that isn't installed is skipped, so the build always
 degrades gracefully.
 
 CPU-torch tip: the default CUDA torch wheels are multiple GB. For a much smaller ML bundle, install

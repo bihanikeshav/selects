@@ -1,4 +1,4 @@
-"""Tests for travelcull.ml.stories — unit tests using synthetic data."""
+"""Tests for selects.ml.stories — unit tests using synthetic data."""
 from __future__ import annotations
 
 from datetime import datetime, timedelta
@@ -7,8 +7,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from travelcull.db import init_db, session_scope
-from travelcull.db.models import (
+from selects.db import init_db, session_scope
+from selects.db.models import (
     ClassicalScore,
     Embedding,
     Photo,
@@ -16,7 +16,7 @@ from travelcull.db.models import (
     Story,
     StoryItem,
 )
-from travelcull.ml.stories import (
+from selects.ml.stories import (
     _day_title,
     _pick_representatives,
     _segment_scenes,
@@ -125,7 +125,7 @@ class TestSegmentScenes:
             prev = current[-1]
             dt = (it["taken_at"] - prev["taken_at"]).total_seconds()
             sim = float(np.dot(it["embedding"], prev["embedding"]))
-            from travelcull.ml.stories import SCENE_TIME_GAP_S, SCENE_SIM_THRESHOLD
+            from selects.ml.stories import SCENE_TIME_GAP_S, SCENE_SIM_THRESHOLD
             if dt > SCENE_TIME_GAP_S and sim < SCENE_SIM_THRESHOLD:
                 scenes.append(current)
                 current = [it]
@@ -147,7 +147,7 @@ class TestSegmentScenes:
         ]
         all_items = items_before + items_after
 
-        from travelcull.ml.stories import SCENE_TIME_GAP_S, SCENE_SIM_THRESHOLD
+        from selects.ml.stories import SCENE_TIME_GAP_S, SCENE_SIM_THRESHOLD
         scenes: list[list] = []
         current = []
         for it in all_items:
@@ -215,9 +215,9 @@ class TestPickRepresentatives:
 
 class TestRunStoryStage:
     def test_builds_stories_for_eligible_days(self, session_factory, tmp_path):
-        from travelcull.config import get_folder_config
+        from selects.config import get_folder_config
         cfg = get_folder_config(tmp_path)
-        import travelcull.ml.stories as stories_mod
+        import selects.ml.stories as stories_mod
         monkeypatch_init_db = lambda _path: session_factory  # noqa: E731
 
         # Insert 2 days: one eligible (15 photos), one not (2 photos — below
@@ -240,9 +240,9 @@ class TestRunStoryStage:
             assert stories[0].day == "2026-03-29"
 
     def test_idempotent_rebuild(self, session_factory, tmp_path):
-        from travelcull.config import get_folder_config
+        from selects.config import get_folder_config
         cfg = get_folder_config(tmp_path)
-        import travelcull.ml.stories as stories_mod
+        import selects.ml.stories as stories_mod
 
         monkeypatch_init_db = lambda _path: session_factory  # noqa: E731
 
@@ -263,9 +263,9 @@ class TestRunStoryStage:
             assert len(stories) == 1
 
     def test_photo_count_capped_at_max(self, session_factory, tmp_path):
-        from travelcull.config import get_folder_config
+        from selects.config import get_folder_config
         cfg = get_folder_config(tmp_path)
-        import travelcull.ml.stories as stories_mod
+        import selects.ml.stories as stories_mod
 
         monkeypatch_init_db = lambda _path: session_factory  # noqa: E731
 
@@ -285,9 +285,9 @@ class TestRunStoryStage:
             assert st.photo_count <= MAX_STORY_PHOTOS
 
     def test_skips_auto_rejected_photos(self, session_factory, tmp_path):
-        from travelcull.config import get_folder_config
+        from selects.config import get_folder_config
         cfg = get_folder_config(tmp_path)
-        import travelcull.ml.stories as stories_mod
+        import selects.ml.stories as stories_mod
 
         monkeypatch_init_db = lambda _path: session_factory  # noqa: E731
 

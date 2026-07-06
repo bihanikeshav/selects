@@ -1,4 +1,4 @@
-"""Tests for travelcull.config."""
+"""Tests for selects.config."""
 from __future__ import annotations
 
 import os
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from travelcull.config import FolderConfig, get_folder_config
+from selects.config import FolderConfig, get_folder_config
 
 
 class TestFolderConfigDefaults:
@@ -21,7 +21,7 @@ class TestFolderConfigDefaults:
 
     def test_state_dir_under_folder(self, tmp_path: Path) -> None:
         cfg = get_folder_config(tmp_path)
-        assert cfg.state_dir == tmp_path.resolve() / ".travelcull"
+        assert cfg.state_dir == tmp_path.resolve() / ".selects"
 
     def test_db_path_under_state_dir(self, tmp_path: Path) -> None:
         cfg = get_folder_config(tmp_path)
@@ -38,17 +38,17 @@ class TestFolderConfigDefaults:
 
 class TestFolderConfigEnvOverride:
     def test_env_override_port(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("TRAVELCULL_WEB_PORT", "9999")
+        monkeypatch.setenv("SELECTS_WEB_PORT", "9999")
         cfg = get_folder_config(tmp_path)
         assert cfg.web_port == 9999
 
     def test_env_override_host(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("TRAVELCULL_WEB_HOST", "0.0.0.0")
+        monkeypatch.setenv("SELECTS_WEB_HOST", "0.0.0.0")
         cfg = get_folder_config(tmp_path)
         assert cfg.web_host == "0.0.0.0"
 
     def test_env_override_speed_mode(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("TRAVELCULL_SPEED_MODE", "fast")
+        monkeypatch.setenv("SELECTS_SPEED_MODE", "fast")
         cfg = get_folder_config(tmp_path)
         assert cfg.speed_mode == "fast"
 
