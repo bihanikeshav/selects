@@ -16,6 +16,7 @@ from travelcull.classical.faces import detect_faces
 from travelcull.config import FolderConfig
 from travelcull.db import init_db, session_scope
 from travelcull.db.models import ClassicalScore, FaceEmbedding, Photo
+from travelcull.ml.face_attributes import compute_face_attributes
 
 log = logging.getLogger(__name__)
 
@@ -91,6 +92,15 @@ def run_face_embedding_stage(
                         )
                         continue
                     blob = face.embedding.astype(np.float16).tobytes()
+                    attrs = compute_face_attributes(
+                        img_w=img.shape[1],
+                        img_h=img.shape[0],
+                        bbox_w=face.w,
+                        bbox_h=face.h,
+                        kps=face.kps,
+                        landmark_2d_106=face.landmark_2d_106,
+                        pose=face.pose,
+                    )
                     fe = FaceEmbedding(
                         photo_id=photo_id,
                         face_index=face_index,
@@ -100,6 +110,10 @@ def run_face_embedding_stage(
                         bbox_w=face.w,
                         bbox_h=face.h,
                         confidence=face.confidence,
+                        eyes_open=attrs.eyes_open,
+                        yaw=attrs.yaw,
+                        pitch=attrs.pitch,
+                        face_area_ratio=attrs.area_ratio,
                     )
                     s.add(fe)
 

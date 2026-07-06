@@ -215,6 +215,20 @@ def curate(
     # Burst stack: keep only ONE member per moment (the user-chosen primary if
     # available, else the highest-combined). Other members stay in the DB and
     # are reached via the stack-cycle UI.
+    #
+    # Face-quality blend: within a stack the aesthetic score is adjusted by a
+    # BOUNDED penalty (closed eyes, contextual on group size / frontality —
+    # see face_quality_penalty). The cap guarantees this only flips
+    # near-equal candidates and never overrides a big aesthetic gap. It does
+    # not affect gating, output scores or sort order.
+    from travelcull.ml.face_attributes import stack_face_penalties
+
+    in_moment_ids = [c.photo_id for c in candidates if c.moment_id is not None]
+    face_penalty = stack_face_penalties(s, in_moment_ids) if in_moment_ids else {}
+
+    def _stack_score(c: CuratedPhoto) -> float:
+        return c.combined - face_penalty.get(c.photo_id, 0.0)
+
     by_moment: dict[int, CuratedPhoto] = {}
     stack_out: list[CuratedPhoto] = []
     for c in candidates:
@@ -229,7 +243,7 @@ def curate(
         elif c.photo_id == primary_id:
             # User has explicitly set this one as the top of stack — respect it
             by_moment[c.moment_id] = c
-        elif existing.photo_id != primary_id and c.combined > existing.combined:
+        elif existing.photo_id != primary_id and _stack_score(c) > _stack_score(existing):
             by_moment[c.moment_id] = c
     stack_out.extend(by_moment.values())
     dedup_out = stack_out

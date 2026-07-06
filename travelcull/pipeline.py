@@ -40,6 +40,12 @@ def run_face_embedding_stage(cfg, on_progress=None):  # noqa: F811
     return _fn(cfg, on_progress=on_progress)
 
 
+def run_face_attribute_stage(cfg, on_progress=None):  # noqa: F811
+    """Lazy proxy: imports travelcull.ml.face_attributes.run_face_attribute_stage on first call."""
+    from travelcull.ml.face_attributes import run_face_attribute_stage as _fn
+    return _fn(cfg, on_progress=on_progress)
+
+
 def run_moment_stage(cfg, on_progress=None):  # noqa: F811
     """Lazy proxy: imports travelcull.ml.moments.run_moment_stage on first call."""
     from travelcull.ml.moments import run_moment_stage as _fn

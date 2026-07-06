@@ -1,0 +1,201 @@
+/* ExportPanel — own stylesheet per project convention. Matches the
+   dark-theme surface/outline tokens defined in styles.css (read-only). */
+
+.export-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, black 55%, transparent);
+}
+
+.export-panel-card {
+  width: min(560px, 92vw);
+  max-height: 86vh;
+  overflow: auto;
+  background: var(--md-surface-c-low);
+  border: 1px solid var(--md-outline-var);
+  border-radius: 14px;
+  box-shadow: 0 24px 64px color-mix(in srgb, black 35%, transparent);
+  padding: 20px 22px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.export-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.export-panel-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--md-on-surface);
+  flex: 1;
+}
+
+.export-panel-close {
+  border: none;
+  background: transparent;
+  color: var(--md-on-surface-var);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+
+.export-panel-close:hover {
+  background: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+}
+
+.export-panel-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--md-outline-var);
+  padding-bottom: 10px;
+}
+
+.export-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.export-field label {
+  font-size: 12px;
+  color: var(--md-on-surface-var);
+  font-weight: 500;
+}
+
+.export-row {
+  display: flex;
+  gap: 10px;
+}
+
+.export-row .export-field {
+  flex: 1;
+}
+
+.export-select {
+  background: var(--md-surface);
+  color: var(--md-on-surface);
+  border: 1px solid var(--md-outline-var);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.export-progress-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.export-progress-bar {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--md-surface-c);
+  overflow: hidden;
+}
+
+.export-progress-fill {
+  height: 100%;
+  background: var(--md-primary);
+  transition: width 0.15s ease;
+}
+
+.export-status-line {
+  font-size: 12px;
+  color: var(--md-on-surface-var);
+  font-family: var(--font-mono);
+}
+
+.export-result {
+  font-size: 13px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--g-green) 12%, transparent);
+  color: var(--md-on-surface);
+}
+
+.export-error {
+  font-size: 13px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--md-error) 12%, transparent);
+  color: var(--md-error);
+}
+
+.export-xmp-list {
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid var(--md-outline-var);
+  border-radius: 8px;
+}
+
+.export-xmp-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--md-outline-var);
+}
+
+.export-xmp-row:last-child {
+  border-bottom: none;
+}
+
+.export-xmp-path {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  color: var(--md-on-surface-var);
+}
+
+.export-xmp-badge {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.export-xmp-badge.write {
+  background: color-mix(in srgb, var(--g-green) 18%, transparent);
+  color: var(--g-green);
+}
+
+.export-xmp-badge.skip_lower,
+.export-xmp-badge.skip_same {
+  background: color-mix(in srgb, var(--md-on-surface) 10%, transparent);
+  color: var(--md-on-surface-var);
+}
+
+.export-xmp-badge.no_op {
+  background: color-mix(in srgb, var(--md-error) 15%, transparent);
+  color: var(--md-error);
+}
+
+.export-panel-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.export-force-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--md-on-surface-var);
+}

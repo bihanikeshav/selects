@@ -8,6 +8,7 @@ import StatusRow from "../components/StatusRow";
 import ModeViewBar from "../components/ModeViewBar";
 import KbdFooter from "../components/KbdFooter";
 import BurstThumb from "../components/BurstThumb";
+import EyesBadge from "../components/EyesBadge";
 import ScoresCard from "../components/ScoresCard";
 
 type LoadState = "loading" | "error" | "empty" | "loaded";
@@ -638,18 +639,21 @@ export default function BurstCull() {
 
             <aside className="cull-side">
               <ScoresCard photo={currentPhoto} />
+              {activeShaForUrl && <EyesBadge sha256={activeShaForUrl} />}
               <div className="burst-strip" aria-label="Photos">
                 {expandedMoment ? (
                   expandedMoment.members.map((member, memberI) => (
-                    <BurstThumb
-                      key={member.photo_id}
-                      src={member.thumb_url}
-                      badge={String(memberI + 1)}
-                      isGold={memberI === momentIdx}
-                      isLiked={burstLiked[member.sha256] === true}
-                      onClick={() => setMomentIdx(memberI)}
-                      alt={`Moment member ${memberI + 1}`}
-                    />
+                    <div key={member.photo_id} style={{ position: "relative" }}>
+                      <BurstThumb
+                        src={member.thumb_url}
+                        badge={String(memberI + 1)}
+                        isGold={memberI === momentIdx}
+                        isLiked={burstLiked[member.sha256] === true}
+                        onClick={() => setMomentIdx(memberI)}
+                        alt={`Moment member ${memberI + 1}`}
+                      />
+                      <EyesBadge sha256={member.sha256} overlay />
+                    </div>
                   ))
                 ) : (
                   photos.slice(Math.max(0, idx - 3), idx + 8).map((p, relI) => {

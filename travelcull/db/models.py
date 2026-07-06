@@ -211,6 +211,11 @@ class FaceEmbedding(Base):
     bbox_w: Mapped[int] = mapped_column(Integer, nullable=False)
     bbox_h: Mapped[int] = mapped_column(Integer, nullable=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    # Face attributes (nullable — backfilled lazily for pre-existing rows).
+    eyes_open: Mapped[Optional[float]] = mapped_column(Float, default=None)        # [0,1], 1 = open
+    yaw: Mapped[Optional[float]] = mapped_column(Float, default=None)              # degrees
+    pitch: Mapped[Optional[float]] = mapped_column(Float, default=None)            # degrees
+    face_area_ratio: Mapped[Optional[float]] = mapped_column(Float, default=None)  # bbox/image area
 
     photo: Mapped["Photo"] = relationship("Photo")
 
