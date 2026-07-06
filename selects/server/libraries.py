@@ -39,6 +39,12 @@ def register_libraries(
         try:
             lib = manager.add_library(name, path)
         except DuplicateLibraryError:
+            # Already registered: open it instead of dead-ending. Activate the
+            # existing library and return it so the UI can proceed straight in.
+            existing = manager.find_by_path(path)
+            if existing is not None:
+                manager.activate(existing["id"])
+                return {"library": existing, "already_registered": True}
             raise HTTPException(409, detail="path is already registered")
         return {"library": lib}
 

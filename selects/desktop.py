@@ -22,6 +22,31 @@ log = logging.getLogger(__name__)
 WINDOW_TITLE = "Selects"
 
 
+class _WindowControls:
+    """JS-exposed window controls for the custom (frameless) title bar."""
+
+    def __init__(self) -> None:
+        self.window = None
+        self._maximized = False
+
+    def minimize(self) -> None:
+        if self.window is not None:
+            self.window.minimize()
+
+    def toggle_maximize(self) -> None:
+        if self.window is None:
+            return
+        if self._maximized:
+            self.window.restore()
+        else:
+            self.window.maximize()
+        self._maximized = not self._maximized
+
+    def close(self) -> None:
+        if self.window is not None:
+            self.window.destroy()
+
+
 def run_app(host: str = "127.0.0.1", port: int = 8000) -> None:
     """Start the server and open the native app window."""
     import uvicorn
@@ -53,9 +78,18 @@ def run_app(host: str = "127.0.0.1", port: int = 8000) -> None:
     try:
         import webview
 
-        webview.create_window(
-            WINDOW_TITLE, url, width=1440, height=900, min_size=(1024, 720)
+        controls = _WindowControls()
+        window = webview.create_window(
+            WINDOW_TITLE,
+            url,
+            width=1440,
+            height=900,
+            min_size=(1024, 720),
+            frameless=True,       # no native chrome — we draw our own title bar
+            easy_drag=False,      # drag only via the title bar's drag region
+            js_api=controls,
         )
+        controls.window = window
         webview.start()  # blocks on the main thread until the window is closed
     except Exception as exc:  # noqa: BLE001
         log.warning("native window unavailable (%s); using browser fallback", exc)

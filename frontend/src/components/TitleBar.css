@@ -1,0 +1,113 @@
+/* Custom desktop title bar (frameless pywebview window). Only present when the
+   .selects-desktop class is set on <html> (i.e. inside the desktop app). */
+
+.titlebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 36px;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  background: #17181c;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Full-width draggable backdrop; sits behind the title and controls. */
+.titlebar-drag {
+  position: absolute;
+  inset: 0;
+}
+
+/* Thin four-color brand strip along the very top. */
+.titlebar-accent {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    #4285f4 0%,
+    #4285f4 25%,
+    #ea4335 25%,
+    #ea4335 50%,
+    #fbbc04 50%,
+    #fbbc04 75%,
+    #34a853 75%,
+    #34a853 100%
+  );
+  pointer-events: none;
+}
+
+/* Centered title — pointer-events off so drags fall through to the backdrop. */
+.titlebar-center {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  pointer-events: none;
+  font-family: "Google Sans Display", system-ui, sans-serif;
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+  color: #e6e6e8;
+}
+
+.titlebar-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 0deg,
+    #4285f4 0deg 90deg,
+    #ea4335 90deg 180deg,
+    #fbbc04 180deg 270deg,
+    #34a853 270deg 360deg
+  );
+}
+
+.titlebar-controls {
+  position: absolute;
+  right: 0;
+  top: 0;
+  height: 100%;
+  display: flex;
+  z-index: 1;
+}
+
+.tb-btn {
+  width: 46px;
+  height: 100%;
+  border: none;
+  background: transparent;
+  color: #c9c9cf;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.tb-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.tb-close:hover {
+  background: #e81123;
+  color: #fff;
+}
+
+/* Push the app down so the fixed title bar doesn't overlap it. */
+html.selects-desktop body {
+  padding-top: 36px;
+  box-sizing: border-box;
+}
