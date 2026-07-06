@@ -27,12 +27,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Install package (CPU torch) + PyInstaller
+      - name: Install package (CPU torch) + ML stack + PyInstaller
         run: |
+          # CPU torch first (much smaller than the CUDA wheels); the [ml] extra
+          # then reuses it (torch>=2.2 already satisfied) and adds transformers/
+          # insightface/onnxruntime/sklearn/hdbscan/umap so the bundle can ship
+          # working AI instead of ImportError-ing on first use.
           pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install . pyinstaller  # non-editable: avoids PEP 660 editable-hook issues
-      - name: Build bundle
-        run: python packaging/build.py
+          pip install ".[ml]" pyinstaller  # non-editable: avoids PEP 660 editable-hook issues
+      - name: Build bundle (with ML stack)
+        run: python packaging/build.py --ml
       - name: Zip bundle
         shell: bash
         run: |
