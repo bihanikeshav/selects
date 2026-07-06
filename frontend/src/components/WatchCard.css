@@ -1,0 +1,122 @@
+.watch-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 24px;
+  background: var(--md-surface-c-low);
+  border: 1px solid var(--md-outline-var);
+  border-radius: var(--r-lg);
+}
+
+.watch-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.watch-card-head h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 500;
+}
+
+.watch-toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.watch-toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.watch-toggle-track {
+  width: 38px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--md-outline-var);
+  position: relative;
+  transition: background 0.15s ease;
+}
+
+.watch-toggle-track::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--md-surface-c-low);
+  transition: transform 0.15s ease;
+}
+
+.watch-toggle input:checked + .watch-toggle-track {
+  background: var(--md-primary);
+}
+
+.watch-toggle input:checked + .watch-toggle-track::before {
+  transform: translateX(16px);
+}
+
+.watch-toggle input:disabled + .watch-toggle-track {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.watch-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.watch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 14px;
+}
+
+.watch-label {
+  color: var(--md-on-surface-var, inherit);
+  opacity: 0.75;
+}
+
+.watch-value {
+  font-weight: 500;
+}
+
+.watch-select {
+  font-size: 13px;
+  padding: 4px 8px;
+  border-radius: var(--r-md, 8px);
+  border: 1px solid var(--md-outline-var);
+  background: transparent;
+  color: inherit;
+}
+
+.watch-status-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 0;
+  font-size: 13px;
+  opacity: 0.8;
+}
+
+.watch-dot {
+  flex-shrink: 0;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--md-outline-var);
+}
+
+.watch-dot.is-active {
+  background: var(--g-green, #2e7d32);
+}

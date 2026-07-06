@@ -1,0 +1,14 @@
+.recap-btn-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.recap-btn {
+  white-space: nowrap;
+}
+
+.recap-btn-error {
+  font-size: 12px;
+  color: var(--md-error, #ba1a1a);
+}

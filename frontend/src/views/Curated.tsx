@@ -5,6 +5,7 @@ import type { CuratedPhoto } from "../api/types";
 import ExportPanel from "../components/ExportPanel";
 import ModeViewBar from "../components/ModeViewBar";
 import Rail from "../components/Rail";
+import TasteCard from "../components/TasteCard";
 import Topbar from "../components/Topbar";
 
 type SortMode = "aesthetic" | "taken_at";
@@ -204,6 +205,9 @@ export default function Curated() {
         </div>
 
         <div style={{ padding: "12px 24px 16px", overflow: "auto", minHeight: 0 }}>
+          <div style={{ marginBottom: 12 }}>
+            <TasteCard />
+          </div>
           {err && (
             <div
               style={{

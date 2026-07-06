@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { Link } from "react-router-dom";
 import ModeViewBar, { modeFromPath } from "../components/ModeViewBar";
 import Rail from "../components/Rail";
+import RecapButton from "../components/RecapButton";
 import StackPhoto from "../components/StackPhoto";
 import Topbar from "../components/Topbar";
 import StatusRow from "../components/StatusRow";
@@ -298,6 +299,7 @@ function StoryCard({ story }: { story: StoryEntry }) {
           >
             {captionLoading ? "Writing…" : "Caption"}
           </button>
+          <RecapButton storyId={story.id} />
         </div>
 
         {exportResult && (
