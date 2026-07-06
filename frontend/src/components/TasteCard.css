@@ -1,0 +1,61 @@
+/* TasteCard — matches the dark surface-card idiom (see ModelsCard / styles.css). */
+
+.taste-card {
+  background: var(--md-surface-c-low);
+  border: 1px solid var(--md-outline-var);
+  border-radius: var(--r-lg, 12px);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 420px;
+}
+
+.taste-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.taste-head h2 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--md-on-surface);
+}
+
+.taste-sub {
+  font-size: 0.75rem;
+  color: var(--md-on-surface-var);
+  white-space: nowrap;
+}
+
+.taste-line {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--md-on-surface);
+}
+
+.taste-line strong {
+  color: var(--md-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.taste-explain {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--md-on-surface-var);
+}
+
+.taste-error {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--md-error);
+}
+
+.taste-card .btn[disabled] {
+  opacity: 0.55;
+  cursor: default;
+}

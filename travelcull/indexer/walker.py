@@ -58,6 +58,23 @@ def walk_supported(root: Path) -> Iterator[tuple[Path, FileKind]]:
                 yield item, kind
 
 
+def classify_paths(paths: "Iterator[Path] | list[Path]") -> Iterator[tuple[Path, FileKind]]:
+    """Yield (path, kind) for an explicit list of candidate paths.
+
+    Unlike :func:`walk_supported`, this does not walk the filesystem tree — it
+    simply classifies (and filters to existing files of) a caller-supplied
+    subset. Used for incremental indexing where the caller (e.g. the watch
+    folder poller) already knows which paths are new.
+    """
+    for item in paths:
+        item = Path(item)
+        if not item.is_file():
+            continue
+        kind = classify(item)
+        if kind is not None:
+            yield item, kind
+
+
 def sha256_of(path: Path) -> str:
     """Return the hex-encoded SHA-256 digest of a file's contents."""
     h = hashlib.sha256()

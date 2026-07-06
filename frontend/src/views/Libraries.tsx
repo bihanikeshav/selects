@@ -12,6 +12,7 @@ import type { Library } from "../api/types";
 import FolderPicker from "../components/FolderPicker";
 import ModelsCard from "../components/ModelsCard";
 import Rail from "../components/Rail";
+import WatchCard from "../components/WatchCard";
 
 function fmtDate(iso: string): string {
   const d = new Date(iso);
@@ -234,6 +235,8 @@ export default function Libraries() {
           </form>
 
           <ModelsCard />
+
+          <WatchCard />
         </div>
       </div>
     </div>

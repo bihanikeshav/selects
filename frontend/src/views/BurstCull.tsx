@@ -1,7 +1,9 @@
-import { useEffect, useCallback, useRef, useState } from "react";
+import { useEffect, useCallback, useMemo, useRef, useState } from "react";
 import { listPhotos, getPhotoMoment, setMomentPrimary } from "../api/client";
 import type { Photo, Moment, MomentMember } from "../api/types";
 import { useLikeStatus, useToggleLike } from "../hooks/useLikes";
+import { useCullKeys } from "../hooks/useCullKeys";
+import CompareView from "../components/CompareView";
 import Rail from "../components/Rail";
 import Topbar from "../components/Topbar";
 import StatusRow from "../components/StatusRow";
@@ -22,6 +24,34 @@ interface SwipeSummary {
 }
 
 type SortMode = "aesthetic" | "taken_at" | "random";
+
+/** Numbered badge shown on thumbs selected for compare (V / shift-click). */
+const compareSelBadgeStyle: React.CSSProperties = {
+  position: "absolute",
+  bottom: 4,
+  left: 4,
+  zIndex: 3,
+  width: 18,
+  height: 18,
+  display: "grid",
+  placeItems: "center",
+  background: "var(--md-primary)",
+  color: "var(--md-on-primary)",
+  borderRadius: 999,
+  fontFamily: "var(--font-mono)",
+  fontSize: 11,
+  fontWeight: 700,
+  boxShadow: "0 0 0 2px var(--md-surface), 0 1px 4px rgba(0,0,0,0.35)",
+  pointerEvents: "none",
+};
+
+interface UndoEntry {
+  sha: string;
+  /** Decision this session had previously recorded for the sha, if any. */
+  prevDecision: string | null;
+  /** Photo index at the time of the decision, to jump back to on undo. */
+  idx: number;
+}
 
 export default function BurstCull() {
   const [photos, setPhotos] = useState<Photo[]>([]);
@@ -71,11 +101,13 @@ export default function BurstCull() {
     return () => { cancelled = true; };
   }, [sortMode]);
 
-  // Reset moment expansion and per-photo edit toggles when navigating
+  // Reset moment expansion, per-photo edit toggles and the compare
+  // selection when navigating to a different photo/group.
   useEffect(() => {
     setExpandedMoment(null);
     setMomentIdx(0);
     setBurstLiked({});
+    setCompareSel([]);
   }, [idx]);
 
   // Liked status for every member of the expanded burst — so the badge can
@@ -200,8 +232,116 @@ export default function BurstCull() {
     [photos, idx, expandedMoment, momentIdx],
   );
 
+  // ── Session culling state: undo stack + progress ─────────────────────────
+  const [undoStack, setUndoStack] = useState<UndoEntry[]>([]);
+  const [sessionCulled, setSessionCulled] = useState(0);
+  // Decisions made THIS session (sha -> decision), so undo can restore the
+  // previous in-session decision rather than blindly clearing.
+  const sessionDecisions = useRef<Map<string, string>>(new Map());
+
+  const decide = useCallback(
+    (sha: string, decision: string, advance = true) => {
+      const prevDecision = sessionDecisions.current.get(sha) ?? null;
+      sessionDecisions.current.set(sha, decision);
+      setUndoStack((st) => [...st, { sha, prevDecision, idx }]);
+      setSessionCulled((n) => n + 1);
+      recordSwipe(sha, decision);
+      if (advance) next();
+    },
+    [idx, next],
+  );
+
+  const undo = useCallback(() => {
+    if (undoStack.length === 0) return;
+    const last = undoStack[undoStack.length - 1];
+    // Restore the previous in-session decision; if there was none, reset to
+    // "skip" (the closest server-side representation of "undecided").
+    recordSwipe(last.sha, last.prevDecision ?? "skip");
+    if (last.prevDecision) sessionDecisions.current.set(last.sha, last.prevDecision);
+    else sessionDecisions.current.delete(last.sha);
+    setUndoStack((st) => st.slice(0, -1));
+    setSessionCulled((n) => Math.max(0, n - 1));
+    setIdx(last.idx);
+  }, [undoStack]);
+
+  // ── Zoom-at-cursor (Z toggles 100%) ──────────────────────────────────────
+  const stageImgRef = useRef<HTMLImageElement | null>(null);
+  const cursorRef = useRef({ x: 0.5, y: 0.5 });
+  const [zoom, setZoom] = useState<{ x: number; y: number; scale: number } | null>(null);
+  const toggleZoom = useCallback(() => {
+    setZoom((z) => {
+      if (z) return null;
+      const img = stageImgRef.current;
+      // 100% = one image pixel per screen pixel; fall back to 2.5x when the
+      // natural size isn't known yet.
+      let scale = 2.5;
+      if (img && img.naturalWidth > 0 && img.clientWidth > 0) {
+        scale = Math.max(1.5, img.naturalWidth / img.clientWidth);
+      }
+      return { ...cursorRef.current, scale };
+    });
+  }, []);
+
+  // ── Compare mode: 2-4 frame selection (V key / shift-click) ─────────────
+  const [compareSel, setCompareSel] = useState<string[]>([]);
+  const [compareOpen, setCompareOpen] = useState(false);
+  const toggleCompareSel = useCallback((sha: string) => {
+    setCompareSel((prevSel) =>
+      prevSel.includes(sha)
+        ? prevSel.filter((s) => s !== sha)
+        : prevSel.length >= 4
+          ? prevSel
+          : [...prevSel, sha],
+    );
+  }, []);
+  const compareFrames = useMemo(
+    () =>
+      compareSel.map((sha, i) => ({
+        sha256: sha,
+        previewUrl: `/api/preview/${sha}`,
+        label: `${i + 1} · ${sha.slice(0, 8)}`,
+      })),
+    [compareSel],
+  );
+
+  // Tab: jump to the next burst group (next collapsed photo with a stack).
+  const nextGroup = useCallback(() => {
+    collapseMoment();
+    setIdx((i) => {
+      for (let j = i + 1; j < photos.length; j++) {
+        if ((photos[j].moment_size ?? 0) > 1) return j;
+      }
+      return Math.min(photos.length - 1, i + 1);
+    });
+  }, [photos, collapseMoment]);
+
+  // Global-in-view keyboard layer: arrows navigate, X/left reject, C/right/
+  // space keep, U undo, Z zoom, Tab next burst, V compare-select, Enter
+  // opens compare when 2+ frames are selected. Suspended while the compare
+  // overlay is open (it handles its own keys).
+  useCullKeys({
+    enabled: loadState === "loaded" && !compareOpen,
+    onPrev: prev,
+    onNext: next,
+    onReject: () => {
+      if (activeShaForUrl) decide(activeShaForUrl, "reject");
+    },
+    onKeep: () => {
+      if (activeShaForUrl) decide(activeShaForUrl, "keep");
+    },
+    onUndo: undo,
+    onZoomToggle: toggleZoom,
+    onNextGroup: nextGroup,
+    onCompareToggle: () => {
+      if (activeShaForUrl) toggleCompareSel(activeShaForUrl);
+    },
+    onCompareOpen:
+      compareSel.length >= 2 ? () => setCompareOpen(true) : undefined,
+  });
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      if (compareOpen) return;
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       const sha = (expandedMoment?.members[momentIdx]?.sha256) || photos[idx]?.sha256;
 
@@ -219,8 +359,15 @@ export default function BurstCull() {
 
       // Keys that operate on the CURRENT burst alternate without leaving
       // the burst view. F/E/S all toggle state on the displayed photo and
-      // are core to the multi-like-within-burst workflow.
-      const STAY_IN_BURST = ["[", "]", "f", "F", "e", "E", "s", "S"];
+      // are core to the multi-like-within-burst workflow. Every key owned
+      // by the useCullKeys layer is also listed so its handlers (which are
+      // burst-aware themselves) don't get pre-empted by a collapse here.
+      const STAY_IN_BURST = [
+        "[", "]", "f", "F", "e", "E", "s", "S",
+        "v", "V", "z", "Z", "u", "U", "x", "X", "c", "C",
+        " ", "Enter", "Tab",
+        "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown",
+      ];
 
       // Any OTHER key while inside burst view pops us back out first,
       // then falls through to its normal handler (j/k/l/d/arrows).
@@ -234,25 +381,19 @@ export default function BurstCull() {
 
       if (e.key === "j" || e.key === "J") {
         e.preventDefault();
-        if (sha) recordSwipe(sha, "reject");
-        next();
+        if (sha) decide(sha, "reject");
+        else next();
       } else if (e.key === "k" || e.key === "K") {
         e.preventDefault();
-        if (sha) recordSwipe(sha, "keep");
-        next();
+        if (sha) decide(sha, "keep");
+        else next();
       } else if (e.key === "l" || e.key === "L") {
         e.preventDefault();
-        if (sha) recordSwipe(sha, "silver");
-        next();
+        if (sha) decide(sha, "silver");
+        else next();
       } else if (e.key === "f" || e.key === "F") {
         e.preventDefault();
         if (sha) toggleLike(sha, activeLiked);
-      } else if (e.key === "ArrowDown" || e.key === "ArrowRight") {
-        e.preventDefault();
-        next();
-      } else if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
-        e.preventDefault();
-        prev();
       } else if (e.key === "e" || e.key === "E") {
         e.preventDefault();
         setEnhancedOn((v) => !v);
@@ -261,13 +402,13 @@ export default function BurstCull() {
         setStraightenOn((v) => !v);
       } else if (e.key === "d" || e.key === "D") {
         e.preventDefault();
-        if (sha) recordSwipe(sha, "reject");
-        next();
+        if (sha) decide(sha, "reject");
+        else next();
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [next, prev, expandedMoment, collapseMoment, idx, momentIdx, photos, cycleStack, activeLiked, toggleLike]);
+  }, [next, expandedMoment, collapseMoment, idx, momentIdx, photos, cycleStack, activeLiked, toggleLike, decide, compareOpen]);
 
   const currentPhoto = currentPhotoForLike;
 
@@ -277,10 +418,11 @@ export default function BurstCull() {
   const [enhancedOn, setEnhancedOn] = useState(false);
   const [straightenOn, setStraightenOn] = useState(false);
 
-  // Reset enhance/straighten per photo so each shot is judged fresh
+  // Reset enhance/straighten/zoom per photo so each shot is judged fresh
   useEffect(() => {
     setEnhancedOn(false);
     setStraightenOn(false);
+    setZoom(null);
   }, [activeShaForUrl]);
 
   const toggleLikeActive = useCallback(() => {
@@ -349,22 +491,49 @@ export default function BurstCull() {
           <section className="cull-stage">
             <div
               className="gold-frame"
-              style={
-                hasMoment
+              style={{
+                // Clip the image when Z-zoomed to 100%
+                overflow: "hidden",
+                ...(hasMoment
                   ? {
                       // Yellow ring around the frame to scream "this is a stack"
                       boxShadow:
                         "0 0 0 3px var(--g-yellow), 0 14px 40px rgba(0,0,0,0.4)",
                     }
-                  : undefined
-              }
+                  : {}),
+              }}
             >
               <img
                 key={activePreviewUrl}
+                ref={stageImgRef}
                 src={activePreviewUrl}
                 alt={activeFilename}
+                onMouseMove={(e) => {
+                  // Remember the cursor point (fraction of the un-zoomed
+                  // image) so Z zooms exactly where the user is looking.
+                  if (!zoom) {
+                    const r = e.currentTarget.getBoundingClientRect();
+                    if (r.width > 0 && r.height > 0) {
+                      cursorRef.current = {
+                        x: (e.clientX - r.left) / r.width,
+                        y: (e.clientY - r.top) / r.height,
+                      };
+                    }
+                  }
+                }}
+                onClick={() => {
+                  if (zoom) setZoom(null);
+                }}
                 style={{
                   animation: hasMoment ? "stack-swap-fade 200ms ease" : undefined,
+                  ...(zoom
+                    ? {
+                        transform: `scale(${zoom.scale})`,
+                        transformOrigin: `${zoom.x * 100}% ${zoom.y * 100}%`,
+                        transition: "transform 120ms ease",
+                        cursor: "zoom-out",
+                      }
+                    : {}),
                 }}
               />
 
@@ -519,12 +688,9 @@ export default function BurstCull() {
 
                 <button
                   onClick={() => {
-                    if (activeShaForUrl) {
-                      recordSwipe(activeShaForUrl, "reject");
-                      next();
-                    }
+                    if (activeShaForUrl) decide(activeShaForUrl, "reject");
                   }}
-                  title="Discard — record a reject and move on (D)"
+                  title="Discard — record a reject and move on (D or X or ←)"
                   className="cull-action-btn"
                   style={{
                     background: "rgba(0,0,0,0.55)",
@@ -642,32 +808,65 @@ export default function BurstCull() {
               {activeShaForUrl && <EyesBadge sha256={activeShaForUrl} />}
               <div className="burst-strip" aria-label="Photos">
                 {expandedMoment ? (
-                  expandedMoment.members.map((member, memberI) => (
-                    <div key={member.photo_id} style={{ position: "relative" }}>
-                      <BurstThumb
-                        src={member.thumb_url}
-                        badge={String(memberI + 1)}
-                        isGold={memberI === momentIdx}
-                        isLiked={burstLiked[member.sha256] === true}
-                        onClick={() => setMomentIdx(memberI)}
-                        alt={`Moment member ${memberI + 1}`}
-                      />
-                      <EyesBadge sha256={member.sha256} overlay />
-                    </div>
-                  ))
+                  expandedMoment.members.map((member, memberI) => {
+                    const selPos = compareSel.indexOf(member.sha256);
+                    return (
+                      <div
+                        key={member.photo_id}
+                        style={{ position: "relative" }}
+                        onClickCapture={(e) => {
+                          if (e.shiftKey) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            toggleCompareSel(member.sha256);
+                          }
+                        }}
+                        title="Shift-click to add to compare"
+                      >
+                        <BurstThumb
+                          src={member.thumb_url}
+                          badge={String(memberI + 1)}
+                          isGold={memberI === momentIdx}
+                          isLiked={burstLiked[member.sha256] === true}
+                          onClick={() => setMomentIdx(memberI)}
+                          alt={`Moment member ${memberI + 1}`}
+                        />
+                        <EyesBadge sha256={member.sha256} overlay />
+                        {selPos >= 0 && (
+                          <span style={compareSelBadgeStyle}>{selPos + 1}</span>
+                        )}
+                      </div>
+                    );
+                  })
                 ) : (
                   photos.slice(Math.max(0, idx - 3), idx + 8).map((p, relI) => {
                     const absI = Math.max(0, idx - 3) + relI;
                     const thumbFilename = p.path.split(/[\\/]/).pop() ?? p.path;
+                    const selPos = compareSel.indexOf(p.sha256);
                     return (
-                      <BurstThumb
+                      <div
                         key={p.id}
-                        src={p.thumb_url}
-                        badge={p.moment_size && p.moment_size > 1 ? `+${p.moment_size - 1}` : String(absI + 1)}
-                        isGold={absI === idx}
-                        onClick={() => setIdx(absI)}
-                        alt={thumbFilename}
-                      />
+                        style={{ position: "relative" }}
+                        onClickCapture={(e) => {
+                          if (e.shiftKey) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            toggleCompareSel(p.sha256);
+                          }
+                        }}
+                        title="Shift-click to add to compare"
+                      >
+                        <BurstThumb
+                          src={p.thumb_url}
+                          badge={p.moment_size && p.moment_size > 1 ? `+${p.moment_size - 1}` : String(absI + 1)}
+                          isGold={absI === idx}
+                          onClick={() => setIdx(absI)}
+                          alt={thumbFilename}
+                        />
+                        {selPos >= 0 && (
+                          <span style={compareSelBadgeStyle}>{selPos + 1}</span>
+                        )}
+                      </div>
                     );
                   })
                 )}
@@ -713,8 +912,63 @@ export default function BurstCull() {
           </section>
         )}
 
+        {/* Progress strip: session cull progress + undo depth + compare bar */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 14,
+            padding: "5px 24px",
+            fontSize: 11,
+            fontFamily: "var(--font-mono)",
+            color: "var(--md-on-surface-var)",
+            borderTop: "1px solid var(--md-outline-var)",
+            background: "var(--md-surface-c-low)",
+          }}
+        >
+          <span title="Keep/reject decisions made this session">
+            {sessionCulled} of {total} culled this session
+          </span>
+          <span title="Press U to undo the most recent decision">
+            undo ×{undoStack.length}
+          </span>
+          <div style={{ flex: 1 }} />
+          {zoom && <span>100% zoom — Z or click exits</span>}
+          {compareSel.length > 0 && (
+            <>
+              <span>
+                {compareSel.length}/4 selected for compare (V / shift-click)
+              </span>
+              <button
+                className="btn btn-text"
+                style={{ fontSize: 11, padding: "1px 8px" }}
+                onClick={() => setCompareSel([])}
+              >
+                Clear
+              </button>
+              <button
+                className="btn btn-filled"
+                style={{ fontSize: 11, padding: "1px 10px" }}
+                onClick={() => setCompareOpen(true)}
+                disabled={compareSel.length < 2}
+                title="Open side-by-side compare (Enter)"
+              >
+                Compare
+              </button>
+            </>
+          )}
+        </div>
+
         <KbdFooter />
       </div>
+
+      {compareOpen && compareFrames.length >= 2 && (
+        <CompareView
+          frames={compareFrames}
+          onClose={() => setCompareOpen(false)}
+          onDecision={(sha, d) => decide(sha, d, false)}
+        />
+      )}
     </div>
   );
 }

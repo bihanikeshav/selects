@@ -21,8 +21,11 @@ from .libraries import register_libraries
 from .library_manager import ActiveConfigProxy, LibraryManager
 from .models_routes import register_model_routes
 from .pipeline_runner import run_pipeline_stages
+from .recap_routes import register_recap_routes
 from .routes import register_routes
 from .search2_routes import register_search2_routes
+from .taste_routes import register_taste_routes
+from .watch_routes import register_watch_routes
 from .ws import progress_bus, register_ws
 
 log = logging.getLogger("travelcull.server")
@@ -141,6 +144,9 @@ def build_app(
     register_dedup_routes(app, manager)
     register_libraries(app, manager, publish)
     register_model_routes(app, publish)
+    register_taste_routes(app, proxy)
+    register_recap_routes(app, proxy)
+    register_watch_routes(app, manager, publish)
     register_fs_routes(app)
     register_ws(app)
     _mount_frontend(app)

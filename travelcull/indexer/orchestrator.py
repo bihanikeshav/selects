@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Callable
+from pathlib import Path
+from typing import Callable, Iterable, Optional
 
 from sqlalchemy import select
 
@@ -12,15 +13,26 @@ from travelcull.decode import decode
 from travelcull.decode.video import decode_first_frame, probe
 from travelcull.indexer.exif import read_exif
 from travelcull.indexer.preview import write_previews
-from travelcull.indexer.walker import FileKind, sha256_of, walk_supported
+from travelcull.indexer.walker import FileKind, classify_paths, sha256_of, walk_supported
 
 log = logging.getLogger(__name__)
 ProgressCb = Callable[[int, int, str], None] | None
 
 
-def index_folder(cfg: FolderConfig, on_progress: ProgressCb = None) -> int:
-    """Walk the folder and add new files. Returns count of new rows."""
-    files = list(walk_supported(cfg.folder))
+def index_folder(
+    cfg: FolderConfig,
+    on_progress: ProgressCb = None,
+    paths: Optional[Iterable[Path]] = None,
+) -> int:
+    """Walk the folder (or an explicit *paths* subset) and add new files.
+
+    When *paths* is given, only those paths are classified/ingested instead of
+    walking the whole tree — used by the watch-folder poller to index just the
+    newly-detected files without re-scanning the entire library.
+
+    Returns count of new rows.
+    """
+    files = list(classify_paths(paths)) if paths is not None else list(walk_supported(cfg.folder))
     total = len(files)
     added = 0
 

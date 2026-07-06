@@ -41,6 +41,8 @@ class CuratedPhoto:
     nima: float
     moment_id: Optional[int]
     moment_size: int = 1   # >1 means this photo is the surfaced member of a burst stack
+    taste: Optional[float] = None   # personalized taste score in [0,1], if a taste model exists
+    final: Optional[float] = None   # blended ranking score in [0,1]: (1-w)*aesthetic + w*taste
 
 
 def _combined(ap25: float, nima: float, *, ap_w: float, nima_w: float) -> float:
@@ -248,8 +250,72 @@ def curate(
     stack_out.extend(by_moment.values())
     dedup_out = stack_out
 
+    # Taste personalization: if a trained taste model exists next to this
+    # library's DB, blend it into the ranking as
+    #   final = (1-w)*aesthetic + w*taste
+    # where aesthetic is the percentile-rank of `combined` within the surfaced
+    # set (so both terms live in [0,1]) and w ramps 0 → 0.4 with the number of
+    # swipe decisions the model was trained on. Gating and stack selection
+    # above are untouched — taste only reorders what already survived.
+    _apply_taste_blend(s, dedup_out)
+
     if sort == "chronological":
         dedup_out.sort(key=lambda c: c.taken_at or "")
     else:
-        dedup_out.sort(key=lambda c: -c.combined)
+        dedup_out.sort(
+            key=lambda c: -(c.final if c.final is not None else c.combined)
+        )
     return dedup_out
+
+
+def _apply_taste_blend(s: OrmSession, photos: list[CuratedPhoto]) -> None:
+    """Fill ``taste`` and ``final`` on *photos* in place, when a model exists.
+
+    No-op (fields stay None) when no taste model has been trained for this
+    library, when the session is not file-backed, or on any load error — the
+    ranking then falls back to pure aesthetic order.
+    """
+    if not photos:
+        return
+    from travelcull.ml import taste as taste_mod
+
+    state_dir = taste_mod.state_dir_from_session(s)
+    if state_dir is None:
+        return
+    model = taste_mod.load_model(state_dir)
+    if model is None:
+        return
+    w = model.weight
+    if w <= 0.0:
+        return
+
+    scores = taste_mod.taste_scores_by_photo_id(
+        s, model, [c.photo_id for c in photos]
+    )
+    if not scores:
+        return
+
+    # Percentile-rank of combined within the surfaced set → aesthetic in [0,1].
+    # Ties get their AVERAGE rank so photos with identical aesthetic scores
+    # share the same aesthetic term (their order is then decided by taste).
+    combined = np.array([c.combined for c in photos], dtype=np.float64)
+    order = np.argsort(combined, kind="mergesort")
+    ranks = np.empty(len(photos), dtype=np.float64)
+    i = 0
+    srt = combined[order]
+    while i < len(photos):
+        j = i
+        while j + 1 < len(photos) and srt[j + 1] == srt[i]:
+            j += 1
+        ranks[order[i : j + 1]] = 0.5 * (i + j)
+        i = j + 1
+    denom = max(len(photos) - 1, 1)
+    for c, rank in zip(photos, ranks):
+        aes = float(rank) / denom if len(photos) > 1 else 1.0
+        t = scores.get(c.photo_id)
+        if t is None:
+            # No embedding: neutral taste so the photo is neither boosted nor
+            # penalized relative to its aesthetic rank.
+            t = 0.5
+        c.taste = float(t) if c.photo_id in scores else None
+        c.final = (1.0 - w) * aes + w * float(t)

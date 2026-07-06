@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import Rail from "../components/Rail";
+import TasteCard from "../components/TasteCard";
 import Topbar from "../components/Topbar";
 
 type Scores = {
@@ -277,6 +278,10 @@ export default function CalibrateDashboard() {
                     Look for models that disagree (low correlation) — they're capturing different things.
                   </div>
                 </div>
+              </div>
+
+              <div style={{ marginBottom: 24 }}>
+                <TasteCard />
               </div>
 
               {/* Sort controls */}
