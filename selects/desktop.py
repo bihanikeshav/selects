@@ -47,6 +47,41 @@ class _WindowControls:
             self.window.destroy()
 
 
+def _apply_windows_chrome(window) -> None:
+    """Tint the native Windows-11 title bar to the brand blue with white text.
+
+    Uses the DWM caption-color attributes (Windows 11 build 22000+). This is a
+    safe alternative to a frameless custom title bar (which crashes in the
+    PyInstaller bundle via a pywebview/WinForms layout recursion): it keeps the
+    reliable native window but gives it branded chrome. No-op on older Windows
+    or non-Windows — DwmSetWindowAttribute simply ignores unknown attributes.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    try:
+        hwnd = int(window.native.Handle.ToInt64())
+    except Exception as exc:  # noqa: BLE001 — native handle not available
+        log.debug("caption color: no native handle (%s)", exc)
+        return
+
+    DWMWA_CAPTION_COLOR = 35
+    DWMWA_TEXT_COLOR = 36
+    # COLORREF is 0x00BBGGRR. Brand blue #1A5DCC -> 0x00CC5D1A.
+    caption = wintypes.DWORD(0x00CC5D1A)
+    text = wintypes.DWORD(0x00FFFFFF)  # white
+    try:
+        dwm = ctypes.windll.dwmapi
+        dwm.DwmSetWindowAttribute(
+            wintypes.HWND(hwnd), DWMWA_CAPTION_COLOR, ctypes.byref(caption), ctypes.sizeof(caption)
+        )
+        dwm.DwmSetWindowAttribute(
+            wintypes.HWND(hwnd), DWMWA_TEXT_COLOR, ctypes.byref(text), ctypes.sizeof(text)
+        )
+    except Exception as exc:  # noqa: BLE001 — DWM unavailable / old Windows
+        log.debug("caption color: DwmSetWindowAttribute failed (%s)", exc)
+
+
 def run_app(host: str = "127.0.0.1", port: int = 8000) -> None:
     """Start the server and open the native app window."""
     import uvicorn
@@ -78,17 +113,20 @@ def run_app(host: str = "127.0.0.1", port: int = 8000) -> None:
     try:
         import webview
 
-        # NOTE: frameless=True + a custom title bar crashes in the PyInstaller
-        # bundle (pythonnet/winforms "Rectangle.Empty" recursion), though it
-        # works unbundled. Until that's resolved (or we move to a Tauri shell),
-        # use the standard native window so the app is reliable.
-        webview.create_window(
+        # A fully frameless custom title bar crashes in the PyInstaller bundle
+        # (a pywebview/WinForms layout recursion, not a bundling gap — Color/
+        # Point/Size resolve fine, so it isn't a missing System.Drawing). Rather
+        # than ship an unreliable frameless window, keep the native window and
+        # brand it via the Windows-11 DWM caption color. A fully custom title
+        # bar would mean moving to a Tauri shell.
+        window = webview.create_window(
             WINDOW_TITLE,
             url,
             width=1440,
             height=900,
             min_size=(1024, 720),
         )
+        window.events.shown += lambda *_: _apply_windows_chrome(window)
         webview.start()  # blocks on the main thread until the window is closed
     except Exception as exc:  # noqa: BLE001
         log.warning("native window unavailable (%s); using browser fallback", exc)

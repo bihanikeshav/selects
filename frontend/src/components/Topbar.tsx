@@ -7,6 +7,7 @@ export default function Topbar({ folder, context }: TopbarProps) {
   return (
     <header className="topbar">
       <div className="topbar-folder">
+        <span className="dot topbar-logo" aria-hidden="true"></span>
         <span className="crumb-folder">{folder}</span>
         <span className="crumb-sep">/</span>
         <span className="crumb-context">{context}</span>

@@ -30,7 +30,11 @@ from selects.db.models import Embedding, Photo
 
 # Cosine-similarity floor above which two SigLIP embeddings within the same
 # library are considered near-duplicates (e.g. burst shots, minor edits).
-NEAR_DUP_COSINE_THRESHOLD = 0.98
+# 0.98 was so strict that genuine burst/near-identical shots fell below it and
+# the Duplicates panel came up empty on essentially every real single-library
+# run (exact-sha256 dupes can't occur within one library — the indexer already
+# dedupes at ingest). 0.94 surfaces real near-dupes without over-grouping.
+NEAR_DUP_COSINE_THRESHOLD = 0.94
 
 # Guard against an O(n^2) all-pairs cosine scan blowing up on a huge library;
 # libraries above this photo count simply skip the near-dup pass (exact-sha256

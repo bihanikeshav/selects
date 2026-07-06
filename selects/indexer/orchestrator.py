@@ -32,6 +32,11 @@ def index_folder(
 
     Returns count of new rows.
     """
+    # Emit an immediate ping so the UI shows "Scanning folder…" while the
+    # (potentially slow, count-unknown) directory walk runs, instead of an
+    # empty bar with no feedback.
+    if on_progress:
+        on_progress(0, 0, "Scanning folder…")
     files = list(classify_paths(paths)) if paths is not None else list(walk_supported(cfg.folder))
     total = len(files)
     added = 0

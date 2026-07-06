@@ -136,13 +136,14 @@ export default function Doctor() {
             style={{
               margin: 0,
               fontFamily: "var(--font-display)",
-              fontSize: 22,
-              fontWeight: 500,
+              fontSize: 32,
+              fontWeight: 400,
+              letterSpacing: "-0.01em",
             }}
           >
             Doctor
           </h1>
-          <span style={{ color: "var(--md-on-surface-var)", fontSize: 13 }}>
+          <span style={{ color: "var(--md-on-surface-var)", fontSize: 14 }}>
             Photos with detectable issues. Pick a model, preview the fix.
           </span>
         </div>

@@ -63,15 +63,21 @@ async def test_add_bad_path_400(registry_path, tmp_path):
         assert r.status_code == 400
 
 
-async def test_add_duplicate_409(registry_path, tmp_path):
+async def test_add_duplicate_opens_existing(registry_path, tmp_path):
     lib_dir = tmp_path / "trip"
     lib_dir.mkdir()
     app = _make_app(registry_path)
     async with _client(app) as c:
         r1 = await c.post("/api/libraries", json={"name": "A", "path": str(lib_dir)})
         assert r1.status_code == 200
+        id1 = r1.json()["library"]["id"]
+        # Re-adding an already-registered path opens the existing library
+        # instead of erroring, so the UI can proceed straight in.
         r2 = await c.post("/api/libraries", json={"name": "B", "path": str(lib_dir)})
-        assert r2.status_code == 409
+        assert r2.status_code == 200
+        body = r2.json()
+        assert body.get("already_registered") is True
+        assert body["library"]["id"] == id1
 
 
 async def test_activate(registry_path, tmp_path):
