@@ -93,4 +93,4 @@ jobs:
         with:
           files: "*.zip"
           generate_release_notes: true
-          draft: true
+          draft: false  # publish immediately, not as a draft
