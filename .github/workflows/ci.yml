@@ -23,7 +23,7 @@ jobs:
         run: |
           case "$RUNNER_OS" in
             Linux)   sudo apt-get update && sudo apt-get install -y ffmpeg ;;
-            macOS)   brew install ffmpeg ;;
+            macOS)   brew install ffmpeg inih ;;  # inih -> libINIReader, needed by pyexiv2's libexiv2
             Windows) choco install ffmpeg -y ;;
           esac
       - name: Cache insightface model pack
