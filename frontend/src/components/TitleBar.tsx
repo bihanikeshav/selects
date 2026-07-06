@@ -6,6 +6,10 @@ import "./TitleBar.css";
 // title bar renders nothing, leaving the web UI untouched.
 declare global {
   interface Window {
+    // Set to true by the desktop app ONLY when the window is frameless (custom
+    // chrome). Frameless is currently disabled (bundled pywebview recursion
+    // bug), so this stays unset and the native title bar is used instead.
+    __SELECTS_FRAMELESS__?: boolean;
     pywebview?: {
       api?: {
         minimize?: () => void;
@@ -18,13 +22,13 @@ declare global {
 
 export default function TitleBar() {
   const [desktop, setDesktop] = useState<boolean>(
-    () => typeof window !== "undefined" && !!window.pywebview,
+    () => typeof window !== "undefined" && window.__SELECTS_FRAMELESS__ === true,
   );
 
   useEffect(() => {
-    const onReady = () => setDesktop(true);
+    const onReady = () => setDesktop(window.__SELECTS_FRAMELESS__ === true);
     window.addEventListener("pywebviewready", onReady);
-    if (window.pywebview) setDesktop(true);
+    if (window.__SELECTS_FRAMELESS__ === true) setDesktop(true);
     return () => window.removeEventListener("pywebviewready", onReady);
   }, []);
 
