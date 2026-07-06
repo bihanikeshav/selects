@@ -5,12 +5,14 @@ analyze (console_scripts entry points aren't directly buildable).
 """
 import sys
 
-from selects.cli import main
-
 if __name__ == "__main__":
-    # Double-clicking the packaged app launches it with no arguments; default to
-    # `serve` so the server starts and the browser opens instead of just printing
-    # help and exiting.
+    # No arguments = double-clicked the app: open the native desktop window.
+    # With arguments, behave as the normal CLI (serve/index/doctor/…).
     if len(sys.argv) == 1:
-        sys.argv.append("serve")
-    main()
+        from selects.desktop import run_app
+
+        run_app()
+    else:
+        from selects.cli import main
+
+        main()

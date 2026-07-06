@@ -66,6 +66,11 @@ hiddenimports += collect_submodules("pydantic")
 hiddenimports += collect_submodules("pydantic_settings")
 hiddenimports += collect_submodules("sqlalchemy")
 
+# Native desktop window (pywebview + the OS webview backend).
+hiddenimports += collect_submodules("webview")
+hiddenimports += ["webview.platforms.winforms", "webview.platforms.edgechromium",
+                  "webview.platforms.cocoa", "webview.platforms.gtk", "webview.platforms.qt"]
+
 
 def _try_collect_all(name, want_binaries=True, want_datas=True):
     """collect_all(name) that no-ops if the package isn't importable."""
@@ -84,6 +89,13 @@ def _try_collect_all(name, want_binaries=True, want_datas=True):
 # Imaging stack — these ship native libs / data that PyInstaller misses.
 for _pkg in ("PIL", "pillow_heif", "rawpy", "pyexiv2", "cv2", "numpy"):
     _try_collect_all(_pkg)
+
+# Native window stack — pywebview and (on Windows) pythonnet/clr for WebView2.
+_try_collect_all("webview")
+if sys.platform == "win32":
+    hiddenimports.append("clr")
+    for _pkg in ("pythonnet", "clr_loader"):
+        _try_collect_all(_pkg)
 
 # --- optional ML stack -----------------------------------------------------
 BUNDLE_ML = os.environ.get("SELECTS_BUNDLE_ML", "").lower() in ("1", "true", "yes")
