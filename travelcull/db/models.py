@@ -69,6 +69,17 @@ class Video(Base):
     thumb_path: Mapped[Optional[str]] = mapped_column(String(4096))
     preview_path: Mapped[Optional[str]] = mapped_column(String(4096))
     indexed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    # --- video-analysis columns (alembic rev d4e5f6a7b8c9) ---------------- #
+    fps: Mapped[Optional[float]] = mapped_column(Float)
+    frame_count: Mapped[Optional[int]] = mapped_column(Integer)
+    best_frame_index: Mapped[Optional[int]] = mapped_column(Integer)
+    sharpness: Mapped[Optional[float]] = mapped_column(Float)      # best-frame Laplacian variance
+    exposure: Mapped[Optional[float]] = mapped_column(Float)       # best-frame exposure score [0,1]
+    dead_footage: Mapped[Optional[bool]] = mapped_column(Boolean)  # NULL = not analysed yet
+    frames_json: Mapped[Optional[str]] = mapped_column(Text)       # sampled-frame metrics
+    highlights_json: Mapped[Optional[str]] = mapped_column(Text)   # [{start,end,frames}]
+    siglip: Mapped[Optional[bytes]] = mapped_column(LargeBinary)   # best-frame SigLIP fp16 blob
+    processed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
 
 
 class ClassicalScore(Base):

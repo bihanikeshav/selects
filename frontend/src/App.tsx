@@ -17,6 +17,7 @@ import Persons from "./views/Persons";
 import PersonDetail from "./views/PersonDetail";
 import Search from "./views/Search";
 import Stories from "./views/Stories";
+import Videos from "./views/Videos";
 
 /**
  * On first load, ask the backend whether any library exists. If none does,
@@ -78,6 +79,7 @@ export default function App() {
         <Route path="/map" element={<MapView />} />
         <Route path="/search" element={<Search />} />
         <Route path="/duplicates" element={<Dedup />} />
+        <Route path="/videos" element={<Videos />} />
         <Route path="/best/:facet/:value" element={<BestOf />} />
         <Route path="/doctor" element={<Doctor />} />
         <Route path="/calibrate" element={<Calibrate />} />

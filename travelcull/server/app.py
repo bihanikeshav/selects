@@ -25,6 +25,7 @@ from .recap_routes import register_recap_routes
 from .routes import register_routes
 from .search2_routes import register_search2_routes
 from .taste_routes import register_taste_routes
+from .video_routes import register_video_routes
 from .watch_routes import register_watch_routes
 from .ws import progress_bus, register_ws
 
@@ -146,6 +147,7 @@ def build_app(
     register_model_routes(app, publish)
     register_taste_routes(app, proxy)
     register_recap_routes(app, proxy)
+    register_video_routes(app, proxy, publish)
     register_watch_routes(app, manager, publish)
     register_fs_routes(app)
     register_ws(app)
