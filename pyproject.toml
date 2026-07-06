@@ -51,6 +51,11 @@ dev = [
 [project.scripts]
 selects = "selects.cli:main"
 
+[tool.hatch.build]
+# The built frontend lands in selects/server/static (gitignored). Force it into
+# the sdist/wheel so `pip install selects` ships a working GUI, not just the API.
+artifacts = ["selects/server/static/**/*"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["selects"]
 
