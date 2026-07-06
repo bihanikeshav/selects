@@ -18,10 +18,26 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-      - name: Install package + test deps (CPU torch)
+      - name: Install ffmpeg (video decode/probe tests need ffprobe)
+        shell: bash
         run: |
+          case "$RUNNER_OS" in
+            Linux)   sudo apt-get update && sudo apt-get install -y ffmpeg ;;
+            macOS)   brew install ffmpeg ;;
+            Windows) choco install ffmpeg -y ;;
+          esac
+      - name: Cache insightface model pack
+        uses: actions/cache@v4
+        with:
+          path: ~/.insightface
+          key: insightface-buffalo_l
+      - name: Install package + test deps (CPU torch + full ML stack)
+        run: |
+          # The suite exercises faces (insightface), model downloads (requests)
+          # and clustering — all in the [ml] extra. Install it so tests don't
+          # ModuleNotFoundError. CPU torch first so [ml]'s torch>=2.2 reuses it.
           pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install -e ".[dev]" transformers huggingface_hub
+          pip install -e ".[ml,dev]"
       - name: Run tests
         run: pytest -q
 
