@@ -26,6 +26,8 @@ except NameError:
 ENTRY = os.path.join(REPO_ROOT, "packaging", "entry.py")
 STATIC_DIR = os.path.join(REPO_ROOT, "selects", "server", "static")
 MIGRATIONS_DIR = os.path.join(REPO_ROOT, "selects", "db", "migrations")
+ICON = os.path.join(REPO_ROOT, "packaging", "selects.ico")
+ICON = ICON if os.path.isfile(ICON) else None
 
 binaries = []
 datas = []
@@ -146,6 +148,7 @@ exe = EXE(
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
+    icon=ICON,
     # TODO(macOS): unsigned builds will be Gatekeeper-blocked on other
     # machines. Set codesign_identity + entitlements_file (and staple a
     # notarization ticket) before distributing a macOS build. Out of scope

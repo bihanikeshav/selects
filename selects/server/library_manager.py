@@ -39,7 +39,16 @@ def _default_registry_path() -> Path:
     env = os.environ.get("SELECTS_REGISTRY")
     if env:
         return Path(env)
-    return Path.home() / ".selects" / "libraries.json"
+    new = Path.home() / ".selects" / "libraries.json"
+    # Carry over a pre-rebrand registry (~/.travelcull/libraries.json) once.
+    legacy = Path.home() / ".travelcull" / "libraries.json"
+    if not new.exists() and legacy.exists():
+        try:
+            new.parent.mkdir(parents=True, exist_ok=True)
+            new.write_bytes(legacy.read_bytes())
+        except OSError:
+            pass
+    return new
 
 
 def _resolve(p: os.PathLike | str) -> str:

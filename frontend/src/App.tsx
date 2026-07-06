@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { libraryStatus } from "./api/client";
+import TitleBar from "./components/TitleBar";
 import BestOf from "./views/BestOf";
 import BurstCull from "./views/BurstCull";
 import Calibrate from "./views/Calibrate";
@@ -34,7 +35,10 @@ function OnboardingGate() {
     libraryStatus()
       .then((s) => {
         if (cancelled) return;
-        if (s.needs_onboarding && location.pathname !== "/onboarding") {
+        // Let the user reach the libraries screen to open an existing project
+        // instead of being trapped on onboarding.
+        const allowed = ["/onboarding", "/libraries"];
+        if (s.needs_onboarding && !allowed.includes(location.pathname)) {
           navigate("/onboarding", { replace: true });
         }
       })
@@ -56,6 +60,7 @@ function OnboardingGate() {
 export default function App() {
   return (
     <BrowserRouter>
+      <TitleBar />
       <OnboardingGate />
       <Routes>
         <Route path="/onboarding" element={<Onboarding />} />
