@@ -13,12 +13,16 @@ from fastapi.staticfiles import StaticFiles
 
 from travelcull.config import FolderConfig
 
+from .dedup_routes import register_dedup_routes
+from .export_routes import register_export_routes
+from .faces2_routes import register_faces2_routes
 from .fs_routes import register_fs_routes
 from .libraries import register_libraries
 from .library_manager import ActiveConfigProxy, LibraryManager
 from .models_routes import register_model_routes
 from .pipeline_runner import run_pipeline_stages
 from .routes import register_routes
+from .search2_routes import register_search2_routes
 from .ws import progress_bus, register_ws
 
 log = logging.getLogger("travelcull.server")
@@ -131,6 +135,10 @@ def build_app(
         return {"status": "ok"}
 
     register_routes(app, proxy)
+    register_search2_routes(app, proxy)
+    register_export_routes(app, proxy)
+    register_faces2_routes(app, proxy)
+    register_dedup_routes(app, manager)
     register_libraries(app, manager, publish)
     register_model_routes(app, publish)
     register_fs_routes(app)

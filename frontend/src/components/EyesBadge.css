@@ -1,0 +1,50 @@
+/* EyesBadge — tiny face-quality pill for burst/cull thumbnails.
+   Matches the app's dark-theme token idiom (see styles.css, read-only). */
+
+.eyes-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.4;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+
+.eyes-badge svg {
+  width: 11px;
+  height: 11px;
+  flex: 0 0 auto;
+}
+
+/* Someone in the frame has their eyes closed — the strong warning. */
+.eyes-badge--closed {
+  background: var(--g-red, #ea4335);
+  color: #fff;
+}
+
+/* Every face is turned away from the camera — soft advisory. */
+.eyes-badge--away {
+  background: var(--g-yellow, #fbbc04);
+  color: #000;
+}
+
+/* All eyes open and someone is facing the camera — quiet confirmation. */
+.eyes-badge--open {
+  background: rgba(0, 0, 0, 0.55);
+  color: var(--g-green, #34a853);
+}
+
+/* Overlay placement helper for thumbnails (parent must be position:relative). */
+.eyes-badge--overlay {
+  position: absolute;
+  bottom: 4px;
+  left: 4px;
+  z-index: 2;
+}

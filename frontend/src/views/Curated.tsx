@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { listCurated, recordSwipe } from "../api/client";
 import type { CuratedPhoto } from "../api/types";
+import ExportPanel from "../components/ExportPanel";
 import ModeViewBar from "../components/ModeViewBar";
 import Rail from "../components/Rail";
 import Topbar from "../components/Topbar";
@@ -18,6 +19,7 @@ export default function Curated() {
   const [launching, setLaunching] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [focusedIdx, setFocusedIdx] = useState<number | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -191,6 +193,14 @@ export default function Curated() {
               ? "Launching…"
               : `Edit ${selected.size || ""} in darktable`}
           </button>
+          <button
+            className="btn btn-tonal"
+            onClick={() => setExportOpen(true)}
+            disabled={photos.length === 0}
+            title="Export keepers — copy/zip originals or write XMP ratings back"
+          >
+            Export…
+          </button>
         </div>
 
         <div style={{ padding: "12px 24px 16px", overflow: "auto", minHeight: 0 }}>
@@ -347,6 +357,10 @@ export default function Curated() {
           )}
         </div>
       </div>
+
+      {exportOpen && (
+        <ExportPanel source="curated" onClose={() => setExportOpen(false)} />
+      )}
 
       {lightboxIdx !== null && photos[lightboxIdx] && (
         <div

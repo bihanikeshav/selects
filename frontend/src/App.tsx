@@ -8,6 +8,7 @@ import CalibrateDashboard from "./views/CalibrateDashboard";
 import Clusters from "./views/Clusters";
 import ClusterDetail from "./views/ClusterDetail";
 import Curated from "./views/Curated";
+import Dedup from "./views/Dedup";
 import Doctor from "./views/Doctor";
 import Libraries from "./views/Libraries";
 import MapView from "./views/Map";
@@ -76,6 +77,7 @@ export default function App() {
         <Route path="/people/:id" element={<PersonDetail />} />
         <Route path="/map" element={<MapView />} />
         <Route path="/search" element={<Search />} />
+        <Route path="/duplicates" element={<Dedup />} />
         <Route path="/best/:facet/:value" element={<BestOf />} />
         <Route path="/doctor" element={<Doctor />} />
         <Route path="/calibrate" element={<Calibrate />} />

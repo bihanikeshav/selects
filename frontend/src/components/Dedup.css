@@ -1,0 +1,245 @@
+.dedup-wrap {
+  padding: 32px 32px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  overflow-y: auto;
+  max-width: 1100px;
+  width: 100%;
+}
+
+.dedup-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.dedup-header h1 {
+  margin: 0 0 4px;
+  font-family: var(--font-display);
+  font-size: 32px;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+
+.dedup-sub {
+  font-size: 14px;
+  color: var(--md-on-surface-var);
+}
+
+.dedup-summary {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr;
+  gap: 12px;
+}
+
+.dedup-summary-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 18px 20px;
+  background: var(--md-surface-c-low);
+  border: 1px solid var(--md-outline-var);
+  border-radius: var(--r-lg);
+}
+
+.dedup-summary-tile-hero {
+  background: var(--md-primary-container);
+  border-color: var(--md-primary-container);
+}
+
+.dedup-summary-tile-hero .dedup-summary-value {
+  color: var(--md-on-primary-container);
+}
+
+.dedup-summary-tile-hero .dedup-summary-label {
+  color: var(--md-on-primary-container);
+  opacity: 0.75;
+}
+
+.dedup-summary-value {
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 500;
+}
+
+.dedup-summary-label {
+  font-size: 13px;
+  color: var(--md-on-surface-var);
+}
+
+.dedup-filters {
+  display: flex;
+  gap: 8px;
+}
+
+.dedup-filter-btn {
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 6px 16px;
+  border-radius: var(--r-full);
+  border: 1px solid var(--md-outline-var);
+  background: transparent;
+  color: var(--md-on-surface-var);
+  cursor: pointer;
+  transition: background var(--dur-short) var(--ease-standard),
+    color var(--dur-short) var(--ease-standard),
+    border-color var(--dur-short) var(--ease-standard);
+}
+
+.dedup-filter-btn:hover {
+  background: var(--md-surface-c-high);
+}
+
+.dedup-filter-btn.is-active {
+  background: var(--md-primary-container);
+  border-color: var(--md-primary-container);
+  color: var(--md-on-primary-container);
+}
+
+.dedup-empty {
+  font-size: 14px;
+  color: var(--md-on-surface-var);
+  padding: 24px 0;
+}
+
+.dedup-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.dedup-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 18px;
+  background: var(--md-surface-c-low);
+  border: 1px solid var(--md-outline-var);
+  border-radius: var(--r-lg);
+}
+
+.dedup-group-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dedup-kind-badge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  padding: 2px 8px;
+  border-radius: var(--r-full);
+  text-transform: uppercase;
+}
+
+.dedup-kind-exact {
+  background: var(--md-primary-container);
+  color: var(--md-on-primary-container);
+}
+
+.dedup-kind-near {
+  background: var(--md-secondary-container);
+  color: var(--md-on-secondary-container);
+}
+
+.dedup-group-count {
+  font-size: 13px;
+  color: var(--md-on-surface-var);
+}
+
+.dedup-group-reclaim {
+  font-size: 13px;
+  color: var(--md-on-surface-var);
+  margin-left: auto;
+}
+
+.dedup-group-thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.dedup-thumb {
+  position: relative;
+  width: 140px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  border: 2px solid transparent;
+}
+
+.dedup-thumb.is-keeper {
+  border-color: var(--g-green);
+}
+
+.dedup-thumb img {
+  width: 140px;
+  height: 140px;
+  object-fit: cover;
+  display: block;
+  background: var(--md-surface-c-high);
+}
+
+.dedup-thumb-fallback {
+  width: 140px;
+  height: 140px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: var(--md-surface-c-high);
+  color: var(--md-on-surface-var);
+  padding: 8px;
+  text-align: center;
+}
+
+.dedup-thumb-fallback-icon {
+  font-size: 22px;
+  opacity: 0.6;
+}
+
+.dedup-thumb-fallback-path {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.3;
+  word-break: break-all;
+}
+
+.dedup-keeper-badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 1;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 2px 6px;
+  border-radius: var(--r-xs);
+  background: var(--g-green);
+  color: #0b1f10;
+}
+
+.dedup-thumb-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--md-on-surface-var);
+  padding: 0 2px;
+}
+
+.dedup-lib-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 85px;
+}
