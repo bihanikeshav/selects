@@ -78,18 +78,17 @@ def run_app(host: str = "127.0.0.1", port: int = 8000) -> None:
     try:
         import webview
 
-        controls = _WindowControls()
-        window = webview.create_window(
+        # NOTE: frameless=True + a custom title bar crashes in the PyInstaller
+        # bundle (pythonnet/winforms "Rectangle.Empty" recursion), though it
+        # works unbundled. Until that's resolved (or we move to a Tauri shell),
+        # use the standard native window so the app is reliable.
+        webview.create_window(
             WINDOW_TITLE,
             url,
             width=1440,
             height=900,
             min_size=(1024, 720),
-            frameless=True,       # no native chrome — we draw our own title bar
-            easy_drag=False,      # drag only via the title bar's drag region
-            js_api=controls,
         )
-        controls.window = window
         webview.start()  # blocks on the main thread until the window is closed
     except Exception as exc:  # noqa: BLE001
         log.warning("native window unavailable (%s); using browser fallback", exc)
