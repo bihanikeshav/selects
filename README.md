@@ -14,16 +14,18 @@ day-by-day stories, surfaces the best shots, and gets out of your way. Nothing i
 
 </div>
 
-<!-- Add a UI screenshot or short GIF here — the single biggest improvement a README can get. -->
-
 ---
 
 ## Why Selects
 
+I built Selects for the post-trip mess: 3,000 photos, five versions of the same mountain, ten blurry food shots, and one frame where everyone actually has their eyes open.
+
+The app is meant to do the boring first pass locally, then leave the final taste call to you.
+
 | | |
 |---|---|
 | **Private by design** | All inference runs locally. No cloud, no account, no upload. |
-| **Actually smart** | Semantic search, face grouping, aesthetic scoring, eyes-open burst picking. |
+| **More than EXIF sorting** | Semantic search, face grouping, aesthetic scoring, eyes-open burst picking. |
 | **Photos and video** | Frame scoring, dead-footage detection, highlight segments. |
 | **Fast to cull** | Keyboard-first review, side-by-side compare, learns your taste. |
 | **Yours to extend** | Clean FastAPI backend + React UI + a scriptable CLI. |
