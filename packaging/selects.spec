@@ -25,6 +25,7 @@ except NameError:
 
 ENTRY = os.path.join(REPO_ROOT, "packaging", "entry.py")
 STATIC_DIR = os.path.join(REPO_ROOT, "selects", "server", "static")
+MIGRATIONS_DIR = os.path.join(REPO_ROOT, "selects", "db", "migrations")
 
 binaries = []
 datas = []
@@ -35,6 +36,15 @@ if os.path.isdir(STATIC_DIR):
     datas.append((STATIC_DIR, os.path.join("selects", "server", "static")))
 else:
     print("[selects.spec] WARNING: no frontend static dir; UI will not be bundled.")
+
+# Bundle the Alembic migration scripts. They're loaded by path at runtime
+# (selects/db/__init__.py -> Path(__file__).parent / "migrations"), so
+# PyInstaller doesn't pick them up automatically — without this the app
+# crashes with "Path doesn't exist: .../selects/db/migrations" on first DB open.
+if os.path.isdir(MIGRATIONS_DIR):
+    datas.append((MIGRATIONS_DIR, os.path.join("selects", "db", "migrations")))
+else:
+    print("[selects.spec] WARNING: no migrations dir; DB init will fail at runtime.")
 
 # --- base hidden imports (the classic PyInstaller pain points) -------------
 hiddenimports += collect_submodules("uvicorn")
