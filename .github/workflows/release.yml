@@ -29,14 +29,18 @@ jobs:
           node-version: 20
       - name: Linux webview (GTK/WebKit) system deps
         if: runner.os == 'Linux'
-        # pywebview's Linux backend is WebKitGTK via PyGObject — without these
-        # system libs the packaged app has no native window and falls back to a
-        # browser. (macOS uses WKWebView via pyobjc, pulled in by pywebview.)
+        # pywebview's Linux backend is WebKitGTK via PyGObject. Best-effort: the
+        # webkit apt package name varies across Ubuntu releases (4.1 / 4.0 /
+        # webkit-6.0), and the app cleanly falls back to a browser window if the
+        # native backend is missing — so never fail the whole build here.
+        continue-on-error: true
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libgirepository1.0-dev gir1.2-gtk-3.0 \
-            gir1.2-webkit2-4.1 libcairo2-dev
-          pip install pygobject pycairo
+          sudo apt-get update || true
+          sudo apt-get install -y libgirepository1.0-dev gir1.2-gtk-3.0 libcairo2-dev || true
+          sudo apt-get install -y gir1.2-webkit2-4.1 \
+            || sudo apt-get install -y gir1.2-webkit2-4.0 \
+            || sudo apt-get install -y gir1.2-webkit-6.0 || true
+          pip install pygobject pycairo || true
       - name: Install package (CPU torch) + ML stack + PyInstaller
         run: |
           # CPU torch first (much smaller than the CUDA wheels); the [ml] extra
