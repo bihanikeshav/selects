@@ -82,6 +82,11 @@ def run_app(host: str = "127.0.0.1", port: int = 8000) -> None:
     """Start the server and open the native app window."""
     import uvicorn
 
+    from selects.logging_setup import setup_logging
+
+    log_path = setup_logging()
+    log.info("selects desktop starting; logs at %s", log_path)
+
     from selects.launcher import _server_ready
     from selects.server.app import build_app
     from selects.server.library_manager import LibraryManager

@@ -128,16 +128,19 @@ else:
 # darktable tree (must contain a ``bin/`` with darktable[.exe] +
 # darktable-cli[.exe]), or drop it at ``<repo>/vendor/darktable``. It lands at
 # ``<app>/darktable`` where routes.py:_find_editor_binary looks first.
+# Darktable is an OPT-IN add-on (~700MB) — not bundled by default. "Edit in
+# darktable" falls back to a system-installed darktable when it isn't bundled.
+# Set SELECTS_BUNDLE_DARKTABLE=1 (and provide the tree) to include it.
+BUNDLE_DARKTABLE = os.environ.get("SELECTS_BUNDLE_DARKTABLE", "").lower() in ("1", "true", "yes")
 DARKTABLE_DIR = os.environ.get(
     "SELECTS_DARKTABLE_DIR", os.path.join(REPO_ROOT, "vendor", "darktable")
 )
-if os.path.isdir(os.path.join(DARKTABLE_DIR, "bin")):
+if BUNDLE_DARKTABLE and os.path.isdir(os.path.join(DARKTABLE_DIR, "bin")):
     datas.append((DARKTABLE_DIR, "darktable"))
     print(f"[selects.spec] bundling darktable from {DARKTABLE_DIR}")
 else:
-    print("[selects.spec] no darktable tree found "
-          f"(looked in {DARKTABLE_DIR}); 'Edit in darktable' will fall back "
-          "to a system install.")
+    print("[selects.spec] darktable NOT bundled (add-on); 'Edit in darktable' "
+          "uses a system install. Set SELECTS_BUNDLE_DARKTABLE=1 to include it.")
 
 block_cipher = None
 
