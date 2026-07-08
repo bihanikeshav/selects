@@ -83,20 +83,6 @@ export default function Rail() {
         Curated
       </NavLink>
 
-      <NavLink
-        to="/cull/stories"
-        className={({ isActive }) => "rail-item" + (isActive ? " is-active" : "")}
-        title="Stories — your trip grouped into moments"
-      >
-        <span className="icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M4 5a2 2 0 0 1 2-2h6v16H6a2 2 0 0 0-2 2z" />
-            <path d="M20 5a2 2 0 0 0-2-2h-6v16h6a2 2 0 0 1 2 2z" />
-          </svg>
-        </span>
-        Stories
-      </NavLink>
-
       <div className="rail-divider" aria-hidden="true" />
 
       {/* Cross-cutting tools */}

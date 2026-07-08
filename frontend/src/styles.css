@@ -1334,7 +1334,9 @@ button.rail-item {
 
 .story-frame .idx {
   position: absolute;
-  top: 8px; left: 8px;
+  /* sits to the right of StackPhoto's top-left like-heart (26px @ 6px) so the
+     two no longer overlap */
+  top: 8px; left: 40px;
   font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 600;

@@ -35,8 +35,10 @@ def setup_logging(level: int = logging.INFO) -> Path:
         "%(asctime)s %(levelname)-7s %(name)s: %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
-    fh = logging.handlers.RotatingFileHandler(
-        path, maxBytes=5_000_000, backupCount=3, encoding="utf-8"
+    # Rolling 24-hour window: rotate once a day and keep a single previous file,
+    # so the log self-clears and never grows unbounded.
+    fh = logging.handlers.TimedRotatingFileHandler(
+        path, when="H", interval=24, backupCount=1, encoding="utf-8", utc=False
     )
     fh.setFormatter(fmt)
 

@@ -93,7 +93,9 @@
 
 .video-card-thumb {
   position: relative;
+  width: 100%;
   aspect-ratio: 16 / 9;
+  flex: 0 0 auto;    /* never let the flex column stretch the thumb taller */
   background: #000;   /* black bars behind letterboxed portrait/odd-ratio videos */
 }
 

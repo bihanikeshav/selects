@@ -162,9 +162,19 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
+# Branded splash shown the instant the exe launches, until the app window opens.
+_splash_img = os.path.join(REPO_ROOT, "packaging", "splash.png")
+splash = Splash(
+    _splash_img,
+    binaries=a.binaries,
+    datas=a.datas,
+    always_on_top=True,
+) if os.path.exists(_splash_img) else None
+
 exe = EXE(
     pyz,
     a.scripts,
+    *([splash] if splash else []),
     [],
     exclude_binaries=True,
     name="selects",
@@ -172,7 +182,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
-    console=True,
+    console=False,  # windowed — no cmd/console window on launch
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
@@ -187,6 +197,7 @@ exe = EXE(
 
 coll = COLLECT(
     exe,
+    *([splash.binaries] if splash else []),
     a.binaries,
     a.zipfiles,
     a.datas,
