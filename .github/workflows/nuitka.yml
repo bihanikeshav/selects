@@ -1,0 +1,69 @@
+name: Nuitka builds
+
+# Manual + tag-triggered: Nuitka compiles are slow, so we don't run them on
+# every push. This matrix is what proves the Nuitka bundle builds on all three
+# desktop OSes (Nuitka can't cross-compile — each artifact is built on its OS).
+on:
+  workflow_dispatch: {}
+  push:
+    tags: ["v*-nuitka", "nuitka-*"]
+
+jobs:
+  nuitka:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: selects-nuitka-windows-x64
+          - os: macos-latest
+            artifact: selects-nuitka-macos-arm64
+          - os: ubuntu-latest
+            artifact: selects-nuitka-linux-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Linux needs patchelf for Nuitka standalone RPATH fixups + GTK/webkit for
+      # the pywebview GTK backend. macOS ships the Xcode CLT compiler already.
+      - name: Linux build deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y patchelf libgirepository1.0-dev gir1.2-gtk-3.0 \
+            gir1.2-webkit2-4.1 libcairo2-dev
+
+      - name: Install package (CPU torch) + ML stack + Nuitka
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install ".[ml]" "nuitka>=2.4" ordered-set zstandard
+          # pywebview GTK backend deps on Linux
+          if [ "$RUNNER_OS" = "Linux" ]; then pip install pygobject pycairo; fi
+        shell: bash
+
+      - name: Build bundle with Nuitka (ML stack)
+        run: python packaging/build_nuitka.py --ml
+
+      - name: Zip bundle
+        shell: bash
+        run: |
+          cd dist/nuitka
+          # standalone drops entry.dist/ (or selects.app on macOS)
+          target=$(ls -d entry.dist selects.app selects 2>/dev/null | head -1)
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a ../../${{ matrix.artifact }}.zip "$target"
+          else
+            zip -qr ../../${{ matrix.artifact }}.zip "$target"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}.zip

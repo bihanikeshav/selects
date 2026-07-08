@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
-import KbdFooter from "../components/KbdFooter";
 import PageHeader from "../components/PageHeader";
 import Rail from "../components/Rail";
 
@@ -303,8 +302,6 @@ export default function Persons() {
             })}
           </div>
         </div>
-
-        <KbdFooter />
       </div>
     </div>
   );

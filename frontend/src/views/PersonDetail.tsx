@@ -132,21 +132,29 @@ export default function PersonDetail() {
 
           <div className="cluster-detail-grid">
             {photos.map((p, i) => (
-              <div key={p.sha256} className={`cluster-photo${selected.has(p.sha256) ? " is-selected" : ""}`} style={{ position: "relative" }}>
+              <div
+                key={p.sha256}
+                className={`cluster-photo${selected.has(p.sha256) ? " is-selected" : ""}`}
+                onDoubleClick={() => setLightbox(i)}
+              >
                 <button
                   onClick={() => toggle(p.sha256)}
                   className="cluster-photo-btn"
                   aria-pressed={selected.has(p.sha256)}
+                  title="Click to select · double-click to view"
                 >
                   <img src={p.thumb_url} alt="" loading="lazy" />
                 </button>
                 {selected.has(p.sha256) && <span className="cluster-photo-check">✓</span>}
                 <button
                   onClick={() => setLightbox(i)}
-                  title="Enlarge"
+                  title="View"
+                  aria-label="View photo"
                   className="cluster-photo-zoom"
                 >
-                  ↗
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+                  </svg>
                 </button>
               </div>
             ))}

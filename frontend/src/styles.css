@@ -2051,10 +2051,14 @@ button.rail-item {
 /* Persons view sits in a 3-row workspace grid (header / content / footer)
    instead of the cluster-detail-wrap default of a 5-row grid — override the
    grid slot and widen the tile minimum for the People grid specifically. */
-.cluster-detail-wrap--persons {
+/* Compound selector so it beats the base .cluster-detail-wrap (which sets
+   grid-row: 3/span 2 for the 5-row cluster workspace and is defined LATER in
+   this file). The People workspace is only 3 rows — the grid belongs in row 2. */
+.cluster-detail-wrap.cluster-detail-wrap--persons {
   grid-row: 2;
   min-height: 0;
   overflow-y: auto;
+  display: block;
 }
 .cluster-detail-grid--wide {
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
@@ -2174,21 +2178,82 @@ button.rail-item {
 
 .cluster-photo {
   position: relative;
-  aspect-ratio: 1 / 1;
+  /* Deterministic SQUARE tile: height is always == width via padding, so the
+     landscape/portrait aspect never bleeds through. (aspect-ratio alone got
+     stretched by the in-flow <img>.) All children are absolutely positioned. */
+  width: 100%;
+  height: 0;
+  padding-bottom: 100%;
   border-radius: var(--r-md);
   overflow: hidden;
   cursor: pointer;
-  border: 0;
-  padding: 0;
+  border: 1px solid var(--md-outline-var);
   background: var(--md-surface-c);
   transition: transform var(--dur-short), box-shadow var(--dur-short);
+}
+
+/* The primary click target fills the tile so the image can crop-to-fill it:
+   a <button> on the photo grids, a <Link> on the People cards. */
+.cluster-photo-btn,
+.cluster-photo .cluster-card-link {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  display: block;
 }
 
 .cluster-photo img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: cover;   /* crop to fill — no letterbox on portraits */
   display: block;
+}
+
+/* Enlarge affordance — top-right, appears on hover. */
+.cluster-photo-zoom,
+.cluster-photo-zoom-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 3;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--r-full);
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--dur-short) var(--ease-standard),
+    background-color var(--dur-short) var(--ease-standard);
+}
+.cluster-photo:hover .cluster-photo-zoom,
+.cluster-photo:hover .cluster-photo-zoom-btn,
+.cluster-photo-zoom:focus-visible,
+.cluster-photo-zoom-btn:focus-visible {
+  opacity: 1;
+}
+.cluster-photo-zoom:hover,
+.cluster-photo-zoom-btn:hover {
+  background: rgba(0, 0, 0, 0.78);
+}
+.cluster-photo-zoom:focus-visible,
+.cluster-photo-zoom-btn:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 1px;
+}
+.cluster-photo-zoom svg,
+.cluster-photo-zoom-btn svg {
+  width: 15px;
+  height: 15px;
 }
 
 .cluster-photo:hover {
