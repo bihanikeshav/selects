@@ -28,10 +28,13 @@ HF_ONNX_REPO = "bihanikeshav/selects-onnx"
 _MODEL_FILES: dict[str, tuple[str, ...]] = {
     "siglip_vision": ("siglip_vision.onnx",),          # fp16, self-contained
     "siglip_text": ("siglip_text.onnx",),              # fp16, self-contained
-    "nafnet": ("nafnet.onnx",),                        # fp16, self-contained
     "ram_plus": ("ram_plus.onnx", "ram_plus.onnx.data"),   # fp32 + external data
-    "csrnet": ("csrnet.onnx", "csrnet.onnx.data"),         # fp32 + external data
-    "zero_dce": ("zero_dce.onnx", "zero_dce.onnx.data"),   # fp32 + external data
+    # Enhancement models (opset-17, legacy TorchScript export → DirectML-safe):
+    "retinexformer": ("retinexformer.onnx",),          # low-light (FiveK), fp32
+    "restormer": ("restormer.onnx",),                  # motion deblur (GoPro), fp32
+    # NOTE: the old csrnet / zero_dce / nafnet exports were retired — csrnet and
+    # zero_dce produced broken output (solid-blue / purple cast) and nafnet was
+    # replaced by the stronger, parity-verified Restormer.
 }
 
 # First available wins. CPU is always appended as the last-resort fallback.
@@ -192,7 +195,11 @@ def model_path(name: str) -> str:
 # conv nets run fine on DML.) If these are ever re-exported with the legacy
 # TorchScript exporter — which produces DML-compatible graphs — drop them from
 # this set to get GPU acceleration back.
-_CPU_ONLY_MODELS = {"siglip_text", "siglip_vision", "ram_plus"}
+# restormer: the full-res transformer OOMs the DirectML EP (verified — Conv in
+# the decoder returns 8007000E "not enough memory"), so run it straight on CPU
+# instead of attempting DML and falling back every call. retinexformer is light
+# enough to run on DML fine.
+_CPU_ONLY_MODELS = {"siglip_text", "siglip_vision", "ram_plus", "restormer"}
 
 
 def model_session(name: str, prefer: Sequence[str] | None = None, cache: bool = True):

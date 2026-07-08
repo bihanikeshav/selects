@@ -5,7 +5,7 @@ import Rail from "../components/Rail";
 import "../components/Doctor.css";
 
 type Bucket = "underexposed" | "overexposed" | "out_of_focus" | "blurry_keepers";
-type Model = "clahe" | "nafnet";
+type Model = "clahe" | "retinexformer" | "restormer";
 
 interface Issue {
   photo_id: number;
@@ -34,8 +34,8 @@ const BUCKET_META: Record<
 > = {
   underexposed: {
     label: "Underexposed",
-    hint: "Too dark — Auto fix lifts shadows and rebalances exposure",
-    suggestedModel: "clahe",
+    hint: "Too dark — Brighten (Retinexformer) lifts shadows with natural colour",
+    suggestedModel: "retinexformer",
     accent: "var(--g-blue)",
   },
   overexposed: {
@@ -47,25 +47,26 @@ const BUCKET_META: Record<
   out_of_focus: {
     label: "Out of focus",
     hint: "Genuinely soft — sharpness below threshold — Deblur can rescue these",
-    suggestedModel: "nafnet",
+    suggestedModel: "restormer",
     accent: "var(--g-red)",
   },
   blurry_keepers: {
     label: "Blurry but aesthetic",
     hint: "High aesthetic, slightly soft — worth a deblur pass",
-    suggestedModel: "nafnet",
+    suggestedModel: "restormer",
     accent: "var(--g-green)",
   },
 };
 
 /** Human-friendly labels for the fix models. The backend `model=` values
- * (clahe / zero-dce-plus / csrnet / nafnet) never change — this is presentation only. */
+ * (clahe / retinexformer / restormer) never change — this is presentation only. */
 const MODEL_META: Record<Model, { label: string; sub: string }> = {
   clahe: { label: "Auto edit", sub: "Auto tone · WB, exposure, contrast, vibrance" },
-  nafnet: { label: "Sharpen / deblur", sub: "NAFNet · GoPro-trained" },
+  retinexformer: { label: "Brighten (low-light)", sub: "Retinexformer · ICCV'23" },
+  restormer: { label: "Sharpen / deblur", sub: "Restormer · CVPR'22, GoPro" },
 };
 
-const MODEL_ORDER: Model[] = ["clahe", "nafnet"];
+const MODEL_ORDER: Model[] = ["clahe", "retinexformer", "restormer"];
 
 export default function Doctor() {
   const [data, setData] = useState<DoctorResp | null>(null);
