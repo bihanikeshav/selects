@@ -91,11 +91,80 @@ def auto_edit(img: Image.Image) -> Image.Image:
     return Image.fromarray(rgb_out)
 
 
+def _luma(x: np.ndarray) -> np.ndarray:
+    return x @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+
+
+def auto_tone(img: Image.Image) -> Image.Image:
+    """Assertive, tasteful auto-edit in the spirit of Lightroom's *Auto* button.
+
+    Unlike ``auto_edit`` (which was tuned to "do almost nothing" and therefore
+    looked broken), this always makes a visible but natural improvement:
+      1. White balance   — shades-of-gray illuminant estimate (robust vs a flat
+                           gray-world), blended so intentional warmth survives.
+      2. Black/White pts — clip the 0.4% luminance tails and stretch.
+      3. Exposure        — nudge mean luminance toward a target via gamma.
+      4. Shadows/Highl.  — lift shadows + roll off highlights as a luminance
+                           gain (hue/saturation preserved).
+      5. Contrast        — mild global S-curve.
+      6. Vibrance        — saturation-aware boost (lifts muted colours more).
+    All strengths are moderate so good photos stay natural and flat/dull travel
+    shots get a clear lift.
+    """
+    rgb = np.asarray(img.convert("RGB"), dtype=np.float32) / 255.0
+    eps = 1e-5
+
+    # 1 — white balance: CONSERVATIVE shades-of-gray. Gray-world assumptions
+    #     wreck non-neutral scenes (snow, sunsets), so clamp per-channel scale
+    #     tightly (±12%) and only blend 30% — enough to nudge an obvious cast,
+    #     not enough to orange-ify a snowy selfie or blue-ify a warm alley.
+    p = 6.0
+    illum = np.power(np.mean(np.power(rgb, p), axis=(0, 1)), 1.0 / p)
+    illum = illum / (illum.mean() + eps)
+    scale = np.clip(1.0 / np.clip(illum, eps, None), 0.88, 1.12)
+    rgb = np.clip(0.70 * rgb + 0.30 * (rgb * scale), 0, 1)
+
+    # 2 — black & white points from luminance percentiles (no-op on wide-range)
+    lum = _luma(rgb)
+    lo, hi = np.percentile(lum, [0.4, 99.6])
+    if hi - lo > 0.03:
+        rgb = np.clip((rgb - lo) / (hi - lo), 0, 1)
+
+    # 3 — exposure toward a target mean via gamma (gently clamped)
+    m = float(_luma(rgb).mean())
+    if m > eps:
+        gamma = float(np.clip(np.log(0.46) / np.log(m + eps), 0.7, 1.5))
+        rgb = np.power(rgb, gamma)
+
+    # 4 — shadow lift + highlight roll-off applied ADDITIVELY in luminance.
+    #     Adding the same delta to R,G,B keeps shadows neutral — a multiplicative
+    #     gain explodes near black and amplifies colour noise into a magenta cast.
+    lum = _luma(rgb)
+    shadow = 0.16 * np.clip(1.0 - lum / 0.5, 0, 1) ** 2      # lift deep shadows
+    highl = 0.12 * np.clip((lum - 0.6) / 0.4, 0, 1) ** 2      # compress highlights
+    delta = (shadow * (1.0 - lum) - highl * lum)[..., None]
+    rgb = np.clip(rgb + delta, 0, 1)
+
+    # 5 — gentle global contrast S-curve around mid-grey
+    rgb = np.clip(0.5 + (rgb - 0.5) * 1.07, 0, 1)
+
+    # 6 — vibrance: boost less-saturated pixels more (protects skin/skies)
+    hsv = cv2.cvtColor(rgb.astype(np.float32), cv2.COLOR_RGB2HSV)
+    s = hsv[..., 1]
+    hsv[..., 1] = np.clip(s * (1.0 + 0.22 * (1.0 - s)), 0, 1)
+    rgb = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
+
+    return Image.fromarray((np.clip(rgb, 0, 1) * 255.0).round().astype(np.uint8))
+
+
 def aesthetic_grade(
     img: Image.Image,
     preset: str = "natural",
     has_face: bool = False,
 ) -> Image.Image:
-    """Backwards-compat shim — old callers passed preset / has_face."""
+    """Backwards-compat shim — old callers passed preset / has_face.
+
+    Now routes to the assertive Lightroom-style ``auto_tone``.
+    """
     _ = preset, has_face
-    return auto_edit(img)
+    return auto_tone(img)

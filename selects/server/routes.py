@@ -986,7 +986,7 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
 
         if preset not in ("film", "clarity", "portrait"):
             preset = "film"
-        if model not in ("clahe", "zero-dce-plus", "csrnet", "nafnet"):
+        if model not in ("clahe", "nafnet"):
             model = "clahe"
 
         # Build a cache key reflecting all toggles independently.
@@ -1025,26 +1025,16 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
             if straighten:
                 out, _angle = do_straighten(out)
             if grade:
-                if model == "zero-dce-plus":
-                    try:
-                        from selects.ml.lowlight import enhance_with_zero_dce_plus
-                        out = enhance_with_zero_dce_plus(out, cfg)
-                    except Exception as exc:
-                        log.warning("zero-dce-plus failed: %s — falling back to CLAHE", exc)
-                        out = aesthetic_grade(out, preset=preset, has_face=has_face)
-                elif model == "csrnet":
-                    try:
-                        from selects.ml.retouch_csrnet import retouch_with_csrnet
-                        out = retouch_with_csrnet(out, cfg)
-                    except Exception as exc:
-                        log.warning("csrnet failed: %s — falling back to CLAHE", exc)
-                        out = aesthetic_grade(out, preset=preset, has_face=has_face)
-                elif model == "nafnet":
+                # zero-dce-plus (purple cast) and csrnet (solid-blue output) were
+                # removed — both ONNX exports are broken, verified via a Haiku
+                # before/after eval. "auto" is now the assertive Lightroom-style
+                # classical auto_tone; nafnet stays as the (mild) deblur option.
+                if model == "nafnet":
                     try:
                         from selects.ml.deblur_nafnet import deblur_with_nafnet
                         out = deblur_with_nafnet(out, cfg)
                     except Exception as exc:
-                        log.warning("nafnet failed: %s — falling back to CLAHE", exc)
+                        log.warning("nafnet failed: %s — falling back to auto", exc)
                         out = aesthetic_grade(out, preset=preset, has_face=has_face)
                 else:
                     out = aesthetic_grade(out, preset=preset, has_face=has_face)
