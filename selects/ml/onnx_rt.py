@@ -169,8 +169,19 @@ def model_path(name: str) -> str:
     return graph_path
 
 
+# The currently-published SigLIP/RAM++ graphs were dynamo-exported, and DirectML
+# cannot run their Reshape pattern (it throws mid-run). Rather than attempt DML,
+# fail, freeze, and fall back per request, we build these directly on CPU. (The
+# conv nets run fine on DML.) If these are ever re-exported with the legacy
+# TorchScript exporter — which produces DML-compatible graphs — drop them from
+# this set to get GPU acceleration back.
+_CPU_ONLY_MODELS = {"siglip_text", "siglip_vision", "ram_plus"}
+
+
 def model_session(name: str, prefer: Sequence[str] | None = None, cache: bool = True):
     """Convenience: download logical model *name* and build a cached ORT session."""
+    if prefer is None and name in _CPU_ONLY_MODELS:
+        prefer = ["CPUExecutionProvider"]
     return make_session(model_path(name), prefer=prefer, cache=cache)
 
 
