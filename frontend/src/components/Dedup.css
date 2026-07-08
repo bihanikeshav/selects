@@ -119,6 +119,11 @@
   color: var(--md-on-primary-container);
 }
 
+.dedup-filter-btn:focus-visible {
+  outline: 2px solid var(--md-primary);
+  outline-offset: 2px;
+}
+
 .dedup-empty {
   font-size: 14px;
   color: var(--md-on-surface-var);
@@ -134,17 +139,20 @@
 .dedup-group {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 16px 18px;
+  gap: 14px;
+  padding: 16px 18px 18px;
   background: var(--md-surface-c-low);
   border: 1px solid var(--md-outline-var);
   border-radius: var(--r-lg);
+  transition: border-color var(--dur-short) var(--ease-standard);
 }
 
 .dedup-group-header {
   display: flex;
   align-items: center;
   gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--md-outline-var);
 }
 
 .dedup-kind-badge {
@@ -193,6 +201,13 @@
   border-radius: var(--r-md);
   overflow: hidden;
   border: 2px solid transparent;
+  transition: transform 140ms var(--ease-standard), box-shadow 140ms var(--ease-standard),
+              border-color 140ms var(--ease-standard);
+}
+
+.dedup-thumb:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--md-elev-2);
 }
 
 .dedup-thumb.is-keeper {
@@ -246,16 +261,19 @@
   border-radius: var(--r-xs);
   background: var(--g-green);
   color: #0b1f10;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
 }
 
 /* "Keep this" hint on non-keeper thumbs — only on hover so it isn't clutter. */
 .dedup-keeper-badge-pick {
-  background: rgba(0, 0, 0, 0.62);
+  background: rgba(0, 0, 0, 0.68);
   color: #fff;
+  backdrop-filter: blur(4px);
   opacity: 0;
-  transition: opacity 120ms ease;
+  transform: translateY(-2px);
+  transition: opacity 140ms var(--ease-standard), transform 140ms var(--ease-standard);
 }
-.dedup-thumb:hover .dedup-keeper-badge-pick { opacity: 1; }
+.dedup-thumb:hover .dedup-keeper-badge-pick { opacity: 1; transform: translateY(0); }
 
 .dedup-thumb-meta {
   display: flex;

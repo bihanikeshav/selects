@@ -11,11 +11,19 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 16px;
+  padding: 10px 20px;
   border-bottom: 1px solid var(--md-outline-var);
+  background: var(--md-surface);
   flex: 0 0 auto;
 }
-.editor-title { font-family: var(--font-display); font-weight: 600; font-size: 15px; }
+.editor-title {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: -0.005em;
+  color: var(--md-on-surface);
+  font-variant-numeric: tabular-nums;
+}
 .editor-top-actions { display: flex; gap: 8px; align-items: center; }
 
 .editor-body {
@@ -41,7 +49,7 @@
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   box-shadow: 0 8px 40px rgba(0,0,0,0.5);
 }
 .editor-err { position: absolute; top: 16px; }
@@ -49,36 +57,54 @@
 .editor-panel {
   border-left: 1px solid var(--md-outline-var);
   overflow-y: auto;
-  padding: 16px 18px 40px;
+  padding: 18px 20px 40px;
   background: var(--md-surface-c);
 }
 
-.editor-group { margin-bottom: 22px; }
+.editor-group { margin-bottom: 24px; }
+.editor-group:last-child { margin-bottom: 4px; }
 .editor-group-title {
   font-family: var(--font-display);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--md-on-surface-var);
-  margin-bottom: 12px;
+  margin-bottom: 14px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--md-outline-var);
 }
 
-.editor-slider { margin-bottom: 14px; }
+.editor-slider { margin-bottom: 16px; }
+.editor-slider:last-child { margin-bottom: 0; }
 .editor-slider-head {
   display: flex;
   justify-content: space-between;
+  align-items: baseline;
   font-size: 12.5px;
+  font-weight: 500;
   color: var(--md-on-surface);
-  margin-bottom: 5px;
+  margin-bottom: 6px;
 }
-.editor-slider-val { font-family: var(--font-mono); color: var(--md-on-surface-var); }
-.editor-slider-val.is-set { color: var(--md-primary); }
+.editor-slider-val {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  min-width: 2.4em;
+  text-align: right;
+  color: var(--md-on-surface-var);
+}
+.editor-slider-val.is-set { color: var(--md-primary); font-weight: 500; }
 
 .editor-slider input[type="range"] {
   width: 100%;
   accent-color: var(--md-primary);
   cursor: pointer;
+}
+.editor-slider input[type="range"]:focus-visible {
+  outline: 2px solid var(--md-primary);
+  outline-offset: 3px;
+  border-radius: var(--r-full);
 }
 
 .editor-filmstrip {
@@ -86,34 +112,45 @@
   display: flex;
   gap: 8px;
   overflow-x: auto;
-  padding: 10px 16px 14px;
+  padding: 12px 20px 16px;
   border-top: 1px solid var(--md-outline-var);
   background: var(--md-surface);
+  scrollbar-width: thin;
+  scrollbar-color: var(--md-outline-var) transparent;
 }
 .editor-film-thumb {
   position: relative;
   flex: 0 0 auto;
   width: 64px; height: 64px;
   border: 2px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   overflow: hidden;
   padding: 0;
-  background: none;
+  background: var(--md-surface-c);
   cursor: pointer;
   opacity: 0.6;
+  transition: opacity var(--dur-short) var(--ease-standard),
+              border-color var(--dur-short) var(--ease-standard),
+              transform var(--dur-short) var(--ease-standard);
 }
 .editor-film-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .editor-film-thumb.is-current { opacity: 1; border-color: var(--md-primary); }
-.editor-film-thumb:hover { opacity: 0.9; }
+.editor-film-thumb:hover { opacity: 0.9; transform: translateY(-2px); }
+.editor-film-thumb:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--md-primary);
+  outline-offset: 2px;
+}
 .editor-film-saved {
   position: absolute;
   top: 3px; right: 3px;
   width: 16px; height: 16px;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: var(--g-green, #34a853);
   color: #0b1f10;
   font-size: 10px;
   font-weight: 700;
   display: grid;
   place-items: center;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
 }
