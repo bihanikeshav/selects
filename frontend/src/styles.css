@@ -2209,6 +2209,12 @@ button.rail-item {
 }
 
 .cluster-photo img {
+  /* Absolutely fill the square padding-box. Works whether the <img> is a direct
+     child of .cluster-photo (Search) or nested in an absolute .cluster-photo-btn
+     / .cluster-card-link (People/Clusters) — height:100% alone collapses to 0
+     against the height:0 padding-box when the img isn't itself positioned. */
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;   /* crop to fill — no letterbox on portraits */
