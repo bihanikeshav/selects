@@ -144,23 +144,30 @@ export default function ClusterDetail() {
             {visiblePhotos.map((p, i) => {
               const sel = selected.has(p.sha256);
               return (
-                <div key={p.sha256} className={`cluster-photo${sel ? " is-selected" : ""}`}>
+                <div
+                  key={p.sha256}
+                  className={`cluster-photo${sel ? " is-selected" : ""}`}
+                  onDoubleClick={() => setLightbox(i)}
+                >
                   <button
                     onClick={() => toggle(p.sha256)}
                     className="cluster-photo-btn"
                     aria-pressed={sel}
                     aria-label={`select photo ${p.sha256.slice(0, 8)}`}
+                    title="Click to select · double-click to view"
                   >
                     <img src={p.thumb_url} alt="" loading="lazy" />
                   </button>
                   {sel && <span className="cluster-photo-check">✓</span>}
                   <button
                     onClick={() => setLightbox(i)}
-                    aria-label="enlarge"
-                    title="Enlarge"
+                    aria-label="View photo"
+                    title="View"
                     className="cluster-photo-zoom-btn"
                   >
-                    ↗
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+                    </svg>
                   </button>
                 </div>
               );
