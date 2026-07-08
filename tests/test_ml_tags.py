@@ -5,7 +5,6 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-import torch
 
 from selects.db import init_db, session_scope
 from selects.db.models import Embedding, Photo, PhotoTag, PipelineState
@@ -45,10 +44,12 @@ def embedded_db(session_factory, tmp_path: Path):
 
 
 def _fake_encode_text(prompts):
-    """Return unit-normalized random [N, 1152] float32 on CPU (no GPU needed)."""
+    """Return unit-normalized random [N, 1152] float32 (numpy — matches the ONNX
+    encode_text_prompts output; the old torch tensor broke the numpy code path)."""
     n = len(prompts)
-    x = torch.randn(n, DIM)
-    return torch.nn.functional.normalize(x.float(), dim=-1)
+    x = np.random.randn(n, DIM).astype(np.float32)
+    x /= np.linalg.norm(x, axis=-1, keepdims=True)
+    return x
 
 
 class TestRunTagStage:

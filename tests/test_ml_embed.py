@@ -7,7 +7,6 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
-import torch
 from PIL import Image
 
 from selects.db import init_db, session_scope
@@ -18,10 +17,12 @@ from selects.ml.embed import run_embedding_stage
 DIM = 1152  # SigLIP-SO400M embedding dimension
 
 
-def _make_fake_feats(n: int) -> torch.Tensor:
-    """Return L2-normalized random [n, 1152] float32 tensor."""
-    x = torch.randn(n, DIM)
-    return torch.nn.functional.normalize(x, dim=-1)
+def _make_fake_feats(n: int) -> np.ndarray:
+    """Return an L2-normalized random [n, 1152] float32 array (matches the ONNX
+    encode_image_batch output — numpy, not a torch tensor)."""
+    x = np.random.randn(n, DIM).astype(np.float32)
+    x /= np.linalg.norm(x, axis=-1, keepdims=True)
+    return x
 
 
 def _make_fake_iqa(n: int) -> np.ndarray:
