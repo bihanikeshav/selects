@@ -5,7 +5,7 @@ import Rail from "../components/Rail";
 import "../components/Doctor.css";
 
 type Bucket = "underexposed" | "overexposed" | "out_of_focus" | "blurry_keepers";
-type Model = "clahe" | "retinexformer" | "restormer";
+type Model = "clahe" | "retinexformer";
 
 interface Issue {
   photo_id: number;
@@ -46,27 +46,26 @@ const BUCKET_META: Record<
   },
   out_of_focus: {
     label: "Out of focus",
-    hint: "Genuinely soft — sharpness below threshold — Deblur can rescue these",
-    suggestedModel: "restormer",
+    hint: "Genuinely soft — sharpness below threshold. Review these to reject.",
+    suggestedModel: "clahe",
     accent: "var(--g-red)",
   },
   blurry_keepers: {
     label: "Blurry but aesthetic",
-    hint: "High aesthetic, slightly soft — worth a deblur pass",
-    suggestedModel: "restormer",
+    hint: "High aesthetic but slightly soft — worth a second look.",
+    suggestedModel: "clahe",
     accent: "var(--g-green)",
   },
 };
 
 /** Human-friendly labels for the fix models. The backend `model=` values
- * (clahe / retinexformer / restormer) never change — this is presentation only. */
+ * (clahe / retinexformer) never change — this is presentation only. */
 const MODEL_META: Record<Model, { label: string; sub: string }> = {
   clahe: { label: "Auto edit", sub: "Auto tone · WB, exposure, contrast, vibrance" },
   retinexformer: { label: "Brighten (low-light)", sub: "Retinexformer · ICCV'23" },
-  restormer: { label: "Sharpen / deblur", sub: "Restormer · CVPR'22, GoPro" },
 };
 
-const MODEL_ORDER: Model[] = ["clahe", "retinexformer", "restormer"];
+const MODEL_ORDER: Model[] = ["clahe", "retinexformer"];
 
 export default function Doctor() {
   const [data, setData] = useState<DoctorResp | null>(null);
