@@ -104,7 +104,10 @@ async def test_activate(registry_path, tmp_path):
         assert (await c.post("/api/libraries/nope/activate")).status_code == 404
 
 
-async def test_delete_active_400_then_delete(registry_path, tmp_path):
+async def test_delete_active_falls_back_then_delete(registry_path, tmp_path):
+    """Deleting the active library is allowed (LibraryManager.delete falls back
+    to another registered library automatically); deleting the last remaining
+    library clears the active id entirely."""
     a = tmp_path / "a"
     a.mkdir()
     b = tmp_path / "b"
@@ -114,14 +117,15 @@ async def test_delete_active_400_then_delete(registry_path, tmp_path):
         id_a = (await c.post("/api/libraries", json={"name": "A", "path": str(a)})).json()["library"]["id"]
         id_b = (await c.post("/api/libraries", json={"name": "B", "path": str(b)})).json()["library"]["id"]
 
-        # A is active and B exists -> deleting A must 400.
-        assert (await c.delete(f"/api/libraries/{id_a}")).status_code == 400
-
-        # Deleting the non-active B is fine.
-        assert (await c.delete(f"/api/libraries/{id_b}")).status_code == 200
-
-        # A is now the only (active) library -> deletion allowed, active -> null.
+        # A is active and B exists -> deleting A succeeds and B becomes active.
         assert (await c.delete(f"/api/libraries/{id_a}")).status_code == 200
+
+        listing = (await c.get("/api/libraries")).json()
+        assert [l["id"] for l in listing["libraries"]] == [id_b]
+        assert listing["active_id"] == id_b
+
+        # B is now the only (active) library -> deletion allowed, active -> null.
+        assert (await c.delete(f"/api/libraries/{id_b}")).status_code == 200
 
         listing = (await c.get("/api/libraries")).json()
         assert listing["libraries"] == []

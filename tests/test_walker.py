@@ -54,8 +54,13 @@ class TestClassify:
     def test_unsupported_no_ext(self) -> None:
         assert classify(Path("Makefile")) is None
 
-    def test_unsupported_png(self) -> None:
-        assert classify(Path("image.png")) is None
+    def test_png_classified_as_jpeg_kind(self) -> None:
+        # PNG/WebP/TIFF/BMP/GIF are standard PIL-openable formats and share
+        # the JPEG decode path, so they are supported image kinds.
+        assert classify(Path("image.png")) == FileKind.JPEG
+
+    def test_webp_classified_as_jpeg_kind(self) -> None:
+        assert classify(Path("image.webp")) == FileKind.JPEG
 
 
 class TestWalkSupported:

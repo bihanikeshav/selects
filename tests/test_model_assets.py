@@ -57,7 +57,7 @@ def test_manifest_well_formed():
     for a in model_assets.MANIFEST:
         for key in ("id", "name", "kind", "ref", "approx_size_mb", "required_for", "sha256"):
             assert key in a, f"asset {a.get('id')} missing {key}"
-        assert a["kind"] in {"hf", "url", "insightface"}
+        assert a["kind"] in {"hf", "url", "insightface", "onnx"}
         assert isinstance(a["approx_size_mb"], int) and a["approx_size_mb"] >= 0
         assert isinstance(a["required_for"], str) and a["required_for"]
         assert a["id"] not in ids, f"duplicate id {a['id']}"
@@ -68,11 +68,13 @@ def test_manifest_well_formed():
             # sha256 is only meaningful for url assets
             assert a["sha256"] is None
 
-    # The real model ids derived from the ml modules must be present.
+    # All ML now runs on ONNX Runtime: SigLIP, RAM++ and the enhancement nets
+    # are bundled into a single shared ONNX asset, plus the insightface pack.
     refs = {a["ref"] for a in model_assets.MANIFEST}
-    assert "google/siglip-so400m-patch14-384" in refs
-    assert "Qwen/Qwen3-VL-2B-Instruct" in refs
-    assert "xinyu1205/recognize-anything-plus-model" in refs
+    assert "bihanikeshav/selects-onnx" in refs
+    ids_present = {a["id"] for a in model_assets.MANIFEST}
+    assert "selects_onnx" in ids_present
+    assert "buffalo_l" in ids_present
 
 
 # --------------------------------------------------------------------------- #
@@ -169,9 +171,13 @@ def test_asset_present_url_sha256(tmp_path):
 
 
 def test_status_shape(tmp_path, monkeypatch):
-    # Force every asset "missing": no hf cache, no insightface, empty url dir.
+    # Force every asset "missing": no hf cache, no insightface, no onnx bundle,
+    # empty url dir.
+    from selects.ml import onnx_rt
+
     monkeypatch.setattr(model_assets, "_hf_repo_cached", lambda repo_id: False)
     monkeypatch.setattr(model_assets, "insightface_dir", lambda: tmp_path / "nope")
+    monkeypatch.setattr(onnx_rt, "all_present", lambda: False)
 
     st = model_assets.status(base_models_dir=tmp_path)
     assert set(st) == {"models", "total_missing_mb"}
