@@ -37,6 +37,12 @@ from selects.db.models import Embedding, Photo
 # dedup rework; until then this threshold is the lever.
 NEAR_DUP_COSINE_THRESHOLD = 0.97
 
+# SigLIP casts a WIDE candidate net (>= this cosine); a perceptual dHash then
+# CONFIRMS visual near-identity (Hamming <= NEAR_DUP_HAMMING_MAX bits out of 64).
+# This is what stops different subjects at the same spot from being grouped.
+NEAR_DUP_CANDIDATE_COSINE = 0.90
+NEAR_DUP_HAMMING_MAX = 10
+
 # Guard against an O(n^2) all-pairs cosine scan blowing up on a huge library;
 # libraries above this photo count simply skip the near-dup pass (exact-sha256
 # duplicates are still reported for them).
@@ -54,8 +60,9 @@ class PhotoRef:
     size_bytes: Optional[int]
     aesthetic_iqa: Optional[float]
     in_active_library: bool
-    # Not serialized — used only for the in-process near-dup cosine pass.
+    # Not serialized — used only for the in-process near-dup pass.
     _siglip: Optional[bytes] = field(default=None, repr=False, compare=False)
+    _dhash: Optional[int] = field(default=None, repr=False, compare=False)
 
     def to_dict(self) -> dict:
         return {
@@ -120,8 +127,10 @@ def _load_library_photos(lib: dict, active_id: Optional[str]) -> list[PhotoRef]:
                 .all()
             )
         is_active = lib["id"] == active_id
+        thumbs_dir = cfg.thumbs_dir
         refs: list[PhotoRef] = []
         for path, sha256, size_bytes, siglip, aesthetic_iqa in rows:
+            dhash = _dhash_from_file(thumbs_dir / f"{sha256}.jpg") if sha256 else None
             refs.append(
                 PhotoRef(
                     library_id=lib["id"],
@@ -132,11 +141,39 @@ def _load_library_photos(lib: dict, active_id: Optional[str]) -> list[PhotoRef]:
                     aesthetic_iqa=aesthetic_iqa,
                     in_active_library=is_active,
                     _siglip=siglip,
+                    _dhash=dhash,
                 )
             )
         return refs
     except Exception:
         return []
+
+
+def _dhash_from_file(path) -> Optional[int]:
+    """64-bit difference hash (dHash) of an image — a perceptual fingerprint of
+    actual visual content. Two shots of the same moment hash within a few bits;
+    different subjects (even at the same spot) differ by dozens of bits."""
+    try:
+        from PIL import Image
+
+        with Image.open(path) as im:
+            small = im.convert("L").resize((9, 8), Image.BILINEAR)
+        px = list(small.getdata())  # 8 rows x 9 cols, row-major
+        h = 0
+        bit = 0
+        for row in range(8):
+            base = row * 9
+            for col in range(8):
+                if px[base + col] > px[base + col + 1]:
+                    h |= 1 << bit
+                bit += 1
+        return h
+    except Exception:
+        return None
+
+
+def _hamming(a: int, b: int) -> int:
+    return bin(a ^ b).count("1")
 
 
 def _union_find_groups(n: int, edges: list[tuple[int, int]]) -> list[list[int]]:
@@ -163,9 +200,14 @@ def _union_find_groups(n: int, edges: list[tuple[int, int]]) -> list[list[int]]:
 
 
 def _near_dup_groups(refs: list[PhotoRef], threshold: float) -> list[list[int]]:
-    """Group *refs* (all from one library) into near-dup clusters by SigLIP
-    cosine similarity. Returns groups as lists of indices into *refs*."""
-    idxs = [i for i, r in enumerate(refs) if r._siglip]
+    """Group *refs* (all from one library) into near-dup clusters.
+
+    SigLIP cosine casts a wide candidate net, then a perceptual dHash confirms
+    the pair is actually visually near-identical — so semantically-similar but
+    visually-different shots (different people at the same viewpoint) are NOT
+    grouped. Returns groups as lists of indices into *refs*.
+    """
+    idxs = [i for i, r in enumerate(refs) if r._siglip is not None and r._dhash is not None]
     if len(idxs) < 2:
         return []
     mat = np.stack(
@@ -175,13 +217,15 @@ def _near_dup_groups(refs: list[PhotoRef], threshold: float) -> list[list[int]]:
     norms[norms == 0] = 1.0
     mat = mat / norms
     sims = mat @ mat.T
+    # Wide candidate net, but never looser than the caller's threshold intent.
+    cand = min(threshold, NEAR_DUP_CANDIDATE_COSINE)
     n = len(idxs)
-    edges = [
-        (a, b)
-        for a in range(n)
-        for b in range(a + 1, n)
-        if sims[a, b] >= threshold
-    ]
+    edges: list[tuple[int, int]] = []
+    for a in range(n):
+        da = refs[idxs[a]]._dhash
+        for b in range(a + 1, n):
+            if sims[a, b] >= cand and _hamming(da, refs[idxs[b]]._dhash) <= NEAR_DUP_HAMMING_MAX:
+                edges.append((a, b))
     local_groups = _union_find_groups(n, edges)
     return [[idxs[i] for i in g] for g in local_groups]
 

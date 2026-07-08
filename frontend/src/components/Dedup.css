@@ -248,6 +248,15 @@
   color: #0b1f10;
 }
 
+/* "Keep this" hint on non-keeper thumbs — only on hover so it isn't clutter. */
+.dedup-keeper-badge-pick {
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.dedup-thumb:hover .dedup-keeper-badge-pick { opacity: 1; }
+
 .dedup-thumb-meta {
   display: flex;
   align-items: center;

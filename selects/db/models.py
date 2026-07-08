@@ -343,6 +343,17 @@ class PhotoPerson(Base):
     confidence: Mapped[float] = mapped_column(Float)
 
 
+class PhotoEdit(Base):
+    """Non-destructive editor state: the slider params (JSON) last applied to a
+    photo in the in-app editor. The baked JPEG lives at <state>/edits/<sha>.jpg."""
+
+    __tablename__ = "photo_edits"
+
+    photo_id: Mapped[int] = mapped_column(Integer, ForeignKey("photos.id"), primary_key=True)
+    params: Mapped[str] = mapped_column(Text, nullable=False)  # JSON of {key: value}
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class Swipe(Base):
     """User keep/reject decision during cull."""
 

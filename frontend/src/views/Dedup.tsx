@@ -25,10 +25,30 @@ function shortPath(path: string): string {
   return `.../${parts.slice(-2).join("/")}`;
 }
 
-function GroupThumb({ member, isKeeper }: { member: DedupPhotoRef; isKeeper: boolean }) {
+function GroupThumb({
+  member,
+  isKeeper,
+  onKeep,
+  onZoom,
+}: {
+  member: DedupPhotoRef;
+  isKeeper: boolean;
+  onKeep: () => void;
+  onZoom: () => void;
+}) {
   return (
-    <div className={"dedup-thumb" + (isKeeper ? " is-keeper" : "")}>
-      {isKeeper && <span className="dedup-keeper-badge">KEEP</span>}
+    <div
+      className={"dedup-thumb" + (isKeeper ? " is-keeper" : "")}
+      onClick={onKeep}
+      onDoubleClick={onZoom}
+      title={isKeeper ? "Kept · double-click to zoom" : "Click to keep this one · double-click to zoom"}
+      style={{ cursor: "pointer" }}
+    >
+      {isKeeper ? (
+        <span className="dedup-keeper-badge">KEEP</span>
+      ) : (
+        <span className="dedup-keeper-badge dedup-keeper-badge-pick">Keep this</span>
+      )}
       {member.thumb_url ? (
         <img src={member.thumb_url} alt="" loading="lazy" />
       ) : (
@@ -47,7 +67,17 @@ function GroupThumb({ member, isKeeper }: { member: DedupPhotoRef; isKeeper: boo
   );
 }
 
-function GroupRow({ group }: { group: DedupGroup }) {
+function GroupRow({
+  group,
+  keeperIndex,
+  onSetKeeper,
+  onZoom,
+}: {
+  group: DedupGroup;
+  keeperIndex: number;
+  onSetKeeper: (i: number) => void;
+  onZoom: (m: DedupPhotoRef) => void;
+}) {
   return (
     <div className="dedup-group">
       <div className="dedup-group-header">
@@ -59,7 +89,13 @@ function GroupRow({ group }: { group: DedupGroup }) {
       </div>
       <div className="dedup-group-thumbs">
         {group.members.map((m, i) => (
-          <GroupThumb key={`${m.library_id}:${m.path}`} member={m} isKeeper={i === group.keeper_index} />
+          <GroupThumb
+            key={`${m.library_id}:${m.path}`}
+            member={m}
+            isKeeper={i === keeperIndex}
+            onKeep={() => onSetKeeper(i)}
+            onZoom={() => onZoom(m)}
+          />
         ))}
       </div>
     </div>
@@ -73,7 +109,15 @@ export default function Dedup() {
   const [result, setResult] = useState<DedupReportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
+  const [keeperOverride, setKeeperOverride] = useState<Record<string, number>>({});
+  const [zoom, setZoom] = useState<string | null>(null);
   const pollRef = useRef<number | null>(null);
+
+  function zoomSrc(m: DedupPhotoRef): string | null {
+    // Preview res only resolves for the active library; else fall back to thumb.
+    if (m.thumb_url && m.sha256) return `/api/preview/${m.sha256}`;
+    return m.thumb_url;
+  }
 
   const poll = useCallback(async () => {
     try {
@@ -207,11 +251,37 @@ export default function Dedup() {
 
           <div className="dedup-groups">
             {filtered.map((g) => (
-              <GroupRow key={g.key} group={g} />
+              <GroupRow
+                key={g.key}
+                group={g}
+                keeperIndex={keeperOverride[g.key] ?? g.keeper_index}
+                onSetKeeper={(i) => setKeeperOverride((prev) => ({ ...prev, [g.key]: i }))}
+                onZoom={(m) => {
+                  const src = zoomSrc(m);
+                  if (src) setZoom(src);
+                }}
+              />
             ))}
           </div>
         </div>
       </div>
+
+      {zoom && (
+        <div
+          onClick={() => setZoom(null)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.94)",
+            zIndex: 90,
+            display: "grid",
+            placeItems: "center",
+            cursor: "zoom-out",
+          }}
+        >
+          <img src={zoom} alt="" style={{ maxWidth: "94vw", maxHeight: "94vh" }} />
+        </div>
+      )}
     </div>
   );
 }
