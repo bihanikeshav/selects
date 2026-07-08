@@ -88,6 +88,21 @@ def register_libraries(
         threading.Thread(target=worker, daemon=True).start()
         return {"started": True}
 
+    @app.get("/api/libraries/{lib_id}/cover")
+    def library_cover(lib_id: str):
+        from fastapi.responses import FileResponse, Response
+
+        thumb = manager.cover_thumb(lib_id)
+        if thumb is None:
+            # 1x1 transparent PNG so the <img> just shows the card's fallback bg.
+            import base64
+
+            px = base64.b64decode(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+            )
+            return Response(content=px, media_type="image/png")
+        return FileResponse(str(thumb), media_type="image/jpeg")
+
     @app.post("/api/libraries/cancel")
     def cancel_indexing():
         """Ask the in-progress indexing run to stop at the next checkpoint."""

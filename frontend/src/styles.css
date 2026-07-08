@@ -715,6 +715,9 @@ button.rail-item {
   flex-direction: column;
   gap: 6px;
   overflow-y: auto;
+  /* Room so the selected item's outline (2.5px + 2px offset) isn't clipped by
+     this scroll container's edges — it used to get buried at the top/sides. */
+  padding: 5px 7px;
   scrollbar-width: thin;
   scrollbar-color: var(--md-outline-var) transparent;
 }
@@ -2264,6 +2267,124 @@ button.rail-item {
 .lib-badge-busy {
   background: color-mix(in srgb, var(--g-yellow) 22%, transparent);
   color: color-mix(in srgb, var(--g-yellow) 70%, var(--md-on-surface));
+}
+
+/* ── Library home: cover-card grid ─────────────────────────────────────── */
+.lib-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 18px;
+  padding: 4px 2px 8px;
+}
+
+.lib-tile {
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--r-lg, 16px);
+  overflow: hidden;
+  background: var(--md-surface-c);
+  border: 1.5px solid transparent;
+  box-shadow: var(--md-elev-1);
+  transition: transform 140ms var(--ease-standard), box-shadow 140ms var(--ease-standard),
+              border-color 140ms var(--ease-standard);
+  cursor: default;
+}
+
+.lib-tile:hover { transform: translateY(-2px); box-shadow: var(--md-elev-2); }
+.lib-tile.is-active { border-color: var(--md-primary); }
+
+.lib-tile-cover {
+  position: relative;
+  aspect-ratio: 16 / 10;
+  background: var(--md-surface-c-highest);
+  overflow: hidden;
+}
+
+.lib-tile-cover img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.lib-tile-badges {
+  position: absolute;
+  top: 8px; left: 8px;
+  display: flex;
+  gap: 6px;
+}
+
+.lib-tile-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px 14px;
+}
+
+.lib-tile-name {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--md-on-surface);
+}
+
+.lib-tile-meta {
+  font-size: 12.5px;
+  color: var(--md-on-surface-var);
+}
+
+.lib-tile-path {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--md-on-surface-var);
+  opacity: 0.75;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lib-tile-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.lib-tile-actions .btn { font-size: 12px; padding: 5px 10px; }
+
+.lib-tile-add {
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 220px;
+  border: 1.5px dashed var(--md-outline);
+  background: transparent;
+  color: var(--md-on-surface-var);
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.lib-tile-add:hover { border-color: var(--md-primary); color: var(--md-primary); transform: none; box-shadow: none; }
+.lib-tile-add-plus { font-size: 30px; line-height: 1; font-weight: 300; }
+
+.lib-active-settings {
+  margin-top: 26px;
+  border-top: 1px solid var(--md-outline-var);
+  padding-top: 14px;
+}
+.lib-active-settings > summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--md-on-surface-var);
+  list-style: none;
+}
+.lib-active-settings > summary::-webkit-details-marker { display: none; }
+.lib-active-settings-body {
+  display: grid;
+  gap: 16px;
+  margin-top: 14px;
+  max-width: 720px;
 }
 
 .lib-path {

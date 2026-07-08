@@ -29,6 +29,13 @@ from selects.db.models import AestheticScore, Embedding, Photo, PhotoPerson, Pho
 _TAG_MATCH_BONUS = 10.0
 _TAG_MATCH_BONUS_STEP = 1.0  # extra per additional matching tag, small tie-breaker only
 
+# Relevance floor for semantic queries: SigLIP returns *some* cosine for every
+# photo, so without a floor a query surfaces a long tail of weak matches and
+# feels muddy. Keep hits within this fraction of the top semantic score (plus
+# any tag hits), but never show fewer than _SEM_MIN_RESULTS.
+_SEM_KEEP_FRACTION = 0.55
+_SEM_MIN_RESULTS = 12
+
 _WORD_RE = re.compile(r"[a-z0-9]+")
 
 
@@ -168,6 +175,13 @@ def build_router(cfg: FolderConfig) -> APIRouter:
                     results.sort(key=lambda r: taken_at_by_id.get(r[0]) or datetime.min, reverse=True)
             else:
                 results.sort(key=lambda r: r[2], reverse=True)
+                # Drop the weak semantic tail (r[3]=sem, r[4]=tag_hits).
+                if sem_scores:
+                    top_sem = max(sem_scores.values())
+                    if top_sem > 0:
+                        floor = top_sem * _SEM_KEEP_FRACTION
+                        kept = [r for r in results if r[4] > 0 or r[3] >= floor]
+                        results = kept if len(kept) >= _SEM_MIN_RESULTS else results[:_SEM_MIN_RESULTS]
 
             results = results[:limit]
 

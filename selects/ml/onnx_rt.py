@@ -140,17 +140,34 @@ def _onnx_dir() -> Path:
     return d
 
 
+_FILE_CACHE: dict[str, str] = {}
+
+
 def repo_file(filename: str) -> str:
     """Download a single file from the selects-onnx HF repo, return local path.
 
     Used for the ONNX graphs, their external-data siblings, and companion assets
     (ram_meta.npz, ram_tags.json, the SigLIP tokenizer). Downloaded into a flat
-    local dir so external-data references resolve; huggingface_hub skips the
-    transfer when the file is already present and unchanged.
+    local dir so external-data references resolve.
+
+    The resolved path is cached per process: without this, every call re-runs
+    ``hf_hub_download``, which does a network HEAD to check the etag even for an
+    already-cached file — so each search query spammed a HEAD request to HF.
     """
+    cached = _FILE_CACHE.get(filename)
+    if cached is not None and Path(cached).exists():
+        return cached
+
     from huggingface_hub import hf_hub_download
 
-    return hf_hub_download(HF_ONNX_REPO, filename, local_dir=str(_onnx_dir()))
+    local = _onnx_dir() / filename
+    if local.exists() and local.stat().st_size > 0:
+        # Already downloaded — trust it and skip the network entirely.
+        path = str(local)
+    else:
+        path = hf_hub_download(HF_ONNX_REPO, filename, local_dir=str(_onnx_dir()))
+    _FILE_CACHE[filename] = path
+    return path
 
 
 def model_path(name: str) -> str:

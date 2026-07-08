@@ -307,22 +307,27 @@ export default function Search() {
                 title={`rank ${i + 1} - score ${h.score.toFixed(3)}${h.tag_hits ? ` - ${h.tag_hits} tag hit${h.tag_hits === 1 ? "" : "s"}` : ""}`}
               >
                 <img src={h.thumb_url} alt="" loading="lazy" />
-                <span
-                  className="cluster-photo-check"
-                  style={{
-                    background: h.tag_hits > 0 ? "var(--md-primary)" : "rgba(0,0,0,0.55)",
-                    color: h.tag_hits > 0 ? "var(--md-on-primary)" : "#fff",
-                    fontSize: 11,
-                    fontWeight: 500,
-                    fontFamily: "var(--font-mono)",
-                    width: "auto",
-                    minWidth: 24,
-                    padding: "0 6px",
-                    borderRadius: 12,
-                  }}
-                >
-                  {h.tag_hits > 0 ? `tag x${h.tag_hits}` : h.score.toFixed(2)}
-                </span>
+                {/* Only badge meaningful signals — a raw SigLIP cosine (~0.05)
+                    rendered as "0.0" on every tile read as broken. Tag matches
+                    are the one badge worth showing. */}
+                {h.tag_hits > 0 && (
+                  <span
+                    className="cluster-photo-check"
+                    style={{
+                      background: "var(--md-primary)",
+                      color: "var(--md-on-primary)",
+                      fontSize: 11,
+                      fontWeight: 500,
+                      fontFamily: "var(--font-mono)",
+                      width: "auto",
+                      minWidth: 24,
+                      padding: "0 6px",
+                      borderRadius: 12,
+                    }}
+                  >
+                    {`tag x${h.tag_hits}`}
+                  </span>
+                )}
               </button>
             ))}
           </div>
