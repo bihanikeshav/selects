@@ -37,11 +37,14 @@ from selects.db.models import Embedding, Photo
 # dedup rework; until then this threshold is the lever.
 NEAR_DUP_COSINE_THRESHOLD = 0.97
 
-# SigLIP casts a WIDE candidate net (>= this cosine); a perceptual dHash then
-# CONFIRMS visual near-identity (Hamming <= NEAR_DUP_HAMMING_MAX bits out of 64).
-# This is what stops different subjects at the same spot from being grouped.
-NEAR_DUP_CANDIDATE_COSINE = 0.90
-NEAR_DUP_HAMMING_MAX = 10
+# Near-dup = SigLIP semantic candidate AND high pixel-appearance correlation.
+# A 32x32 grayscale correlation captures actual content (not just coarse layout,
+# which is why a dHash grouped different valleys that share sky/mountain/ground
+# composition). Validated on the real 1002-photo Ladakh library: this groups true
+# burst/pose sequences and rejects different-content-same-composition shots.
+NEAR_DUP_CANDIDATE_COSINE = 0.92
+NEAR_DUP_APPEAR_CORR = 0.93
+_APPEAR_SIZE = 32
 
 # Guard against an O(n^2) all-pairs cosine scan blowing up on a huge library;
 # libraries above this photo count simply skip the near-dup pass (exact-sha256
@@ -62,7 +65,7 @@ class PhotoRef:
     in_active_library: bool
     # Not serialized — used only for the in-process near-dup pass.
     _siglip: Optional[bytes] = field(default=None, repr=False, compare=False)
-    _dhash: Optional[int] = field(default=None, repr=False, compare=False)
+    _appear: Optional["np.ndarray"] = field(default=None, repr=False, compare=False)
 
     def to_dict(self) -> dict:
         return {
@@ -130,7 +133,7 @@ def _load_library_photos(lib: dict, active_id: Optional[str]) -> list[PhotoRef]:
         thumbs_dir = cfg.thumbs_dir
         refs: list[PhotoRef] = []
         for path, sha256, size_bytes, siglip, aesthetic_iqa in rows:
-            dhash = _dhash_from_file(thumbs_dir / f"{sha256}.jpg") if sha256 else None
+            appear = _appearance_from_file(thumbs_dir / f"{sha256}.jpg") if sha256 else None
             refs.append(
                 PhotoRef(
                     library_id=lib["id"],
@@ -141,7 +144,7 @@ def _load_library_photos(lib: dict, active_id: Optional[str]) -> list[PhotoRef]:
                     aesthetic_iqa=aesthetic_iqa,
                     in_active_library=is_active,
                     _siglip=siglip,
-                    _dhash=dhash,
+                    _appear=appear,
                 )
             )
         return refs
@@ -149,31 +152,25 @@ def _load_library_photos(lib: dict, active_id: Optional[str]) -> list[PhotoRef]:
         return []
 
 
-def _dhash_from_file(path) -> Optional[int]:
-    """64-bit difference hash (dHash) of an image — a perceptual fingerprint of
-    actual visual content. Two shots of the same moment hash within a few bits;
-    different subjects (even at the same spot) differ by dozens of bits."""
+def _appearance_from_file(path):
+    """Unit-normalized 32x32 grayscale appearance vector of an image (or None).
+
+    The dot product of two of these is a correlation in [-1, 1] that measures how
+    similar the actual pixel content is — near-identical shots correlate ~0.95+,
+    different scenes (even similar composition) drop well below."""
     try:
         from PIL import Image
 
         with Image.open(path) as im:
-            small = im.convert("L").resize((9, 8), Image.BILINEAR)
-        px = list(small.getdata())  # 8 rows x 9 cols, row-major
-        h = 0
-        bit = 0
-        for row in range(8):
-            base = row * 9
-            for col in range(8):
-                if px[base + col] > px[base + col + 1]:
-                    h |= 1 << bit
-                bit += 1
-        return h
+            small = im.convert("L").resize((_APPEAR_SIZE, _APPEAR_SIZE), Image.BILINEAR)
+        v = np.asarray(small, dtype=np.float32).ravel()
+        v -= v.mean()
+        n = float(np.linalg.norm(v))
+        if n < 1e-6:
+            return None
+        return v / n
     except Exception:
         return None
-
-
-def _hamming(a: int, b: int) -> int:
-    return bin(a ^ b).count("1")
 
 
 def _union_find_groups(n: int, edges: list[tuple[int, int]]) -> list[list[int]]:
@@ -202,12 +199,12 @@ def _union_find_groups(n: int, edges: list[tuple[int, int]]) -> list[list[int]]:
 def _near_dup_groups(refs: list[PhotoRef], threshold: float) -> list[list[int]]:
     """Group *refs* (all from one library) into near-dup clusters.
 
-    SigLIP cosine casts a wide candidate net, then a perceptual dHash confirms
-    the pair is actually visually near-identical — so semantically-similar but
-    visually-different shots (different people at the same viewpoint) are NOT
-    grouped. Returns groups as lists of indices into *refs*.
+    SigLIP cosine casts a semantic candidate net, then 32x32 pixel-appearance
+    CORRELATION confirms the pair is actually visually near-identical — so
+    semantically-similar but visually-different shots (different content at the
+    same viewpoint) are NOT grouped. Returns groups as lists of indices.
     """
-    idxs = [i for i, r in enumerate(refs) if r._siglip is not None and r._dhash is not None]
+    idxs = [i for i, r in enumerate(refs) if r._siglip is not None and r._appear is not None]
     if len(idxs) < 2:
         return []
     mat = np.stack(
@@ -215,16 +212,15 @@ def _near_dup_groups(refs: list[PhotoRef], threshold: float) -> list[list[int]]:
     )
     norms = np.linalg.norm(mat, axis=1, keepdims=True)
     norms[norms == 0] = 1.0
-    mat = mat / norms
-    sims = mat @ mat.T
-    # Wide candidate net, but never looser than the caller's threshold intent.
+    sims = (mat / norms) @ (mat / norms).T                       # SigLIP cosine
+    appear = np.stack([refs[i]._appear for i in idxs])
+    corr = appear @ appear.T                                    # appearance correlation
     cand = min(threshold, NEAR_DUP_CANDIDATE_COSINE)
     n = len(idxs)
     edges: list[tuple[int, int]] = []
     for a in range(n):
-        da = refs[idxs[a]]._dhash
         for b in range(a + 1, n):
-            if sims[a, b] >= cand and _hamming(da, refs[idxs[b]]._dhash) <= NEAR_DUP_HAMMING_MAX:
+            if sims[a, b] >= cand and corr[a, b] >= NEAR_DUP_APPEAR_CORR:
                 edges.append((a, b))
     local_groups = _union_find_groups(n, edges)
     return [[idxs[i] for i in g] for g in local_groups]
