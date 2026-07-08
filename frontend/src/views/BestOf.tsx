@@ -3,6 +3,8 @@ import { useParams, Link } from "react-router-dom";
 import Rail from "../components/Rail";
 import StackPhoto from "../components/StackPhoto";
 import Topbar from "../components/Topbar";
+import Viewer from "../components/Viewer";
+import PhotoEditor from "../editor/PhotoEditor";
 import type { CuratedPhoto } from "../api/types";
 
 type CurateResp = {
@@ -26,8 +28,7 @@ export default function BestOf() {
   const [err, setErr] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null);
-  const [launching, setLaunching] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
+  const [editShas, setEditShas] = useState<string[] | null>(null);
   const [personLabel, setPersonLabel] = useState<string | null>(null);
   const [focusedPhotoId, setFocusedPhotoId] = useState<number | null>(null);
 
@@ -82,27 +83,9 @@ export default function BestOf() {
     setSelected(new Set((data?.photos ?? []).map((p) => p.sha256)));
   const clearSelection = () => setSelected(new Set());
 
-  const openInDarktable = useCallback(async () => {
+  const openInEditor = useCallback(() => {
     if (selected.size === 0) return;
-    setLaunching(true);
-    setToast(null);
-    try {
-      const res = await fetch("/api/edit/darktable", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sha256s: Array.from(selected) }),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({ detail: res.statusText }));
-        throw new Error(j.detail || `darktable launch ${res.status}`);
-      }
-      const j = await res.json();
-      setToast(`darktable opened with ${j.opened} photos.`);
-    } catch (e) {
-      setToast(String(e));
-    } finally {
-      setLaunching(false);
-    }
+    setEditShas(Array.from(selected));
   }, [selected]);
 
   useEffect(() => {
@@ -185,11 +168,11 @@ export default function BestOf() {
           </button>
           <button
             className="btn btn-tonal"
-            onClick={openInDarktable}
-            disabled={selected.size === 0 || launching}
-            title="Launch darktable with the selected originals"
+            onClick={openInEditor}
+            disabled={selected.size === 0}
+            title="Edit the selected photos in the built-in editor"
           >
-            {launching ? "Launching…" : `Edit ${selected.size || ""} in darktable`}
+            {`Edit ${selected.size || ""}`}
           </button>
           <Link to="/cull/stories" className="btn btn-text">
             ← Stories
@@ -209,22 +192,6 @@ export default function BestOf() {
               }}
             >
               {err}
-            </div>
-          )}
-          {toast && (
-            <div
-              style={{
-                padding: "8px 12px",
-                color: "var(--md-on-surface)",
-                background: "var(--md-surface-c)",
-                border: "1px solid var(--md-outline-var)",
-                borderRadius: 8,
-                marginBottom: 12,
-                fontSize: 12,
-                fontFamily: "var(--font-mono)",
-              }}
-            >
-              {toast}
             </div>
           )}
           {loading ? (
@@ -310,25 +277,26 @@ export default function BestOf() {
       </div>
 
       {lightboxIdx !== null && data && data.photos[lightboxIdx] && (
-        <div
-          onClick={() => setLightboxIdx(null)}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.95)",
-            zIndex: 90,
-            display: "grid",
-            placeItems: "center",
-            cursor: "zoom-out",
-          }}
-        >
-          <img
-            src={data.photos[lightboxIdx].preview_url}
-            alt=""
-            style={{ maxWidth: "94vw", maxHeight: "94vh" }}
-          />
-        </div>
+        <Viewer
+          items={data.photos.map((p) => ({ sha256: p.sha256 }))}
+          index={lightboxIdx}
+          onIndex={setLightboxIdx}
+          onClose={() => setLightboxIdx(null)}
+          renderActions={(it) => (
+            <button
+              className="btn btn-filled"
+              onClick={() => {
+                setLightboxIdx(null);
+                setEditShas([it.sha256]);
+              }}
+            >
+              Edit
+            </button>
+          )}
+        />
       )}
+
+      {editShas && <PhotoEditor shas={editShas} onClose={() => setEditShas(null)} />}
     </div>
   );
 }

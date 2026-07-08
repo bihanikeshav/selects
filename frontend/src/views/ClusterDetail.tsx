@@ -5,6 +5,8 @@ import { listClusterPhotos } from "../api/client";
 import type { Photo } from "../api/types";
 import KbdFooter from "../components/KbdFooter";
 import Rail from "../components/Rail";
+import Viewer from "../components/Viewer";
+import PhotoEditor from "../editor/PhotoEditor";
 import StatusRow from "../components/StatusRow";
 import Topbar from "../components/Topbar";
 
@@ -23,9 +25,9 @@ export default function ClusterDetail() {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [editStatus, setEditStatus] = useState<Record<string, EditStatus>>({});
-  const [lightbox, setLightbox] = useState<string | null>(null);
+  const [lightbox, setLightbox] = useState<number | null>(null);
+  const [editShas, setEditShas] = useState<string[] | null>(null);
 
-  const [launching, setLaunching] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -105,27 +107,9 @@ export default function ClusterDetail() {
 
   const editedCount = Object.values(editStatus).filter((s) => s.edited).length;
 
-  async function openInDarktable() {
+  function openInEditor() {
     if (selected.size === 0) return;
-    setLaunching(true);
-    setToast(null);
-    try {
-      const res = await fetch("/api/edit/darktable", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sha256s: Array.from(selected) }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ detail: res.statusText }));
-        throw new Error(err.detail || `darktable launch ${res.status}`);
-      }
-      const j = await res.json();
-      setToast(`darktable opened with ${j.opened} photos. Edit, save (Ctrl+S), close. We'll detect XMPs in real time.`);
-    } catch (e) {
-      setToast(String(e));
-    } finally {
-      setLaunching(false);
-    }
+    setEditShas(Array.from(selected));
   }
 
   async function exportEdited() {
@@ -191,11 +175,11 @@ export default function ClusterDetail() {
 
             <button
               className="btn btn-tonal"
-              onClick={openInDarktable}
-              disabled={selected.size === 0 || launching}
-              title="Launch darktable with the selected originals in a per-session library"
+              onClick={openInEditor}
+              disabled={selected.size === 0}
+              title="Edit the selected photos in the built-in editor"
             >
-              {launching ? "Launching…" : `Edit ${selected.size} in darktable`}
+              {`Edit ${selected.size || ""}`}
             </button>
             <button
               className="btn btn-filled"
@@ -256,7 +240,7 @@ export default function ClusterDetail() {
           )}
 
           <div className="cluster-detail-grid">
-            {visiblePhotos.map((p) => {
+            {visiblePhotos.map((p, i) => {
               const sel = selected.has(p.sha256);
               const isEdited = editStatus[p.sha256]?.edited;
               return (
@@ -291,7 +275,7 @@ export default function ClusterDetail() {
                     </span>
                   )}
                   <button
-                    onClick={() => setLightbox(p.sha256)}
+                    onClick={() => setLightbox(i)}
                     aria-label="enlarge"
                     title="Enlarge"
                     style={{
@@ -321,18 +305,27 @@ export default function ClusterDetail() {
         <KbdFooter />
       </div>
 
-      {lightbox && (
-        <div
-          onClick={() => setLightbox(null)}
-          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.92)", zIndex: 90, display: "grid", placeItems: "center", cursor: "zoom-out" }}
-        >
-          <img
-            src={`/api/preview/${lightbox}`}
-            alt=""
-            style={{ maxWidth: "94vw", maxHeight: "94vh", boxShadow: "0 12px 60px rgba(0,0,0,0.8)" }}
-          />
-        </div>
+      {lightbox !== null && visiblePhotos[lightbox] && (
+        <Viewer
+          items={visiblePhotos.map((p) => ({ sha256: p.sha256 }))}
+          index={lightbox}
+          onIndex={setLightbox}
+          onClose={() => setLightbox(null)}
+          renderActions={(it) => (
+            <button
+              className="btn btn-filled"
+              onClick={() => {
+                setLightbox(null);
+                setEditShas([it.sha256]);
+              }}
+            >
+              Edit
+            </button>
+          )}
+        />
       )}
+
+      {editShas && <PhotoEditor shas={editShas} onClose={() => setEditShas(null)} />}
     </div>
   );
 }

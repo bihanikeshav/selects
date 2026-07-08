@@ -3,7 +3,6 @@ import { useCallback, useEffect, useState } from "react";
 import { listCurated, recordSwipe } from "../api/client";
 import type { CuratedPhoto } from "../api/types";
 import ExportPanel from "../components/ExportPanel";
-import ModeViewBar from "../components/ModeViewBar";
 import PageHeader from "../components/PageHeader";
 import Rail from "../components/Rail";
 import TasteCard from "../components/TasteCard";
@@ -19,8 +18,7 @@ export default function Curated() {
   const [sortMode, setSortMode] = useState<SortMode>("aesthetic");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null);
-  const [editSha, setEditSha] = useState<string | null>(null);
-  const [launching, setLaunching] = useState(false);
+  const [editShas, setEditShas] = useState<string[] | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [focusedIdx, setFocusedIdx] = useState<number | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
@@ -65,27 +63,9 @@ export default function Curated() {
     });
   };
 
-  const openInDarktable = useCallback(async () => {
+  const openInEditor = useCallback(() => {
     if (selected.size === 0) return;
-    setLaunching(true);
-    setToast(null);
-    try {
-      const res = await fetch("/api/edit/darktable", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sha256s: Array.from(selected) }),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({ detail: res.statusText }));
-        throw new Error(j.detail || `darktable launch ${res.status}`);
-      }
-      const j = await res.json();
-      setToast(`darktable opened with ${j.opened} photos`);
-    } catch (e) {
-      setToast(String(e));
-    } finally {
-      setLaunching(false);
-    }
+    setEditShas(Array.from(selected));
   }, [selected]);
 
   // Keyboard
@@ -136,7 +116,6 @@ export default function Curated() {
               ? "Loading…"
               : `${photos.length} liked photos · ready to edit & post · press F on a thumb to remove`
           }
-          above={<ModeViewBar />}
           actions={
             <>
               <div style={{ display: "flex", gap: 4 }}>
@@ -171,12 +150,11 @@ export default function Curated() {
               </button>
               <button
                 className="btn btn-filled"
-                onClick={openInDarktable}
-                disabled={selected.size === 0 || launching}
+                onClick={openInEditor}
+                disabled={selected.size === 0}
+                title="Edit the selected photos in the built-in editor"
               >
-                {launching
-                  ? "Launching…"
-                  : `Edit ${selected.size || ""} in darktable`}
+                {`Edit ${selected.size || ""}`}
               </button>
               <button
                 className="btn btn-tonal"
@@ -363,7 +341,7 @@ export default function Curated() {
               className="btn btn-filled"
               onClick={() => {
                 setLightboxIdx(null);
-                setEditSha(it.sha256);
+                setEditShas([it.sha256]);
               }}
             >
               Edit
@@ -372,7 +350,7 @@ export default function Curated() {
         />
       )}
 
-      {editSha && <PhotoEditor sha={editSha} onClose={() => setEditSha(null)} />}
+      {editShas && <PhotoEditor shas={editShas} onClose={() => setEditShas(null)} />}
     </div>
   );
 }

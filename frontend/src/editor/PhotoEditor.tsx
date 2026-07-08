@@ -5,20 +5,29 @@ import { EditorEngine } from "./engine";
 import "./editor.css";
 
 interface Props {
-  sha: string;
+  /** One or more photos to edit; a filmstrip switches between them. */
+  shas: string[];
   onClose: () => void;
 }
 
-/** Full-screen non-destructive editor: edits the 1024px preview live in WebGL,
- *  bakes the result on Save. Adjustments come from the ADJUSTMENTS registry, so
- *  the slider list here needs no changes to gain a new tool. */
-export default function PhotoEditor({ sha, onClose }: Props) {
+/** Full-screen non-destructive editor. Edits the 1024px preview live in WebGL and
+ *  bakes on Save. Adjustments come from the ADJUSTMENTS registry (add a tool =
+ *  one registry entry). Multi-image: edits are kept per-photo in memory; a
+ *  filmstrip switches between them and Save bakes the current one. */
+export default function PhotoEditor({ shas, onClose }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const engineRef = useRef<EditorEngine | null>(null);
   const rafRef = useRef<number | null>(null);
-  const [params, setParams] = useState<EditParams>(defaultParams);
+
+  const [cur, setCur] = useState(0);
+  const sha = shas[cur];
+  // Per-photo params kept in memory so switching doesn't lose in-progress edits.
+  const [allParams, setAllParams] = useState<Record<string, EditParams>>({});
+  const params = allParams[sha] ?? defaultParams();
+
   const [ready, setReady] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState<Set<string>>(new Set());
   const [compare, setCompare] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -28,20 +37,28 @@ export default function PhotoEditor({ sha, onClose }: Props) {
     return g;
   }, []);
 
-  // Init engine + load the preview image and any saved params.
+  // Init the WebGL engine once.
   useEffect(() => {
-    let cancelled = false;
     const canvas = canvasRef.current;
     if (!canvas) return;
-    let engine: EditorEngine;
     try {
-      engine = new EditorEngine(canvas);
+      engineRef.current = new EditorEngine(canvas);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
-      return;
     }
-    engineRef.current = engine;
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      engineRef.current?.dispose();
+      engineRef.current = null;
+    };
+  }, []);
 
+  // Load the current photo's preview + saved params whenever the selection changes.
+  useEffect(() => {
+    const engine = engineRef.current;
+    if (!engine || !sha) return;
+    let cancelled = false;
+    setReady(false);
     const img = new Image();
     img.crossOrigin = "anonymous";
     img.onload = () => {
@@ -52,20 +69,19 @@ export default function PhotoEditor({ sha, onClose }: Props) {
     img.onerror = () => !cancelled && setErr("could not load the photo preview");
     img.src = `/api/preview/${sha}`;
 
-    fetch(`/api/editor/params/${sha}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => { if (!cancelled && d && d.params) setParams({ ...defaultParams(), ...d.params }); })
-      .catch(() => {});
+    if (!(sha in allParams)) {
+      fetch(`/api/editor/params/${sha}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          if (!cancelled && d && d.params)
+            setAllParams((p) => ({ ...p, [sha]: { ...defaultParams(), ...d.params } }));
+        })
+        .catch(() => {});
+    }
+    return () => { cancelled = true; };
+  }, [sha]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    return () => {
-      cancelled = true;
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      engine.dispose();
-      engineRef.current = null;
-    };
-  }, [sha]);
-
-  // Render whenever params (or compare) change — throttled to a frame.
+  // Live render on param / compare / photo change.
   useEffect(() => {
     if (!ready) return;
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
@@ -75,7 +91,10 @@ export default function PhotoEditor({ sha, onClose }: Props) {
   }, [params, compare, ready]);
 
   function set(key: string, value: number) {
-    setParams((p) => ({ ...p, [key]: value }));
+    setAllParams((p) => ({ ...p, [sha]: { ...(p[sha] ?? defaultParams()), [key]: value } }));
+  }
+  function reset() {
+    setAllParams((p) => ({ ...p, [sha]: defaultParams() }));
   }
 
   async function onSave() {
@@ -91,9 +110,13 @@ export default function PhotoEditor({ sha, onClose }: Props) {
       fd.append("image", blob, `${sha}.jpg`);
       const res = await fetch(`/api/editor/save/${sha}`, { method: "POST", body: fd });
       if (!res.ok) throw new Error(`save failed: HTTP ${res.status}`);
-      onClose();
+      setSaved((s) => new Set(s).add(sha));
+      // Advance to the next unsaved photo if there is one.
+      const next = shas.findIndex((s2, i) => i > cur && !saved.has(s2) && s2 !== sha);
+      if (next >= 0) setCur(next);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
+    } finally {
       setSaving(false);
     }
   }
@@ -101,8 +124,8 @@ export default function PhotoEditor({ sha, onClose }: Props) {
   return (
     <div className="editor-overlay" role="dialog" aria-modal="true">
       <div className="editor-topbar">
-        <button className="btn btn-text" onClick={onClose} disabled={saving}>Cancel</button>
-        <span className="editor-title">Edit</span>
+        <button className="btn btn-text" onClick={onClose} disabled={saving}>Close</button>
+        <span className="editor-title">Edit{shas.length > 1 ? ` · ${cur + 1}/${shas.length}` : ""}</span>
         <div className="editor-top-actions">
           <button
             className="btn btn-text"
@@ -113,11 +136,9 @@ export default function PhotoEditor({ sha, onClose }: Props) {
           >
             Compare
           </button>
-          <button className="btn btn-text" onClick={() => setParams(defaultParams())} disabled={isDefault(params)}>
-            Reset
-          </button>
+          <button className="btn btn-text" onClick={reset} disabled={isDefault(params)}>Reset</button>
           <button className="btn btn-filled" onClick={onSave} disabled={saving || !ready}>
-            {saving ? "Saving…" : "Save"}
+            {saving ? "Saving…" : saved.has(sha) ? "Save again" : "Save"}
           </button>
         </div>
       </div>
@@ -155,6 +176,22 @@ export default function PhotoEditor({ sha, onClose }: Props) {
           ))}
         </div>
       </div>
+
+      {shas.length > 1 && (
+        <div className="editor-filmstrip">
+          {shas.map((s, i) => (
+            <button
+              key={s}
+              className={"editor-film-thumb" + (i === cur ? " is-current" : "")}
+              onClick={() => setCur(i)}
+              title={saved.has(s) ? "Saved" : "Edit this one"}
+            >
+              <img src={`/api/thumb/${s}`} alt="" loading="lazy" />
+              {saved.has(s) && <span className="editor-film-saved">✓</span>}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

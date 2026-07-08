@@ -74,9 +74,10 @@ export default function App() {
 
         {/* Curated mode — three sub-views */}
         <Route path="/curated" element={<Curated />} />
-        <Route path="/curated/clusters" element={<Clusters />} />
-        <Route path="/curated/clusters/:tag" element={<ClusterDetail />} />
-        <Route path="/curated/stories" element={<Stories />} />
+        {/* Curated is standalone now — its old sub-views live only under Sort. */}
+        <Route path="/curated/clusters" element={<Navigate to="/cull/clusters" replace />} />
+        <Route path="/curated/clusters/:tag" element={<Navigate to="/cull/clusters" replace />} />
+        <Route path="/curated/stories" element={<Navigate to="/cull/stories" replace />} />
 
         {/* Cross-cutting (independent of mode) */}
         <Route path="/people" element={<Persons />} />
