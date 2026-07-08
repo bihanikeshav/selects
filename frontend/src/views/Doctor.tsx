@@ -5,7 +5,7 @@ import Rail from "../components/Rail";
 import "../components/Doctor.css";
 
 type Bucket = "underexposed" | "overexposed" | "out_of_focus" | "blurry_keepers";
-type Model = "clahe" | "zero-dce-plus" | "csrnet" | "nafnet";
+type Model = "clahe" | "nafnet";
 
 interface Issue {
   photo_id: number;
@@ -34,8 +34,8 @@ const BUCKET_META: Record<
 > = {
   underexposed: {
     label: "Underexposed",
-    hint: "Too dark — Brighten (low-light) can lift shadows naturally",
-    suggestedModel: "zero-dce-plus",
+    hint: "Too dark — Auto fix lifts shadows and rebalances exposure",
+    suggestedModel: "clahe",
     accent: "var(--g-blue)",
   },
   overexposed: {
@@ -61,13 +61,11 @@ const BUCKET_META: Record<
 /** Human-friendly labels for the fix models. The backend `model=` values
  * (clahe / zero-dce-plus / csrnet / nafnet) never change — this is presentation only. */
 const MODEL_META: Record<Model, { label: string; sub: string }> = {
-  clahe: { label: "Auto fix (contrast & colour)", sub: "CLAHE · classical, fast" },
-  "zero-dce-plus": { label: "Brighten (low-light)", sub: "Zero-DCE++ · ICCV'19" },
-  csrnet: { label: "Pro retouch", sub: "CSRNet · experimental" },
+  clahe: { label: "Auto edit", sub: "Auto tone · WB, exposure, contrast, vibrance" },
   nafnet: { label: "Sharpen / deblur", sub: "NAFNet · GoPro-trained" },
 };
 
-const MODEL_ORDER: Model[] = ["clahe", "zero-dce-plus", "csrnet", "nafnet"];
+const MODEL_ORDER: Model[] = ["clahe", "nafnet"];
 
 export default function Doctor() {
   const [data, setData] = useState<DoctorResp | null>(null);
