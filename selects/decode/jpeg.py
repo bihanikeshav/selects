@@ -22,8 +22,12 @@ def _try_nvimg():
 
 
 def decode_jpeg(path: Path) -> np.ndarray:
-    """Decode JPEG to HWC uint8 RGB ndarray. Prefers GPU via nvImageCodec, falls back to PIL."""
-    dec = _try_nvimg()
+    """Decode a standard image (JPEG/PNG/WebP/TIFF/BMP/GIF) to HWC uint8 RGB.
+
+    Real JPEGs go through GPU nvImageCodec when available; other formats (and any
+    failure) fall back to PIL, which opens them all.
+    """
+    dec = _try_nvimg() if path.suffix.lower() in (".jpg", ".jpeg") else False
     if dec:
         try:
             with path.open("rb") as f:

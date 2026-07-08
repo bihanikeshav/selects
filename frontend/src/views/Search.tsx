@@ -12,17 +12,6 @@ import KbdFooter from "../components/KbdFooter";
 import PageHeader from "../components/PageHeader";
 import Rail from "../components/Rail";
 
-const SUGGESTIONS = [
-  "monastery interior",
-  "yak in the mountains",
-  "golden hour landscape",
-  "food on a plate",
-  "prayer flags",
-  "snow on rocks",
-  "river reflection",
-  "person smiling",
-];
-
 const DEBOUNCE_MS = 350;
 
 export default function Search() {
@@ -167,7 +156,7 @@ export default function Search() {
                 type="search"
                 value={q}
                 onChange={e => setQ(e.target.value)}
-                placeholder="Search photos, try 'monastery interior' or 'yaks in pasture'"
+                placeholder="Search your photos in plain words — a place, a scene, a moment"
                 autoFocus
                 className="search-query-input"
               />
@@ -187,9 +176,9 @@ export default function Search() {
             <div className="search-header-controls">
               <div className="search-chip-row">
                 {selectedTags.length === 0 && !q.trim()
-                  ? SUGGESTIONS.map(s => (
-                      <button key={s} className="filter-chip" onClick={() => setQ(s)}>
-                        {s}
+                  ? tags.slice(0, 8).map(t => (
+                      <button key={t.tag} className="filter-chip" onClick={() => toggleTag(t.tag)}>
+                        {t.tag}
                       </button>
                     ))
                   : selectedTags.map(t => (

@@ -131,6 +131,9 @@ def serve(folder: Path | None, port: int, host: str, no_browser: bool, no_backgr
 
     import uvicorn
 
+    from selects.logging_setup import setup_logging
+    setup_logging()
+
     from selects.server.app import build_app
     from selects.server.library_manager import LibraryManager
 

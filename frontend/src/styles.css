@@ -264,7 +264,10 @@ button.rail-item {
   border: none;
   background: none;
   padding: 0;
-  font: inherit;
+  /* Only inherit the family — NOT `font: inherit`, which would also reset
+     font-size to the parent's larger value and make the Theme label bigger than
+     the NavLink labels. Size/weight come from `.rail-item` (11px / 500). */
+  font-family: inherit;
   cursor: pointer;
 }
 

@@ -17,7 +17,11 @@ class FileKind(str, Enum):
 
 
 # Extension sets (all lowercase for case-insensitive comparison)
-_JPEG_EXTS: frozenset[str] = frozenset({".jpg", ".jpeg"})
+# JPEG kind = "decode with PIL/nvImageCodec". PNG/WebP/TIFF/BMP/GIF are all
+# standard PIL-openable formats, so they share the JPEG decode path.
+_JPEG_EXTS: frozenset[str] = frozenset({
+    ".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff", ".bmp", ".gif",
+})
 _HEIC_EXTS: frozenset[str] = frozenset({".heic", ".heif"})
 _RAW_EXTS: frozenset[str] = frozenset({
     ".dng", ".cr2", ".cr3", ".nef", ".arw", ".raf", ".orf", ".rw2", ".pef"
