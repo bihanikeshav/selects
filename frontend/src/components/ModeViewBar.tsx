@@ -41,42 +41,15 @@ const VIEWS: { key: View; label: string; hint: string }[] = [
   { key: "stories", label: "Stories", hint: "By day / people / place" },
 ];
 
-const MODES: { key: Mode; label: string; tone: string; hint: string }[] = [
-  { key: "cull", label: "Sort", tone: "var(--md-primary)", hint: "Decide what's worth keeping" },
-  { key: "curated", label: "Curated", tone: "var(--g-red)", hint: "Your liked set — edit & post" },
-];
-
 export default function ModeViewBar() {
   const nav = useNavigate();
   const { pathname } = useLocation();
-  const mode = modeFromPath(pathname);
   const view = viewFromPath(pathname);
 
+  // Sort-only view switcher now — All / Clusters / Stories. The Sort↔Curated
+  // toggle was removed: Curated is a standalone page reached from the rail.
   return (
-    <nav className="mode-view-bar" aria-label="Mode and view">
-      <div className="mvb-group" role="tablist" aria-label="Mode">
-        {MODES.map((m) => (
-          <button
-            key={m.key}
-            role="tab"
-            aria-selected={mode === m.key}
-            className={`mvb-mode${mode === m.key ? " is-active" : ""}`}
-            style={{ ["--tone" as string]: m.tone }}
-            onClick={() => nav(routeFor(m.key, view))}
-            title={m.hint}
-          >
-            {m.key === "curated" && (
-              <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" aria-hidden="true">
-                <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
-              </svg>
-            )}
-            {m.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="mvb-sep" aria-hidden="true" />
-
+    <nav className="mode-view-bar" aria-label="View">
       <div className="mvb-group" role="tablist" aria-label="View">
         {VIEWS.map((v) => (
           <button
@@ -84,7 +57,7 @@ export default function ModeViewBar() {
             role="tab"
             aria-selected={view === v.key}
             className={`mvb-view${view === v.key ? " is-active" : ""}`}
-            onClick={() => nav(routeFor(mode, v.key))}
+            onClick={() => nav(routeFor("cull", v.key))}
             title={v.hint}
           >
             {v.label}
