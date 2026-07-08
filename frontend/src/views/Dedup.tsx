@@ -4,6 +4,7 @@ import { dedupReport, dedupRescan } from "../api/dedup";
 import type { DedupGroup, DedupPhotoRef, DedupReportResult } from "../api/dedup";
 import PageHeader from "../components/PageHeader";
 import Rail from "../components/Rail";
+import Viewer from "../components/Viewer";
 import "../components/Dedup.css";
 
 function fmtBytes(n: number): string {
@@ -69,15 +70,16 @@ function GroupThumb({
 
 function GroupRow({
   group,
-  keeperIndex,
-  onSetKeeper,
+  kept,
+  onToggleKeep,
   onZoom,
 }: {
   group: DedupGroup;
-  keeperIndex: number;
-  onSetKeeper: (i: number) => void;
-  onZoom: (m: DedupPhotoRef) => void;
+  kept: Set<number>;
+  onToggleKeep: (i: number) => void;
+  onZoom: (i: number) => void;
 }) {
+  const keepCount = kept.size;
   return (
     <div className="dedup-group">
       <div className="dedup-group-header">
@@ -85,16 +87,18 @@ function GroupRow({
           {group.kind === "exact" ? "Exact" : "Near"}
         </span>
         <span className="dedup-group-count">{group.members.length} copies</span>
-        <span className="dedup-group-reclaim">reclaim {fmtBytes(group.reclaimable_bytes)}</span>
+        <span className="dedup-group-reclaim">
+          keeping {keepCount} · reclaim {fmtBytes(group.reclaimable_bytes)}
+        </span>
       </div>
       <div className="dedup-group-thumbs">
         {group.members.map((m, i) => (
           <GroupThumb
             key={`${m.library_id}:${m.path}`}
             member={m}
-            isKeeper={i === keeperIndex}
-            onKeep={() => onSetKeeper(i)}
-            onZoom={() => onZoom(m)}
+            isKeeper={kept.has(i)}
+            onKeep={() => onToggleKeep(i)}
+            onZoom={() => onZoom(i)}
           />
         ))}
       </div>
@@ -109,14 +113,23 @@ export default function Dedup() {
   const [result, setResult] = useState<DedupReportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
-  const [keeperOverride, setKeeperOverride] = useState<Record<string, number>>({});
-  const [zoom, setZoom] = useState<string | null>(null);
+  // Per-group set of member indices to KEEP (multi-select). Defaults lazily to
+  // the auto-picked keeper; the user can keep several.
+  const [kept, setKept] = useState<Record<string, Set<number>>>({});
+  const [viewer, setViewer] = useState<{ key: string; index: number } | null>(null);
   const pollRef = useRef<number | null>(null);
 
-  function zoomSrc(m: DedupPhotoRef): string | null {
-    // Preview res only resolves for the active library; else fall back to thumb.
-    if (m.thumb_url && m.sha256) return `/api/preview/${m.sha256}`;
-    return m.thumb_url;
+  function keptFor(g: DedupGroup): Set<number> {
+    return kept[g.key] ?? new Set([g.keeper_index]);
+  }
+  function toggleKeep(g: DedupGroup, i: number) {
+    setKept((prev) => {
+      const cur = new Set(prev[g.key] ?? new Set([g.keeper_index]));
+      if (cur.has(i)) {
+        if (cur.size > 1) cur.delete(i); // always keep at least one
+      } else cur.add(i);
+      return { ...prev, [g.key]: cur };
+    });
   }
 
   const poll = useCallback(async () => {
@@ -254,34 +267,39 @@ export default function Dedup() {
               <GroupRow
                 key={g.key}
                 group={g}
-                keeperIndex={keeperOverride[g.key] ?? g.keeper_index}
-                onSetKeeper={(i) => setKeeperOverride((prev) => ({ ...prev, [g.key]: i }))}
-                onZoom={(m) => {
-                  const src = zoomSrc(m);
-                  if (src) setZoom(src);
-                }}
+                kept={keptFor(g)}
+                onToggleKeep={(i) => toggleKeep(g, i)}
+                onZoom={(i) => setViewer({ key: g.key, index: i })}
               />
             ))}
           </div>
         </div>
       </div>
 
-      {zoom && (
-        <div
-          onClick={() => setZoom(null)}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.94)",
-            zIndex: 90,
-            display: "grid",
-            placeItems: "center",
-            cursor: "zoom-out",
-          }}
-        >
-          <img src={zoom} alt="" style={{ maxWidth: "94vw", maxHeight: "94vh" }} />
-        </div>
-      )}
+      {viewer && (() => {
+        const g = groups.find((x) => x.key === viewer.key);
+        if (!g) return null;
+        const kset = keptFor(g);
+        const items = g.members.map((m) => ({
+          sha256: m.sha256 ?? "",
+          caption: `${m.library_name} · ${fmtBytes(m.size_bytes ?? 0)}`,
+        }));
+        return (
+          <Viewer
+            items={items}
+            index={viewer.index}
+            onIndex={(i) => setViewer({ key: g.key, index: i })}
+            onClose={() => setViewer(null)}
+            isMarked={(i) => kset.has(i)}
+            markLabel="KEEP"
+            renderActions={(_it, i) => (
+              <button className="btn btn-filled" onClick={() => toggleKeep(g, i)}>
+                {kset.has(i) ? "Keeping ✓" : "Keep this"}
+              </button>
+            )}
+          />
+        );
+      })()}
     </div>
   );
 }

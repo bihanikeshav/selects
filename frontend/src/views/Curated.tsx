@@ -7,6 +7,7 @@ import ModeViewBar from "../components/ModeViewBar";
 import PageHeader from "../components/PageHeader";
 import Rail from "../components/Rail";
 import TasteCard from "../components/TasteCard";
+import Viewer from "../components/Viewer";
 import PhotoEditor from "../editor/PhotoEditor";
 
 type SortMode = "aesthetic" | "taken_at";
@@ -352,36 +353,23 @@ export default function Curated() {
       )}
 
       {lightboxIdx !== null && photos[lightboxIdx] && (
-        <div
-          onClick={() => setLightboxIdx(null)}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.94)",
-            zIndex: 90,
-            display: "grid",
-            placeItems: "center",
-            cursor: "zoom-out",
-          }}
-        >
-          <img
-            src={photos[lightboxIdx].preview_url}
-            alt=""
-            style={{ maxWidth: "94vw", maxHeight: "94vh" }}
-          />
-          <button
-            className="btn btn-filled"
-            style={{ position: "absolute", top: 20, right: 20, cursor: "pointer" }}
-            onClick={(e) => {
-              e.stopPropagation();
-              const p = photos[lightboxIdx];
-              setLightboxIdx(null);
-              if (p) setEditSha(p.sha256);
-            }}
-          >
-            Edit
-          </button>
-        </div>
+        <Viewer
+          items={photos.map((p) => ({ sha256: p.sha256 }))}
+          index={lightboxIdx}
+          onIndex={setLightboxIdx}
+          onClose={() => setLightboxIdx(null)}
+          renderActions={(it) => (
+            <button
+              className="btn btn-filled"
+              onClick={() => {
+                setLightboxIdx(null);
+                setEditSha(it.sha256);
+              }}
+            >
+              Edit
+            </button>
+          )}
+        />
       )}
 
       {editSha && <PhotoEditor sha={editSha} onClose={() => setEditSha(null)} />}

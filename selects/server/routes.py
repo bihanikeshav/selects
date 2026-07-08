@@ -1060,14 +1060,19 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
         Buckets:
           - underexposed: ClassicalScore.exposure < 0.35 and mean luma low
           - overexposed:  high clipping ratio at the top end
-          - blurry:       ClassicalScore.blur below a threshold
+          - out_of_focus: ClassicalScore.blur (Laplacian variance) below a threshold —
+                          genuinely soft/out-of-focus frames, best fixed with Deblur (nafnet)
           - blurry_keeper: blur low but combined aesthetic high (rescuable)
 
         Each photo can appear in multiple buckets.
         """
         AP_W = cfg.ap_weight
         NIMA_W = cfg.nima_weight
-        BLUR_HARD = 150.0      # below this is genuinely blurry
+        # ClassicalScore.blur is a Laplacian-variance sharpness metric; lower means
+        # softer. 150 sits well below the typical in-focus range (400+) seen across
+        # the library's distribution and reliably isolates genuinely out-of-focus
+        # frames without flagging merely-soft-but-sharp-enough shots.
+        BLUR_HARD = 150.0      # below this is genuinely out of focus
         BLUR_SOFT = 400.0      # below this is "a bit soft" — interesting if aesthetic
         UNDER_MEAN = 0.32      # mean luma below this → underexposed
         OVER_MEAN = 0.78       # mean luma above this → overexposed
@@ -1095,7 +1100,7 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
 
         underexposed: list[dict] = []
         overexposed: list[dict] = []
-        blurry: list[dict] = []
+        out_of_focus: list[dict] = []
         blurry_keepers: list[dict] = []
 
         from selects.ml.lowlight import luma_stats as _luma_stats
@@ -1155,7 +1160,7 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
                     overexposed.append(base)
 
             if blur_v < BLUR_HARD:
-                blurry.append(base)
+                out_of_focus.append(base)
             elif blur_v < BLUR_SOFT and combined is not None and combined >= AESTHETIC_HIGH:
                 blurry_keepers.append(base)
 
@@ -1180,18 +1185,18 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
         # Sort each bucket: most-severe first
         underexposed.sort(key=lambda p: p.get("luma_mean", 1.0))
         overexposed.sort(key=lambda p: -p.get("clipped_high", 0.0))
-        blurry.sort(key=lambda p: p["blur"])
+        out_of_focus.sort(key=lambda p: p["blur"])
         blurry_keepers.sort(key=lambda p: -(p["combined"] or 0))
 
         return {
             "underexposed": underexposed,
             "overexposed": overexposed,
-            "blurry": blurry,
+            "out_of_focus": out_of_focus,
             "blurry_keepers": blurry_keepers,
             "counts": {
                 "underexposed": len(underexposed),
                 "overexposed": len(overexposed),
-                "blurry": len(blurry),
+                "out_of_focus": len(out_of_focus),
                 "blurry_keepers": len(blurry_keepers),
             },
         }

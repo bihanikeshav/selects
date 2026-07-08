@@ -1960,7 +1960,7 @@ button.rail-item {
 .onb-close {
   position: absolute;
   top: 18px;
-  right: 20px;
+  left: 20px;
   width: 34px;
   height: 34px;
   display: grid;
@@ -1969,7 +1969,9 @@ button.rail-item {
   border-radius: 999px;
   background: var(--md-surface-c);
   color: var(--md-on-surface-var);
-  font-size: 15px;
+  font-size: 22px;
+  line-height: 1;
+  padding-bottom: 2px;
   cursor: pointer;
   z-index: 5;
 }

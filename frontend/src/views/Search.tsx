@@ -11,6 +11,7 @@ import {
 import KbdFooter from "../components/KbdFooter";
 import PageHeader from "../components/PageHeader";
 import Rail from "../components/Rail";
+import Viewer from "../components/Viewer";
 
 const DEBOUNCE_MS = 350;
 
@@ -31,7 +32,7 @@ export default function Search() {
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [lightbox, setLightbox] = useState<string | null>(null);
+  const [lightbox, setLightbox] = useState<number | null>(null);
 
   const reqId = useRef(0);
 
@@ -302,7 +303,7 @@ export default function Search() {
               <button
                 key={h.sha256}
                 className="cluster-photo"
-                onClick={() => setLightbox(h.sha256)}
+                onClick={() => setLightbox(i)}
                 style={{ cursor: "zoom-in" }}
                 title={`rank ${i + 1} - score ${h.score.toFixed(3)}${h.tag_hits ? ` - ${h.tag_hits} tag hit${h.tag_hits === 1 ? "" : "s"}` : ""}`}
               >
@@ -336,25 +337,13 @@ export default function Search() {
         <KbdFooter />
       </div>
 
-      {lightbox && (
-        <div
-          onClick={() => setLightbox(null)}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.92)",
-            zIndex: 90,
-            display: "grid",
-            placeItems: "center",
-            cursor: "zoom-out",
-          }}
-        >
-          <img
-            src={`/api/preview/${lightbox}`}
-            alt=""
-            style={{ maxWidth: "94vw", maxHeight: "94vh", boxShadow: "0 12px 60px rgba(0,0,0,0.8)" }}
-          />
-        </div>
+      {lightbox !== null && hits[lightbox] && (
+        <Viewer
+          items={hits.map((h) => ({ sha256: h.sha256 }))}
+          index={lightbox}
+          onIndex={setLightbox}
+          onClose={() => setLightbox(null)}
+        />
       )}
     </div>
   );

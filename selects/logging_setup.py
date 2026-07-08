@@ -48,6 +48,13 @@ def setup_logging(level: int = logging.INFO) -> Path:
     # every HuggingFace HEAD/GET. Quiet them so the log (and console) stays useful.
     for noisy in ("httpx", "httpcore", "huggingface_hub", "urllib3", "filelock"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
+
+    # Silence noisy third-party deprecation warnings that we can't act on
+    # (e.g. insightface's face_align calling scikit-image's deprecated estimate()).
+    import warnings
+
+    warnings.filterwarnings("ignore", category=FutureWarning, module=r"insightface\..*")
+    warnings.filterwarnings("ignore", message=r".*estimate.*is deprecated.*")
     # Keep console output too when a console exists (dev / CLI).
     if sys.stderr is not None:
         sh = logging.StreamHandler(sys.stderr)
