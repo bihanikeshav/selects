@@ -42,7 +42,7 @@ const VIEWS: { key: View; label: string; hint: string }[] = [
 ];
 
 const MODES: { key: Mode; label: string; tone: string; hint: string }[] = [
-  { key: "cull", label: "Cull", tone: "var(--md-primary)", hint: "Decide what's worth keeping" },
+  { key: "cull", label: "Sort", tone: "var(--md-primary)", hint: "Decide what's worth keeping" },
   { key: "curated", label: "Curated", tone: "var(--g-red)", hint: "Your liked set — edit & post" },
 ];
 

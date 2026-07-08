@@ -57,7 +57,7 @@ export default function Rail() {
       <NavLink
         to="/cull"
         className={"rail-item" + (cullActive ? " is-active" : "")}
-        title="Cull — decide what's worth keeping"
+        title="Sort — decide what's worth keeping"
       >
         <span className="icon" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -67,7 +67,7 @@ export default function Rail() {
             <rect x="14" y="14" width="7" height="7" rx="1.5" />
           </svg>
         </span>
-        Cull
+        Sort
       </NavLink>
 
       <NavLink
