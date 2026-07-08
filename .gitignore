@@ -65,3 +65,8 @@ desktop.ini
 /score_comparison.html
 /test_enhanced.jpg
 /*.jpg
+
+# Nuitka
+nuitka-crash-report.xml
+dist/nuitka/
+*.build/
