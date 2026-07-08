@@ -59,6 +59,11 @@ export default function BurstCull() {
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [swipeSummary, setSwipeSummary] = useState<SwipeSummary | null>(null);
   const [sortMode, setSortMode] = useState<SortMode>("aesthetic");
+  // Quick-sort quality filter (the retired Doctor's buckets): restrict the cull
+  // queue to just photos with a given issue so they can be reviewed/rejected fast.
+  const [quality, setQuality] = useState<
+    null | "underexposed" | "overexposed" | "out_of_focus" | "blurry_keepers"
+  >(null);
 
   // Moment state: when a photo has a moment, we may expand it
   const [expandedMoment, setExpandedMoment] = useState<Moment | null>(null);
@@ -82,7 +87,14 @@ export default function BurstCull() {
   useEffect(() => {
     let cancelled = false;
     setLoadState("loading");
-    listPhotos({ limit: 200, collapse: "moments", sort: sortMode })
+    // When filtering to a quality bucket, don't collapse moments — we want every
+    // matching photo, not just burst primaries.
+    listPhotos({
+      limit: 200,
+      collapse: quality ? "none" : "moments",
+      sort: sortMode,
+      quality: quality ?? undefined,
+    })
       .then((data) => {
         if (cancelled) return;
         if (data.items.length === 0) {
@@ -98,7 +110,7 @@ export default function BurstCull() {
         if (!cancelled) setLoadState("error");
       });
     return () => { cancelled = true; };
-  }, [sortMode]);
+  }, [sortMode, quality]);
 
   // Reset moment expansion, per-photo edit toggles and the compare
   // selection when navigating to a different photo/group.
@@ -464,7 +476,29 @@ export default function BurstCull() {
                 : `${total} photos indexed`
               : "Decide what's worth keeping — C keep, X reject"
           }
-          above={<ModeViewBar />}
+          above={
+            <>
+              <ModeViewBar />
+              <div className="sort-quality-chips">
+                {([
+                  [null, "All"],
+                  ["underexposed", "Underexposed"],
+                  ["overexposed", "Overexposed"],
+                  ["out_of_focus", "Out of focus"],
+                  ["blurry_keepers", "Blurry"],
+                ] as const).map(([key, label]) => (
+                  <button
+                    key={label}
+                    className={"dedup-filter-btn" + (quality === key ? " is-active" : "")}
+                    onClick={() => setQuality(key)}
+                    title={key ? `Cull only ${label.toLowerCase()} photos` : "All photos"}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </>
+          }
           actions={
             <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
               <span style={{ fontSize: 11, color: "var(--md-on-surface-var)", marginRight: 6 }}>

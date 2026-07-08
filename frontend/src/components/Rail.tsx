@@ -1,7 +1,6 @@
 import { useEffect } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 
-import { modeFromPath } from "./ModeViewBar";
 
 /** Retint the native desktop title bar to match the theme. No-op in a browser
  *  (window.pywebview only exists inside the pywebview desktop shell). */
@@ -46,10 +45,11 @@ export default function Rail() {
   }, []);
 
   const { pathname } = useLocation();
-  const mode = modeFromPath(pathname);
 
-  const cullActive = mode === "cull";
-  const curatedActive = mode === "curated";
+  // Sort/Curated highlight only on THEIR routes — not "everything that isn't
+  // curated" (which lit Sort up on People/Search/Map/etc.).
+  const cullActive = pathname === "/cull" || pathname.startsWith("/cull/");
+  const curatedActive = pathname === "/curated" || pathname.startsWith("/curated/");
 
   return (
     <nav className="rail" aria-label="Primary">
@@ -156,20 +156,6 @@ export default function Rail() {
           </svg>
         </span>
         Dupes
-      </NavLink>
-
-      <NavLink
-        to="/doctor"
-        className={({ isActive }) => "rail-item" + (isActive ? " is-active" : "")}
-        title="Image Doctor — detect & fix problem photos"
-      >
-        <span className="icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M9 3v18M15 3v18M3 9h18M3 15h18" />
-            <circle cx="12" cy="12" r="3" fill="currentColor" opacity="0.4" />
-          </svg>
-        </span>
-        Doctor
       </NavLink>
 
       <div className="rail-spacer"></div>

@@ -3295,3 +3295,11 @@ button.rail-item {
   box-shadow: var(--md-elev-3);
   padding: 12px;
 }
+
+/* Quick-sort quality filter chips (Sort page header) */
+.sort-quality-chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
