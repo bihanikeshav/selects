@@ -10,6 +10,16 @@ interface PersonEntry {
   label: string | null;
   photo_count: number;
   cover_url: string;
+  hidden: boolean;
+}
+
+async function setPersonHidden(id: number, hidden: boolean) {
+  const res = await fetch(`/api/persons/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ hidden }),
+  });
+  if (!res.ok) throw new Error(`hide failed: HTTP ${res.status}`);
 }
 
 async function mergePeople(targetId: number, sourceIds: number[]) {
@@ -31,10 +41,11 @@ export default function Persons() {
   const [mergeTarget, setMergeTarget] = useState<number | null>(null);
   const [mergeSources, setMergeSources] = useState<Set<number>>(() => new Set());
   const [mergeBusy, setMergeBusy] = useState(false);
+  const [showHidden, setShowHidden] = useState(false);
 
   const loadPersons = useCallback(() => {
     setLoading(true);
-    fetch("/api/persons")
+    fetch(`/api/persons?include_hidden=${showHidden}`)
       .then(r => r.json())
       .then(d => {
         setPersons(d.persons);
@@ -45,11 +56,25 @@ export default function Persons() {
         setErr(String(e));
         setLoading(false);
       });
-  }, []);
+  }, [showHidden]);
 
   useEffect(() => {
     loadPersons();
   }, [loadPersons]);
+
+  const toggleHidden = useCallback(async (id: number, hidden: boolean) => {
+    try {
+      await setPersonHidden(id, hidden);
+      // Optimistic: when not showing hidden, a hidden person drops out of the list.
+      setPersons(prev =>
+        showHidden
+          ? prev.map(p => (p.id === id ? { ...p, hidden } : p))
+          : prev.filter(p => p.id !== id || !hidden),
+      );
+    } catch (e) {
+      setErr(String(e));
+    }
+  }, [showHidden]);
 
   async function commitLabel(id: number) {
     const label = draft.trim() || null;
@@ -166,9 +191,14 @@ export default function Persons() {
                 </button>
               </>
             ) : (
-              <button className="btn btn-filled" type="button" onClick={() => setMergeMode(true)}>
-                Merge people
-              </button>
+              <>
+                <button className="btn btn-text" type="button" onClick={() => setShowHidden(v => !v)}>
+                  {showHidden ? "Hide hidden" : "Show hidden"}
+                </button>
+                <button className="btn btn-filled" type="button" onClick={() => setMergeMode(true)}>
+                  Merge people
+                </button>
+              </>
             )
           }
         />
@@ -217,6 +247,33 @@ export default function Persons() {
                     <span className="person-merge-badge">
                       {isTarget ? "Target" : isSource ? "Merge" : "Pick"}
                     </span>
+                  )}
+
+                  {!mergeMode && (
+                    <button
+                      type="button"
+                      title={p.hidden ? "Unhide this person" : "Hide this person"}
+                      onClick={e => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        toggleHidden(p.id, !p.hidden);
+                      }}
+                      style={{
+                        position: "absolute",
+                        top: 6,
+                        right: 6,
+                        zIndex: 2,
+                        background: "rgba(0,0,0,0.55)",
+                        color: "#fff",
+                        border: 0,
+                        borderRadius: 4,
+                        padding: "3px 7px",
+                        fontSize: 11,
+                        cursor: "pointer",
+                      }}
+                    >
+                      {p.hidden ? "Unhide" : "Hide"}
+                    </button>
                   )}
 
                   <div

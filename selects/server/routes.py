@@ -1182,6 +1182,7 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
         label: Optional[str]
         photo_count: int
         cover_url: str
+        hidden: bool = False
 
     class PersonList(BaseModel):
         total: int
@@ -1192,6 +1193,7 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
         min_confidence: float = Query(0.55, ge=0.0, le=1.0),
         min_face_px: int = Query(50, ge=0),
         min_photo_count: int = Query(2, ge=1),
+        include_hidden: bool = Query(False),
     ):
         """List Person identities. Picks each cluster's BEST face (highest
         confidence × bbox-area) as the cover so a person's surfacing isn't
@@ -1210,6 +1212,8 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
             persons = []
             for p in persons_all:
                 if p.photo_count < min_photo_count:
+                    continue
+                if p.hidden and not include_hidden:
                     continue
                 # Pick the best face in this cluster as cover: rank by
                 # confidence * sqrt(area). Skip the cluster if no face in it
@@ -1234,6 +1238,7 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
                     id=p.id, label=p.label,
                     photo_count=p.photo_count,
                     cover_url=f"/api/face_crop/{best_face.id}",
+                    hidden=bool(p.hidden),
                 ))
         return PersonList(total=len(persons), persons=persons)
 
@@ -1271,11 +1276,12 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
 
     @app.patch("/api/persons/{person_id}")
     def label_person(person_id: int, payload: dict = Body(...)):
-        """Body: {label: str | null}."""
+        """Body: {label?: str | null, hidden?: bool}."""
         from selects.db.models import Person, Story
 
+        has_label = "label" in payload
         label = payload.get("label")
-        if label is not None and not isinstance(label, str):
+        if has_label and label is not None and not isinstance(label, str):
             raise HTTPException(400, detail="label must be a string or null")
         if isinstance(label, str):
             label = label.strip() or None
@@ -1284,6 +1290,14 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
             person = s.get(Person, person_id)
             if not person:
                 raise HTTPException(404, detail="person not found")
+
+            # Toggle hidden independently of label edits.
+            if "hidden" in payload:
+                person.hidden = bool(payload["hidden"])
+                if not has_label:
+                    s.flush()
+                    return {"ok": True, "id": person_id, "hidden": person.hidden}
+
             old_label = person.label
             person.label = label
             s.flush()

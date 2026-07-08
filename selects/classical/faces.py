@@ -27,11 +27,22 @@ def _get_detector():
     global _detector
     if _detector is not None:
         return _detector
+    import os
+
     from insightface.app import FaceAnalysis
 
+    # NOTE: DirectML cannot run buffalo_l's SCRFD detector (its Reshape ops throw
+    # under DmlExecutionProvider, same limitation as our SigLIP/RAM++ models), so
+    # we deliberately DON'T offer DML here. CUDA accelerates on NVIDIA builds; on
+    # the DirectML/CPU build onnxruntime simply uses CPU (CUDA EP absent).
     providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
     app = FaceAnalysis(name="buffalo_l", providers=providers)
-    app.prepare(ctx_id=0, det_size=(640, 640))
+    # det_size drives small-face recall: at 640x640 distant/small faces vanish.
+    # 1280x1280 recovers them (slower). det_thresh 0.4 (< default 0.5) keeps more
+    # low-confidence faces. Both overridable via env for tuning.
+    det = int(os.environ.get("SELECTS_FACE_DET_SIZE", "1280"))
+    thr = float(os.environ.get("SELECTS_FACE_DET_THRESH", "0.4"))
+    app.prepare(ctx_id=0, det_size=(det, det), det_thresh=thr)
     _detector = app
     return app
 

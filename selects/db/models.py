@@ -328,6 +328,8 @@ class Person(Base):
     photo_count: Mapped[int] = mapped_column(Integer, default=0)
     centroid: Mapped[Optional[bytes]] = mapped_column(LargeBinary, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    # User can hide stranger/random clusters from the People view (not deleted).
+    hidden: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
 class PhotoPerson(Base):
