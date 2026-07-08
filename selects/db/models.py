@@ -97,6 +97,13 @@ class ClassicalScore(Base):
     auto_reject: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     reject_reason: Mapped[Optional[str]] = mapped_column(Text)
 
+    # Cached luminance stats from the preview (mean / clipping), computed once by
+    # the Doctor endpoint and reused on later visits so it never re-opens every
+    # preview JPEG. Content-addressed previews make these stable per photo.
+    luma_mean: Mapped[Optional[float]] = mapped_column(Float)
+    clipped_high: Mapped[Optional[float]] = mapped_column(Float)
+    clipped_low: Mapped[Optional[float]] = mapped_column(Float)
+
     photo: Mapped["Photo"] = relationship("Photo", back_populates="classical_score")
 
 

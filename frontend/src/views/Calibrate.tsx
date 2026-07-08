@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import PageHeader from "../components/PageHeader";
 import Rail from "../components/Rail";
-import Topbar from "../components/Topbar";
 
 type Scores = {
   iqa: number | null;
@@ -190,41 +190,27 @@ export default function Calibrate() {
         className="workspace"
         style={{
           display: "grid",
-          gridTemplateRows: "auto auto 1fr",
+          gridTemplateRows: "auto 1fr",
           minHeight: 0,
           maxHeight: "100vh",
           overflow: "hidden",
         }}
       >
-        <Topbar folder="selects" context="aesthetic calibration" />
-
-        {/* Header */}
-        <div
-          style={{
-            padding: "10px 24px",
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-            borderBottom: "1px solid var(--md-outline-var)",
-          }}
-        >
-          <div style={{ display: "flex", flexDirection: "column" }}>
-            <h2 style={{ margin: 0, fontFamily: "var(--font-display)", fontSize: 16, fontWeight: 500 }}>
-              Rescue from the bottom of NIMA + AP V2.5
-            </h2>
-            <div style={{ color: "var(--md-on-surface-var)", fontSize: 12 }}>
-              Click the photos that are actually good — they'll train the personal model.
-              Unclicked = confirmed bad.
-            </div>
-          </div>
-          <div style={{ flex: 1 }} />
-          <div style={{ color: "var(--md-on-surface-var)", fontSize: 12, fontFamily: "var(--font-mono)" }}>
-            {totalRated} rated / {totalIndexed} indexed
-          </div>
-          <Link to="/calibrate/dashboard" className="btn btn-text">
-            Dashboard →
-          </Link>
-        </div>
+        <PageHeader
+          context="aesthetic calibration"
+          title="Calibrate"
+          subtitle="Rescue from the bottom of NIMA + AP V2.5 — click the photos that are actually good; they'll train the personal model. Unclicked = confirmed bad."
+          actions={
+            <>
+              <div style={{ color: "var(--md-on-surface-var)", fontSize: 12, fontFamily: "var(--font-mono)" }}>
+                {totalRated} rated / {totalIndexed} indexed
+              </div>
+              <Link to="/calibrate/dashboard" className="btn btn-text">
+                Dashboard →
+              </Link>
+            </>
+          }
+        />
 
         {/* Body: grid + side panel */}
         <div

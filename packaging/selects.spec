@@ -1,15 +1,17 @@
 # -*- mode: python ; coding: utf-8 -*-
 """PyInstaller spec for selects (onedir).
 
-onedir (not onefile): the ML stack — torch especially — is far too large to
-unpack from a onefile bundle on every launch.
+onedir (not onefile): the ML stack (onnxruntime + insightface + sklearn) is too
+large to unpack from a onefile bundle on every launch.
 
 ML bundling is opt-in and degrades gracefully:
   * By default the base app (FastAPI + imaging stack) is packed and ML deps
     are left out, keeping the build fast and small.
-  * Set env ``SELECTS_BUNDLE_ML=1`` to also collect torch/transformers/
-    insightface/onnxruntime/sklearn when they are importable. Any that are not
-    installed are simply skipped, so a CPU-only or ML-less venv still builds.
+  * Set env ``SELECTS_BUNDLE_ML=1`` to also collect onnxruntime/sentencepiece/
+    huggingface_hub/insightface/sklearn when they are importable. Any that are
+    not installed are simply skipped, so an ML-less venv still builds. Model
+    weights themselves are ONNX and fetched at runtime from the selects-onnx HF
+    repo, not bundled.
 """
 import os
 import sys
@@ -101,18 +103,41 @@ if sys.platform == "win32":
 
 # --- optional ML stack -----------------------------------------------------
 BUNDLE_ML = os.environ.get("SELECTS_BUNDLE_ML", "").lower() in ("1", "true", "yes")
-ML_PKGS = ["torch", "torchvision", "transformers", "insightface",
-           "onnxruntime", "sklearn", "hdbscan", "umap"]
+# All models run on ONNX Runtime now — no torch/torchvision/transformers.
+ML_PKGS = ["onnxruntime", "sentencepiece", "huggingface_hub", "insightface",
+           "sklearn", "hdbscan", "umap"]
+
+# torch & friends are no longer used — always exclude them so a stray dev-venv
+# install can never get pulled in transitively and bloat the build by gigabytes.
+DEAD_PKGS = ["torch", "torchvision", "torchcodec", "transformers", "ram"]
 
 if BUNDLE_ML:
     print("[selects.spec] SELECTS_BUNDLE_ML set — collecting ML deps.")
     for _pkg in ML_PKGS:
         _try_collect_all(_pkg)
-    excludes = []
+    excludes = list(DEAD_PKGS)
 else:
     print("[selects.spec] ML deps excluded (set SELECTS_BUNDLE_ML=1 to include).")
     # Excluding keeps them from being pulled in transitively and bloating the build.
-    excludes = list(ML_PKGS) + ["scipy", "pandas", "matplotlib", "IPython", "notebook"]
+    excludes = list(ML_PKGS) + DEAD_PKGS + ["scipy", "pandas", "matplotlib", "IPython", "notebook"]
+
+# --- optional bundled editor (darktable) -----------------------------------
+# The "Edit in darktable" feature launches a real darktable install. Shipping
+# darktable inside the bundle makes it work with no separate install. Opt-in
+# and layout-agnostic: point ``SELECTS_DARKTABLE_DIR`` at an extracted
+# darktable tree (must contain a ``bin/`` with darktable[.exe] +
+# darktable-cli[.exe]), or drop it at ``<repo>/vendor/darktable``. It lands at
+# ``<app>/darktable`` where routes.py:_find_editor_binary looks first.
+DARKTABLE_DIR = os.environ.get(
+    "SELECTS_DARKTABLE_DIR", os.path.join(REPO_ROOT, "vendor", "darktable")
+)
+if os.path.isdir(os.path.join(DARKTABLE_DIR, "bin")):
+    datas.append((DARKTABLE_DIR, "darktable"))
+    print(f"[selects.spec] bundling darktable from {DARKTABLE_DIR}")
+else:
+    print("[selects.spec] no darktable tree found "
+          f"(looked in {DARKTABLE_DIR}); 'Edit in darktable' will fall back "
+          "to a system install.")
 
 block_cipher = None
 

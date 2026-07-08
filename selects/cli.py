@@ -163,11 +163,10 @@ def serve(folder: Path | None, port: int, host: str, no_browser: bool, no_backgr
 
 @main.command()
 def doctor():
-    """Report CUDA / NVDEC / nvImageCodec / cv2.cuda capabilities."""
+    """Report the active ONNX Runtime provider / nvImageCodec / cv2.cuda."""
     caps = detect_capabilities()
-    click.echo(f"CUDA              : {'yes' if caps.cuda_available else 'no'} ({caps.device_name})")
-    click.echo(f"CUDA capability   : {caps.cuda_capability}")
+    click.echo(f"GPU acceleration  : {'yes' if caps.gpu_available else 'no'}")
+    click.echo(f"ONNX provider     : {caps.provider} ({caps.device_name})")
     click.echo(f"VRAM              : {caps.vram_total_mb} MB")
-    click.echo(f"NVDEC (torchcodec): {'yes' if caps.nvdec_available else 'no'}")
     click.echo(f"nvImageCodec      : {'yes' if caps.nvimgcodec_available else 'no'}")
     click.echo(f"cv2.cuda          : {'yes' if caps.cv2_cuda_available else 'no'}")

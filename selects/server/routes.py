@@ -672,10 +672,7 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
         if q:
             try:
                 from selects.ml.embed import encode_text_prompts
-                import numpy as _np
-                _t = encode_text_prompts([q])
-                _t = (_t / _t.norm(dim=-1, keepdim=True)).cpu().float().numpy().squeeze(0)
-                q_vec = _t.astype("float32")
+                q_vec = encode_text_prompts([q])[0].astype("float32")  # already L2-normalized
             except Exception:
                 q_vec = None
 
@@ -1037,6 +1034,9 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
                     Photo.taken_at,
                     ClassicalScore.blur,
                     ClassicalScore.exposure,
+                    ClassicalScore.luma_mean,
+                    ClassicalScore.clipped_high,
+                    ClassicalScore.clipped_low,
                     AestheticScore.ap25_score,
                     AestheticScore.nima_score,
                 )
@@ -1053,7 +1053,11 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
         from selects.ml.lowlight import luma_stats as _luma_stats
         from PIL import Image as _PILImage
 
-        for pid, sha, taken, blur, exp, ap25, nima in rows:
+        # Luma stats computed fresh this request (photo_id -> stats), flushed to
+        # the DB once at the end so future visits skip the preview decode.
+        freshly_computed: dict[int, dict] = {}
+
+        for pid, sha, taken, blur, exp, luma_mean, clipped_high, clipped_low, ap25, nima in rows:
             blur_v = blur if blur is not None else 9999.0
             exp_v = exp if exp is not None else 0.5
             combined = (
@@ -1072,28 +1076,58 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
                 "combined": combined,
             }
 
-            # Compute mean+clipping from the preview once per photo.
-            # The classical `exposure` is a composite score that doesn't tell
-            # us *direction*, so we have to look at the image.
-            preview_path = cfg.previews_dir / f"{sha}.jpg"
-            if preview_path.exists():
-                try:
-                    with _PILImage.open(preview_path) as _im:
-                        stats = _luma_stats(_im)
-                    base["luma_mean"] = stats["mean"]
-                    base["clipped_high"] = stats["clipped_high"]
-                    base["clipped_low"] = stats["clipped_low"]
-                    if stats["mean"] < UNDER_MEAN or stats["clipped_low"] > 0.10:
-                        underexposed.append(base)
-                    elif stats["mean"] > OVER_MEAN or stats["clipped_high"] > HI_CLIP:
-                        overexposed.append(base)
-                except Exception as exc:
-                    log.warning("doctor: luma_stats failed for %s: %s", sha, exc)
+            # Mean+clipping tell us the *direction* of an exposure problem (the
+            # classical `exposure` is a direction-less composite). Use the cached
+            # values when present; otherwise decode the preview once and remember
+            # the result to persist after the loop.
+            stats = None
+            if luma_mean is not None:
+                stats = {
+                    "mean": luma_mean,
+                    "clipped_high": clipped_high if clipped_high is not None else 0.0,
+                    "clipped_low": clipped_low if clipped_low is not None else 0.0,
+                }
+            else:
+                preview_path = cfg.previews_dir / f"{sha}.jpg"
+                if preview_path.exists():
+                    try:
+                        with _PILImage.open(preview_path) as _im:
+                            stats = _luma_stats(_im)
+                        freshly_computed[pid] = stats
+                    except Exception as exc:
+                        log.warning("doctor: luma_stats failed for %s: %s", sha, exc)
+
+            if stats is not None:
+                base["luma_mean"] = stats["mean"]
+                base["clipped_high"] = stats["clipped_high"]
+                base["clipped_low"] = stats["clipped_low"]
+                if stats["mean"] < UNDER_MEAN or stats["clipped_low"] > 0.10:
+                    underexposed.append(base)
+                elif stats["mean"] > OVER_MEAN or stats["clipped_high"] > HI_CLIP:
+                    overexposed.append(base)
 
             if blur_v < BLUR_HARD:
                 blurry.append(base)
             elif blur_v < BLUR_SOFT and combined is not None and combined >= AESTHETIC_HIGH:
                 blurry_keepers.append(base)
+
+        # Persist any newly-computed stats so the next Doctor visit is instant.
+        if freshly_computed:
+            try:
+                with session_scope(Session) as s:
+                    for pid, stats in freshly_computed.items():
+                        s.query(ClassicalScore).filter(
+                            ClassicalScore.photo_id == pid
+                        ).update(
+                            {
+                                ClassicalScore.luma_mean: stats["mean"],
+                                ClassicalScore.clipped_high: stats["clipped_high"],
+                                ClassicalScore.clipped_low: stats["clipped_low"],
+                            },
+                            synchronize_session=False,
+                        )
+            except Exception as exc:
+                log.warning("doctor: failed to cache luma stats: %s", exc)
 
         # Sort each bucket: most-severe first
         underexposed.sort(key=lambda p: p.get("luma_mean", 1.0))
@@ -1264,6 +1298,87 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
                     s.add(story)
 
         return {"ok": True, "label": label}
+
+    @app.post("/api/persons/merge")
+    def merge_persons(payload: dict = Body(...)):
+        """Merge one or more source Person identities into a target.
+
+        Body: {target_id: int, source_ids: int[]}
+        """
+        from sqlalchemy import func
+
+        from selects.db.models import Person, PhotoPerson
+
+        target_id = payload.get("target_id")
+        source_ids_raw = payload.get("source_ids")
+        if not isinstance(target_id, int):
+            raise HTTPException(400, detail="target_id must be an integer")
+        if not isinstance(source_ids_raw, list) or not source_ids_raw:
+            raise HTTPException(400, detail="source_ids must be a non-empty list")
+
+        source_ids = []
+        for value in source_ids_raw:
+            if not isinstance(value, int):
+                raise HTTPException(400, detail="source_ids must contain only integers")
+            if value != target_id and value not in source_ids:
+                source_ids.append(value)
+        if not source_ids:
+            raise HTTPException(400, detail="choose at least one source person")
+
+        with session_scope(Session) as s:
+            target = s.get(Person, target_id)
+            if not target:
+                raise HTTPException(404, detail="target person not found")
+
+            sources = s.query(Person).filter(Person.id.in_(source_ids)).all()
+            if len(sources) != len(source_ids):
+                raise HTTPException(404, detail="one or more source persons were not found")
+
+            if target.label is None:
+                first_source_label = next((p.label for p in sources if p.label), None)
+                if first_source_label:
+                    target.label = first_source_label
+
+            moved = 0
+            source_rows = (
+                s.query(PhotoPerson)
+                .filter(PhotoPerson.person_id.in_(source_ids))
+                .all()
+            )
+            for row in source_rows:
+                existing = (
+                    s.query(PhotoPerson)
+                    .filter(
+                        PhotoPerson.photo_id == row.photo_id,
+                        PhotoPerson.person_id == target_id,
+                    )
+                    .first()
+                )
+                if existing is None:
+                    s.add(PhotoPerson(
+                        photo_id=row.photo_id,
+                        person_id=target_id,
+                        face_embedding_id=row.face_embedding_id,
+                        confidence=row.confidence,
+                    ))
+                    moved += 1
+                elif row.confidence > existing.confidence:
+                    existing.face_embedding_id = row.face_embedding_id
+                    existing.confidence = row.confidence
+                s.delete(row)
+
+            for person in sources:
+                s.delete(person)
+
+            s.flush()
+            target.photo_count = (
+                s.query(func.count(func.distinct(PhotoPerson.photo_id)))
+                .filter(PhotoPerson.person_id == target_id)
+                .scalar()
+                or 0
+            )
+
+        return {"ok": True, "target_id": target_id, "source_ids": source_ids, "moved": moved}
 
     @app.get("/api/persons/{person_id}/photos", response_model=PhotoList)
     def person_photos(person_id: int, limit: int = Query(500, le=2000)):
@@ -1515,18 +1630,6 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
             "skipped_detail": skipped,
         }
 
-    @app.post("/api/stories/{story_id}/caption")
-    def generate_story_caption(story_id: int):
-        """Generate an Instagram-ready caption + hashtags for a story via VLM."""
-        from selects.ml.caption import generate_caption
-
-        try:
-            return generate_caption(cfg, story_id)
-        except ValueError as e:
-            raise HTTPException(404, detail=str(e))
-        except Exception as e:
-            raise HTTPException(500, detail=f"caption failed: {e}")
-
     @app.get("/api/search")
     def search(q: str = Query(..., min_length=1), k: int = Query(60, le=300)):
         """Free-text photo search via SigLIP image-text similarity."""
@@ -1592,29 +1695,46 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
         return {"start_new_session": True}
 
     def _find_editor_binary(
-        names: list[str], windows_candidates: list[Path]
+        names: list[str],
+        windows_candidates: list[Path],
+        bundle_subdir: Optional[str] = None,
     ) -> Optional[str]:
         """Locate an external editor binary across Windows/macOS/Linux.
 
-        Tries ``shutil.which`` for each of ``names`` first (works on every
-        OS when the binary is on PATH), then falls back to well-known
-        per-platform install locations:
+        Resolution order:
 
-          * Windows: caller-supplied ``windows_candidates`` (e.g. the usual
-            "Program Files" layouts).
-          * macOS: ``/Applications/<app>.app/Contents/MacOS/<name>``.
-          * Linux: ``/usr/bin``, ``/usr/local/bin``, and — best-effort — the
-            Flatpak export path for darktable.
+          1. A copy bundled inside the app (PyInstaller onedir). When the
+             release build ships ``<app>/darktable/bin`` alongside the binary,
+             we use it first so editing "just works" with no system install.
+          2. ``shutil.which`` for each of ``names`` (binary on PATH).
+          3. Well-known per-platform install locations:
+             * Windows: caller-supplied ``windows_candidates``.
+             * macOS: ``/Applications/<app>.app/Contents/MacOS/<name>``.
+             * Linux: ``/usr/bin``, ``/usr/local/bin``, and — best-effort —
+               the Flatpak export path for darktable.
         """
         import platform
         import shutil
+        import sys
 
+        system = platform.system()
+
+        # (1) Bundled copy — data files land under sys._MEIPASS in a frozen
+        # onedir build (the app's `_internal` dir). Skipped when not frozen.
+        bundle_root = getattr(sys, "_MEIPASS", None)
+        if bundle_root and bundle_subdir:
+            suffix = ".exe" if system == "Windows" else ""
+            for name in names:
+                cand = Path(bundle_root) / bundle_subdir / "bin" / f"{name}{suffix}"
+                if cand.exists():
+                    return str(cand)
+
+        # (2) On PATH.
         for name in names:
             found = shutil.which(name)
             if found:
                 return found
 
-        system = platform.system()
         candidates: list[Path] = []
         if system == "Windows":
             candidates.extend(windows_candidates)
@@ -1653,6 +1773,7 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
                 Path(r"C:\Program Files\darktable\darktable.exe"),
                 Path(r"C:\darktable\bin\darktable.exe"),
             ],
+            bundle_subdir="darktable",
         )
 
     def _find_darktable_cli() -> Optional[str]:
@@ -1663,6 +1784,7 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
                 Path(r"C:\Program Files\darktable\bin\darktable-cli.exe"),
                 Path(r"C:\Program Files (x86)\darktable\bin\darktable-cli.exe"),
             ],
+            bundle_subdir="darktable",
         )
 
     @app.post("/api/edit/darktable")

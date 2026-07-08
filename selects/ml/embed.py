@@ -1,25 +1,36 @@
-"""SigLIP-SO400M image embedding pass. fp16 on CUDA. Batched."""
+"""SigLIP-SO400M image embedding + IQA pass — ONNX Runtime (no torch). Batched.
+
+Image and text towers are served from siglip_vision.onnx / siglip_text.onnx
+(fp16) via onnxruntime; text is tokenized by the ported SiglipTokenizer. All
+returns are L2-normalized float32 numpy arrays.
+"""
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import Callable
 
 import numpy as np
-import torch
 from PIL import Image
 
 from selects.config import FolderConfig
 from selects.db import init_db, session_scope
 from selects.db.models import Embedding, PipelineState, Photo
+from selects.ml.onnx_rt import model_session
+from selects.ml.siglip_tokenizer import get_tokenizer
 
 log = logging.getLogger(__name__)
 
-_MODEL = None
-_PROC = None
-_IQA_TEXT_FEATS: torch.Tensor | None = None
+_IQA_TEXT_FEATS: np.ndarray | None = None
 
-_DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+# SigLIP image preprocessing (from the HF image_processor config): resize to
+# 384x384 BICUBIC, rescale 1/255, normalize mean/std 0.5 -> pixel = x/127.5 - 1.
+_IMG_SIZE = 384
+
+# SigLIP sigmoid-training constants (google/siglip-so400m-patch14-384), used to
+# turn image<->IQA-prompt similarity into a probability. The bias cancels in the
+# 2-way softmax but is kept for fidelity with the original torch path.
+_LOGIT_SCALE = 112.33287048339844   # = logit_scale.exp()
+_LOGIT_BIAS = -16.54642105102539
 
 # CLIP-IQA-style antonym pair prompts (Wang et al. 2023).
 # Softmax over the pair gives prob(positive) = aesthetic IQA in [0, 1].
@@ -27,75 +38,51 @@ IQA_POS = "a high-quality photograph"
 IQA_NEG = "a low-quality photograph"
 
 
-def _load():
-    global _MODEL, _PROC
-    if _MODEL is not None:
-        return _MODEL, _PROC
-    from transformers import AutoModel, AutoProcessor
-
-    name = "google/siglip-so400m-patch14-384"
-    log.info("loading SigLIP model %s (device=%s)", name, _DEVICE)
-    dtype = torch.float16 if _DEVICE == "cuda" else torch.float32
-    _MODEL = AutoModel.from_pretrained(name, dtype=dtype).to(_DEVICE).eval()
-    _PROC = AutoProcessor.from_pretrained(name)
-    log.info("SigLIP loaded")
-    return _MODEL, _PROC
+def _l2norm(a: np.ndarray) -> np.ndarray:
+    return a / (np.linalg.norm(a, axis=-1, keepdims=True) + 1e-12)
 
 
-def _extract_tensor(output) -> torch.Tensor:
-    """Extract tensor from model output — handles both raw Tensor and ModelOutput objects.
-
-    In transformers 5.x, get_text_features / get_image_features return a
-    BaseModelOutputWithPooling whose pooler_output is the CLS-pooled embedding.
-    """
-    if isinstance(output, torch.Tensor):
-        return output
-    # ModelOutput / BaseModelOutputWithPooling
-    if hasattr(output, "pooler_output") and output.pooler_output is not None:
-        return output.pooler_output
-    if hasattr(output, "last_hidden_state"):
-        return output.last_hidden_state[:, 0]  # CLS token
-    raise ValueError(f"Cannot extract tensor from {type(output)}")
+def _preprocess_images(images: list[Image.Image]) -> np.ndarray:
+    """PIL images -> [B,3,384,384] float32, matching the SigLIP image processor."""
+    out = np.empty((len(images), 3, _IMG_SIZE, _IMG_SIZE), dtype=np.float32)
+    for i, im in enumerate(images):
+        im = im.convert("RGB").resize((_IMG_SIZE, _IMG_SIZE), Image.BICUBIC)
+        arr = np.asarray(im, dtype=np.float32) / 127.5 - 1.0   # [-1, 1]
+        out[i] = arr.transpose(2, 0, 1)
+    return out
 
 
-def encode_text_prompts(prompts: list[str]) -> torch.Tensor:
-    """Return L2-normalized [N, 1152] text embeddings on cuda."""
-    model, proc = _load()
-    with torch.no_grad():
-        inp = proc(text=prompts, return_tensors="pt", padding=True, truncation=True).to(_DEVICE)
-        raw = model.get_text_features(**inp)
-        feats = _extract_tensor(raw)
-        feats = torch.nn.functional.normalize(feats.float(), dim=-1)
-    return feats
+def encode_text_prompts(prompts: list[str]) -> np.ndarray:
+    """Return L2-normalized [N, 1152] float32 text embeddings."""
+    sess = model_session("siglip_text")
+    ids = get_tokenizer()(prompts)                          # [N, 64] int64
+    embeds = sess.run(None, {"input_ids": ids})[0]          # [N, 1152]
+    return _l2norm(embeds.astype(np.float32))
 
 
-def encode_image_batch(images: list[Image.Image]) -> tuple[torch.Tensor, np.ndarray]:
-    """Return (image_feats_normed [B,1152] cpu float32, iqa_scores [B] cpu float32 in [0,1]).
+def encode_image_batch(images: list[Image.Image]) -> tuple[np.ndarray, np.ndarray]:
+    """Return (image_feats_normed [B,1152] float32, iqa_scores [B] float32 in [0,1]).
 
-    IQA is computed from the same forward pass — image features are compared against
-    the pos/neg IQA text prompts via softmax over the antonym pair.
+    IQA compares each image feature against the pos/neg IQA text prompts via a
+    softmax over the antonym pair.
     """
     global _IQA_TEXT_FEATS
-    model, proc = _load()
     if _IQA_TEXT_FEATS is None:
-        _IQA_TEXT_FEATS = encode_text_prompts([IQA_POS, IQA_NEG])  # [2, 1152] float32, computed once
-    iqa_text = _IQA_TEXT_FEATS
+        _IQA_TEXT_FEATS = encode_text_prompts([IQA_POS, IQA_NEG])  # [2, 1152], once
 
-    with torch.no_grad():
-        img_dtype = torch.float16 if _DEVICE == "cuda" else torch.float32
-        inp = proc(images=images, return_tensors="pt").to(_DEVICE, img_dtype)
-        raw = model.get_image_features(**inp)
-        feats = _extract_tensor(raw)                        # [B, 1152] fp16 or float32
-        feats = torch.nn.functional.normalize(feats.float(), dim=-1)  # [B, 1152] float32
+    sess = model_session("siglip_vision")
+    pixel_values = _preprocess_images(images)               # [B,3,384,384]
+    embeds = sess.run(None, {"pixel_values": pixel_values})[0]
+    feats = _l2norm(embeds.astype(np.float32))              # [B, 1152]
 
-        sim = feats @ iqa_text.T                            # [B, 2]
-        # Use model's logit_scale if available (matches SigLIP's sigmoid training)
-        scale = model.logit_scale.exp().item() if hasattr(model, "logit_scale") else 10.0
-        bias = model.logit_bias.item() if hasattr(model, "logit_bias") else 0.0
-        probs = torch.softmax(sim * scale + bias, dim=-1)
-        iqa = probs[:, 0].cpu().numpy()                     # prob(high-quality)
+    sim = feats @ _IQA_TEXT_FEATS.T                         # [B, 2]
+    logits = sim * _LOGIT_SCALE + _LOGIT_BIAS
+    logits -= logits.max(axis=-1, keepdims=True)            # stable softmax
+    e = np.exp(logits)
+    probs = e / e.sum(axis=-1, keepdims=True)
+    iqa = probs[:, 0].astype(np.float32)                    # prob(high-quality)
 
-    return feats.cpu(), iqa
+    return feats, iqa
 
 
 def run_embedding_stage(
@@ -150,7 +137,7 @@ def run_embedding_stage(
 
             with session_scope(Session) as s:
                 for (pid, _), feat_row, iqa_score in zip(valid_chunk, feats, iqa):
-                    blob = feat_row.numpy().astype(np.float16).tobytes()
+                    blob = feat_row.astype(np.float16).tobytes()
                     emb = s.get(Embedding, pid) or Embedding(photo_id=pid)
                     emb.siglip = blob
                     emb.aesthetic_iqa = float(iqa_score)

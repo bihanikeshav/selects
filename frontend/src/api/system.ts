@@ -1,6 +1,7 @@
 export interface SystemInfo {
   backend: "cpu" | "gpu";
-  cuda_available: boolean;
+  gpu_available: boolean;
+  provider: string | null;      // active ONNX Runtime execution provider
   device_name: string | null;
   vram_total_mb: number | null;
 }

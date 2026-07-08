@@ -189,9 +189,6 @@ function StoryCard({ story }: { story: StoryEntry }) {
   const dayLabel = formatDayLabel(story.day);
   const [playerStartIdx, setPlayerStartIdx] = useState<number | null>(null);
   const [playerOpen, setPlayerOpen] = useState(false);
-  const [caption, setCaption] = useState<{ caption: string; hashtags: string[] } | null>(null);
-  const [captionLoading, setCaptionLoading] = useState(false);
-  const [copied, setCopied] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportResult, setExportResult] = useState<string | null>(null);
   const [focusedPhotoId, setFocusedPhotoId] = useState<number | null>(null);
@@ -223,31 +220,6 @@ function StoryCard({ story }: { story: StoryEntry }) {
     }
   }
 
-  async function genCaption() {
-    setCaptionLoading(true);
-    setCaption(null);
-    try {
-      const res = await fetch(`/api/stories/${story.id}/caption`, { method: "POST" });
-      if (!res.ok) throw new Error(`caption ${res.status}`);
-      const j = await res.json();
-      setCaption({ caption: j.caption, hashtags: j.hashtags || [] });
-    } catch (e) {
-      setCaption({ caption: String(e), hashtags: [] });
-    } finally {
-      setCaptionLoading(false);
-    }
-  }
-
-  function copyCaption() {
-    if (!caption) return;
-    const text = caption.caption + (caption.hashtags.length
-      ? "\n\n" + caption.hashtags.map(h => "#" + h).join(" ")
-      : "");
-    navigator.clipboard.writeText(text).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  }
   // Parse scene count from title: "... · N photos, M scenes"
   const scenesMatch = story.title.match(/(\d+)\s+scenes/);
   const scenesCount = scenesMatch ? scenesMatch[1] : "";
@@ -291,14 +263,6 @@ function StoryCard({ story }: { story: StoryEntry }) {
             {ExportIcon}
             {exporting ? "Exporting…" : "Export"}
           </button>
-          <button
-            className="btn btn-text"
-            onClick={genCaption}
-            disabled={captionLoading || story.items.length === 0}
-            title="Generate Instagram-ready caption + hashtags"
-          >
-            {captionLoading ? "Writing…" : "Caption"}
-          </button>
           <RecapButton storyId={story.id} />
         </div>
 
@@ -316,35 +280,6 @@ function StoryCard({ story }: { story: StoryEntry }) {
             }}
           >
             {exportResult}
-          </div>
-        )}
-
-        {caption && (
-          <div
-            style={{
-              marginTop: 12,
-              padding: "12px 14px",
-              border: "1px solid var(--md-outline-var)",
-              borderRadius: 12,
-              background: "var(--md-surface-c-low)",
-            }}
-          >
-            <div style={{ fontFamily: "var(--font-body)", fontSize: 14, lineHeight: 1.45, color: "var(--md-on-surface)" }}>
-              {caption.caption}
-            </div>
-            {caption.hashtags.length > 0 && (
-              <div style={{ marginTop: 8, fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--md-primary)", lineHeight: 1.5 }}>
-                {caption.hashtags.map(h => "#" + h).join(" ")}
-              </div>
-            )}
-            <div style={{ marginTop: 8, display: "flex", gap: 8, alignItems: "center" }}>
-              <button className="btn btn-text" onClick={copyCaption} style={{ fontSize: 12 }}>
-                {copied ? "Copied!" : "Copy"}
-              </button>
-              <button className="btn btn-text" onClick={genCaption} disabled={captionLoading} style={{ fontSize: 12 }}>
-                Regenerate
-              </button>
-            </div>
           </div>
         )}
 

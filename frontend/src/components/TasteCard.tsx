@@ -54,27 +54,29 @@ export default function TasteCard() {
 
   return (
     <div className="taste-card">
-      <div className="taste-head">
-        <h2>Your taste</h2>
-        {trained && status && (
-          <span className="taste-sub">
-            {status.auc !== null ? `AUC ${status.auc.toFixed(2)}` : "trained"}
-          </span>
+      <div className="taste-main">
+        <div className="taste-head">
+          <h2>Your taste</h2>
+          {trained && status && (
+            <span className="taste-sub">
+              {status.auc !== null ? `AUC ${status.auc.toFixed(2)}` : "trained"}
+            </span>
+          )}
+        </div>
+
+        {err ? (
+          <p className="taste-error">{err}</p>
+        ) : trained && status ? (
+          <p className="taste-line">
+            Learned from <strong>{status.n_samples}</strong> decisions · influence{" "}
+            <strong>{pct(status.weight)}</strong>
+          </p>
+        ) : (
+          <p className="taste-line">
+            Not trained yet · <strong>{labeled}</strong> of {MIN_SAMPLES} decisions collected
+          </p>
         )}
       </div>
-
-      {err && <p className="taste-error">{err}</p>}
-
-      {trained && status ? (
-        <p className="taste-line">
-          Learned from <strong>{status.n_samples}</strong> decisions · influence{" "}
-          <strong>{pct(status.weight)}</strong>
-        </p>
-      ) : (
-        <p className="taste-line">
-          Not trained yet · <strong>{labeled}</strong> of {MIN_SAMPLES} decisions collected
-        </p>
-      )}
 
       <p className="taste-explain">
         Every keep or reject teaches selects what you like. The learned taste

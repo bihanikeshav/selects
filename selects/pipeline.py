@@ -52,10 +52,14 @@ def run_moment_stage(cfg, on_progress=None):  # noqa: F811
     return _fn(cfg, on_progress=on_progress)
 
 
-def run_smart_cluster_stage(cfg, on_progress=None, vlm_model="Qwen/Qwen3-VL-2B-Instruct"):  # noqa: F811
-    """Lazy proxy: imports selects.ml.smart_clusters.run_smart_cluster_stage on first call."""
+def run_smart_cluster_stage(cfg, on_progress=None, vlm_model=None):  # noqa: F811
+    """Lazy proxy for selects.ml.smart_clusters.run_smart_cluster_stage.
+
+    ``vlm_model`` is accepted for backward compatibility but ignored — cluster
+    naming is now SigLIP zero-shot, not a VLM.
+    """
     from selects.ml.smart_clusters import run_smart_cluster_stage as _fn
-    return _fn(cfg, on_progress=on_progress, vlm_model=vlm_model)
+    return _fn(cfg, on_progress=on_progress)
 
 log = logging.getLogger(__name__)
 ProgressCb = Callable[[int, int, str], None] | None

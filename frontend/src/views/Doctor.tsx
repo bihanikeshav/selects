@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
+import PageHeader from "../components/PageHeader";
 import Rail from "../components/Rail";
-import Topbar from "../components/Topbar";
 
 type Bucket = "underexposed" | "overexposed" | "blurry" | "blurry_keepers";
 type Model = "clahe" | "zero-dce-plus" | "csrnet" | "nafnet";
@@ -115,49 +115,17 @@ export default function Doctor() {
         className="workspace"
         style={{
           display: "grid",
-          gridTemplateRows: "auto auto auto 1fr",
+          gridTemplateRows: "auto 1fr",
           height: "100vh",
           maxHeight: "100vh",
           overflow: "hidden",
         }}
       >
-        <Topbar folder="selects" context="image doctor" />
-
-        <div
-          style={{
-            padding: "12px 24px",
-            borderBottom: "1px solid var(--md-outline-var)",
-            display: "flex",
-            alignItems: "center",
-            gap: 14,
-          }}
-        >
-          <h1
-            style={{
-              margin: 0,
-              fontFamily: "var(--font-display)",
-              fontSize: 32,
-              fontWeight: 400,
-              letterSpacing: "-0.01em",
-            }}
-          >
-            Doctor
-          </h1>
-          <span style={{ color: "var(--md-on-surface-var)", fontSize: 14 }}>
-            Photos with detectable issues. Pick a model, preview the fix.
-          </span>
-        </div>
-
-        <div
-          style={{
-            padding: "8px 24px",
-            display: "flex",
-            gap: 6,
-            borderBottom: "1px solid var(--md-outline-var)",
-            overflowX: "auto",
-          }}
-        >
-          {(Object.keys(BUCKET_META) as Bucket[]).map((b) => {
+        <PageHeader
+          context="image doctor"
+          title="Doctor"
+          subtitle="Photos with detectable issues. Pick a model, preview the fix."
+          controls={(Object.keys(BUCKET_META) as Bucket[]).map((b) => {
             const meta = BUCKET_META[b];
             const n = counts?.[b] ?? 0;
             const active = b === bucket;
@@ -201,7 +169,7 @@ export default function Doctor() {
               </button>
             );
           })}
-        </div>
+        />
 
         <div
           style={{

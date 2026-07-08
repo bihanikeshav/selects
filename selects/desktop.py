@@ -22,39 +22,33 @@ log = logging.getLogger(__name__)
 WINDOW_TITLE = "Selects"
 
 
-class _WindowControls:
-    """JS-exposed window controls for the custom (frameless) title bar."""
+class _NativeChrome:
+    """JS-exposed API so the web UI can retint the native title bar when the
+    app theme toggles — the frontend calls ``window.pywebview.api.set_theme``.
+    """
 
     def __init__(self) -> None:
-        self.window = None
-        self._maximized = False
+        # NOTE: underscore-prefixed on purpose. pywebview's JS-API bridge walks
+        # dir(js_api) and recurses into every *public* non-callable attribute to
+        # enumerate methods. A public window ref would make it descend into the
+        # live .NET window (window.native.AccessibilityObject.Bounds.Empty…) and
+        # spew "Error while processing" recursion. The leading _ makes it skip.
+        self._window = None
 
-    def minimize(self) -> None:
-        if self.window is not None:
-            self.window.minimize()
-
-    def toggle_maximize(self) -> None:
-        if self.window is None:
-            return
-        if self._maximized:
-            self.window.restore()
-        else:
-            self.window.maximize()
-        self._maximized = not self._maximized
-
-    def close(self) -> None:
-        if self.window is not None:
-            self.window.destroy()
+    def set_theme(self, is_dark: bool) -> None:
+        if self._window is not None:
+            _apply_windows_chrome(self._window, dark=bool(is_dark))
 
 
-def _apply_windows_chrome(window) -> None:
-    """Tint the native Windows-11 title bar to the brand blue with white text.
+def _apply_windows_chrome(window, dark: bool = False) -> None:
+    """Tint the native Windows-11 title bar to match the app background for the
+    current theme (light/dark), with readable caption text.
 
-    Uses the DWM caption-color attributes (Windows 11 build 22000+). This is a
-    safe alternative to a frameless custom title bar (which crashes in the
-    PyInstaller bundle via a pywebview/WinForms layout recursion): it keeps the
-    reliable native window but gives it branded chrome. No-op on older Windows
-    or non-Windows — DwmSetWindowAttribute simply ignores unknown attributes.
+    Uses the DWM caption-color attributes (Windows 11 build 22000+). Keeps the
+    reliable native window (a frameless custom bar crashes in the PyInstaller
+    bundle via a pywebview/WinForms layout recursion) while blending the caption
+    into the app so it doesn't read as a jarring coloured band. No-op on older
+    Windows / non-Windows — DwmSetWindowAttribute ignores unknown attributes.
     """
     import ctypes
     from ctypes import wintypes
@@ -67,17 +61,19 @@ def _apply_windows_chrome(window) -> None:
 
     DWMWA_CAPTION_COLOR = 35
     DWMWA_TEXT_COLOR = 36
-    # COLORREF is 0x00BBGGRR. Brand blue #1A5DCC -> 0x00CC5D1A.
-    caption = wintypes.DWORD(0x00CC5D1A)
-    text = wintypes.DWORD(0x00FFFFFF)  # white
+    # COLORREF is 0x00BBGGRR — matched to the app's surface for each theme.
+    if dark:
+        caption = wintypes.DWORD(0x00201C1C)  # ~#1C1C20 (dark surface)
+        text = wintypes.DWORD(0x00E7E4E4)     # ~#E4E4E7
+    else:
+        caption = wintypes.DWORD(0x00FAF7F7)  # ~#F7F7FA (light surface)
+        text = wintypes.DWORD(0x00242420)     # ~#202124
     try:
         dwm = ctypes.windll.dwmapi
-        dwm.DwmSetWindowAttribute(
-            wintypes.HWND(hwnd), DWMWA_CAPTION_COLOR, ctypes.byref(caption), ctypes.sizeof(caption)
-        )
-        dwm.DwmSetWindowAttribute(
-            wintypes.HWND(hwnd), DWMWA_TEXT_COLOR, ctypes.byref(text), ctypes.sizeof(text)
-        )
+        for attr, val in ((DWMWA_CAPTION_COLOR, caption), (DWMWA_TEXT_COLOR, text)):
+            dwm.DwmSetWindowAttribute(
+                wintypes.HWND(hwnd), attr, ctypes.byref(val), ctypes.sizeof(val)
+            )
     except Exception as exc:  # noqa: BLE001 — DWM unavailable / old Windows
         log.debug("caption color: DwmSetWindowAttribute failed (%s)", exc)
 
@@ -119,14 +115,19 @@ def run_app(host: str = "127.0.0.1", port: int = 8000) -> None:
         # than ship an unreliable frameless window, keep the native window and
         # brand it via the Windows-11 DWM caption color. A fully custom title
         # bar would mean moving to a Tauri shell.
+        chrome = _NativeChrome()
         window = webview.create_window(
             WINDOW_TITLE,
             url,
             width=1440,
             height=900,
             min_size=(1024, 720),
+            js_api=chrome,
         )
-        window.events.shown += lambda *_: _apply_windows_chrome(window)
+        chrome._window = window
+        # Start matched to the light theme; the web UI calls set_theme() on load
+        # and on every toggle to keep the caption in sync with the app theme.
+        window.events.shown += lambda *_: _apply_windows_chrome(window, dark=False)
         webview.start()  # blocks on the main thread until the window is closed
     except Exception as exc:  # noqa: BLE001
         log.warning("native window unavailable (%s); using browser fallback", exc)

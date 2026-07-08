@@ -1,10 +1,9 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import KbdFooter from "../components/KbdFooter";
+import PageHeader from "../components/PageHeader";
 import Rail from "../components/Rail";
-import StatusRow from "../components/StatusRow";
-import Topbar from "../components/Topbar";
 
 interface PersonEntry {
   id: number;
@@ -13,19 +12,44 @@ interface PersonEntry {
   cover_url: string;
 }
 
+async function mergePeople(targetId: number, sourceIds: number[]) {
+  const res = await fetch("/api/persons/merge", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ target_id: targetId, source_ids: sourceIds }),
+  });
+  if (!res.ok) throw new Error(`merge failed: HTTP ${res.status}`);
+}
+
 export default function Persons() {
   const [persons, setPersons] = useState<PersonEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [editing, setEditing] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
+  const [mergeMode, setMergeMode] = useState(false);
+  const [mergeTarget, setMergeTarget] = useState<number | null>(null);
+  const [mergeSources, setMergeSources] = useState<Set<number>>(() => new Set());
+  const [mergeBusy, setMergeBusy] = useState(false);
 
-  useEffect(() => {
+  const loadPersons = useCallback(() => {
+    setLoading(true);
     fetch("/api/persons")
       .then(r => r.json())
-      .then(d => { setPersons(d.persons); setLoading(false); })
-      .catch(e => { setErr(String(e)); setLoading(false); });
+      .then(d => {
+        setPersons(d.persons);
+        setErr(null);
+        setLoading(false);
+      })
+      .catch(e => {
+        setErr(String(e));
+        setLoading(false);
+      });
   }, []);
+
+  useEffect(() => {
+    loadPersons();
+  }, [loadPersons]);
 
   async function commitLabel(id: number) {
     const label = draft.trim() || null;
@@ -48,28 +72,108 @@ export default function Persons() {
     }
   }
 
+  const targetPerson = useMemo(
+    () => persons.find(p => p.id === mergeTarget) ?? null,
+    [persons, mergeTarget]
+  );
+
+  const sourceIds = useMemo(
+    () => Array.from(mergeSources).filter(id => id !== mergeTarget),
+    [mergeSources, mergeTarget]
+  );
+
+  function resetMerge() {
+    setMergeMode(false);
+    setMergeTarget(null);
+    setMergeSources(new Set());
+  }
+
+  function onMergeCardClick(id: number) {
+    if (!mergeMode) return;
+    if (mergeTarget === null) {
+      setMergeTarget(id);
+      return;
+    }
+    if (id === mergeTarget) {
+      setMergeTarget(null);
+      return;
+    }
+    setMergeSources(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function onDropPerson(sourceId: number, targetId: number) {
+    if (!mergeMode || sourceId === targetId) return;
+    setMergeTarget(targetId);
+    setMergeSources(prev => new Set(prev).add(sourceId));
+  }
+
+  async function commitMerge() {
+    if (mergeTarget === null || sourceIds.length === 0) return;
+    setMergeBusy(true);
+    setErr(null);
+    try {
+      await mergePeople(mergeTarget, sourceIds);
+      resetMerge();
+      loadPersons();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setMergeBusy(false);
+    }
+  }
+
+  const mergeSummary = mergeMode
+    ? mergeTarget === null
+      ? "Choose the person to keep, then click or drag other identities into it"
+      : `${sourceIds.length} selected to merge into ${targetPerson?.label || `P${mergeTarget}`}`
+    : `${persons.filter(p => p.label).length} of ${persons.length} named - click a name to label`;
+
   return (
     <div className="app">
       <Rail />
-      <div className="workspace">
-        <Topbar folder="selects" context="persons" />
-        <StatusRow
-          pos={`${persons.length} identities`}
-          keepersCount={persons.filter(p => p.label).length}
-          details={loading ? "loading…" : err ?? "click a name to label"}
+      <div
+        className="workspace"
+        style={{
+          display: "grid",
+          gridTemplateRows: "auto 1fr auto",
+          height: "100vh",
+          maxHeight: "100vh",
+          overflow: "hidden",
+        }}
+      >
+        <PageHeader
+          context="persons"
+          title="People"
+          subtitle={loading ? "loading..." : err ?? mergeSummary}
+          actions={
+            mergeMode ? (
+              <>
+                <button className="btn btn-text" type="button" onClick={resetMerge} disabled={mergeBusy}>
+                  Cancel
+                </button>
+                <button
+                  className="btn btn-filled"
+                  type="button"
+                  onClick={commitMerge}
+                  disabled={mergeBusy || mergeTarget === null || sourceIds.length === 0}
+                >
+                  {mergeBusy ? "Merging..." : `Merge ${sourceIds.length || ""}`}
+                </button>
+              </>
+            ) : (
+              <button className="btn btn-filled" type="button" onClick={() => setMergeMode(true)}>
+                Merge people
+              </button>
+            )
+          }
         />
 
-        <div className="cluster-detail-wrap">
-          <div className="cluster-detail-toolbar">
-            <h1 style={{ margin: 0, fontFamily: "var(--font-display)", fontWeight: 500, fontSize: 28 }}>
-              People
-            </h1>
-            <div style={{ flex: 1 }} />
-            <span style={{ color: "var(--md-on-surface-var)", fontSize: 13 }}>
-              {persons.filter(p => p.label).length} of {persons.length} named
-            </span>
-          </div>
-
+        <div className="cluster-detail-wrap" style={{ gridRow: "2", minHeight: 0, overflowY: "auto" }}>
           <div
             className="cluster-detail-grid"
             style={{ gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))" }}
@@ -77,15 +181,44 @@ export default function Persons() {
             {persons.map(p => {
               const isEditing = editing === p.id;
               const displayName = p.label || `P${p.id}`;
+              const isTarget = mergeTarget === p.id;
+              const isSource = sourceIds.includes(p.id);
               return (
-                <div key={p.id} className="cluster-photo" style={{ position: "relative", aspectRatio: "1/1" }}>
+                <div
+                  key={p.id}
+                  className={`cluster-photo person-card${mergeMode ? " is-merge-mode" : ""}${isTarget ? " is-merge-target" : ""}${isSource ? " is-merge-source" : ""}`}
+                  style={{ position: "relative", aspectRatio: "1/1" }}
+                  draggable={mergeMode}
+                  onDragStart={e => e.dataTransfer.setData("text/person-id", String(p.id))}
+                  onDragOver={e => {
+                    if (mergeMode) e.preventDefault();
+                  }}
+                  onDrop={e => {
+                    e.preventDefault();
+                    const sourceId = Number(e.dataTransfer.getData("text/person-id"));
+                    if (Number.isFinite(sourceId)) onDropPerson(sourceId, p.id);
+                  }}
+                  onClick={e => {
+                    if (mergeMode) {
+                      e.preventDefault();
+                      onMergeCardClick(p.id);
+                    }
+                  }}
+                >
                   <Link
                     to={`/people/${p.id}`}
                     style={{ display: "block", width: "100%", height: "100%" }}
-                    onClick={e => { if (isEditing) e.preventDefault(); }}
+                    onClick={e => { if (isEditing || mergeMode) e.preventDefault(); }}
                   >
                     <img src={p.cover_url} alt={displayName} loading="lazy" />
                   </Link>
+
+                  {mergeMode && (
+                    <span className="person-merge-badge">
+                      {isTarget ? "Target" : isSource ? "Merge" : "Pick"}
+                    </span>
+                  )}
+
                   <div
                     style={{
                       position: "absolute",
@@ -128,6 +261,10 @@ export default function Persons() {
                         onClick={e => {
                           e.preventDefault();
                           e.stopPropagation();
+                          if (mergeMode) {
+                            onMergeCardClick(p.id);
+                            return;
+                          }
                           setEditing(p.id);
                           setDraft(p.label ?? "");
                         }}
@@ -143,9 +280,9 @@ export default function Persons() {
                           textAlign: "left",
                           flex: 1,
                         }}
-                        title="Click to name this person"
+                        title={mergeMode ? "Select for merge" : "Click to name this person"}
                       >
-                        {p.label || <em style={{ opacity: 0.7 }}>name…</em>}
+                        {p.label || <em style={{ opacity: 0.7 }}>name...</em>}
                       </button>
                     )}
                     <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, opacity: 0.85 }}>

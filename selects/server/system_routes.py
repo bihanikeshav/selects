@@ -13,8 +13,9 @@ def register_system_routes(app: FastAPI) -> None:
 
         caps = detect_capabilities()
         return {
-            "backend": "gpu" if caps.cuda_available else "cpu",
-            "cuda_available": caps.cuda_available,
+            "backend": "gpu" if caps.gpu_available else "cpu",
+            "gpu_available": caps.gpu_available,
+            "provider": caps.provider,
             "device_name": caps.device_name,
             "vram_total_mb": caps.vram_total_mb,
         }

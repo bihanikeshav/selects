@@ -5,8 +5,7 @@ import { useLikeStatus, useToggleLike } from "../hooks/useLikes";
 import { useCullKeys } from "../hooks/useCullKeys";
 import CompareView from "../components/CompareView";
 import Rail from "../components/Rail";
-import Topbar from "../components/Topbar";
-import StatusRow from "../components/StatusRow";
+import PageHeader from "../components/PageHeader";
 import ModeViewBar from "../components/ModeViewBar";
 import KbdFooter from "../components/KbdFooter";
 import BurstThumb from "../components/BurstThumb";
@@ -439,35 +438,34 @@ export default function BurstCull() {
       ? (currentPhoto.path.split(/[\\/]/).pop() ?? currentPhoto.path)
       : "";
 
-  // Use a consistent folder label across all views so the Topbar doesn't
-  // change shape when switching modes. The actual folder shows up in the
-  // status row context only.
-  const folderName = "selects";
-
   const hasMoment = Boolean(currentPhoto?.moment_id && (currentPhoto?.moment_size ?? 0) > 1);
 
   return (
     <div className="app">
       <Rail />
 
-      <div className="workspace">
-        <Topbar
-          folder={folderName}
+      <div
+        className="workspace"
+        style={{
+          display: "grid",
+          gridTemplateRows: "auto 1fr auto auto",
+          height: "100vh",
+          maxHeight: "100vh",
+          overflow: "hidden",
+        }}
+      >
+        <PageHeader
           context={loadState === "loaded" ? `cull · ${idx + 1} of ${total}` : "cull"}
-        />
-        <ModeViewBar />
-
-        <StatusRow
-          pos={loadState === "loaded" ? `${idx + 1} / ${total}` : undefined}
-          keepersCount={swipeSummary?.kept ?? 0}
-          details={
+          title="Cull"
+          subtitle={
             loadState === "loaded"
               ? swipeSummary
-                ? `${swipeSummary.kept} kept · ${swipeSummary.rejected} rejected · ${swipeSummary.undecided} to review`
+                ? `${idx + 1} / ${total} · ${swipeSummary.kept} kept · ${swipeSummary.rejected} rejected · ${swipeSummary.undecided} to review`
                 : `${total} photos indexed`
-              : undefined
+              : "Decide what's worth keeping — C keep, X reject"
           }
-          right={
+          above={<ModeViewBar />}
+          actions={
             <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
               <span style={{ fontSize: 11, color: "var(--md-on-surface-var)", marginRight: 6 }}>
                 Sort:

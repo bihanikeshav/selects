@@ -35,6 +35,14 @@ jobs:
           # working AI instead of ImportError-ing on first use.
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install ".[ml]" pyinstaller  # non-editable: avoids PEP 660 editable-hook issues
+      - name: Fetch darktable for bundling (Windows)
+        if: runner.os == 'Windows'
+        # Silent-installs darktable into vendor/darktable (Inno Setup, no extra
+        # tooling); selects.spec bundles it so "Edit in darktable" works with no
+        # separate install. Non-fatal: a failure just means the released build
+        # falls back to a system darktable install.
+        continue-on-error: true
+        run: python packaging/fetch_darktable.py
       - name: Build bundle (with ML stack)
         run: python packaging/build.py --ml
       - name: Zip bundle

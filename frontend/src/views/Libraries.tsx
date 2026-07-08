@@ -11,6 +11,7 @@ import {
 import type { Library } from "../api/types";
 import FolderPicker from "../components/FolderPicker";
 import ModelsCard from "../components/ModelsCard";
+import PageHeader from "../components/PageHeader";
 import Rail from "../components/Rail";
 import WatchCard from "../components/WatchCard";
 
@@ -35,9 +36,6 @@ export default function Libraries() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [rowErr, setRowErr] = useState<string | null>(null);
 
-  // `indexing` is only reported by the status endpoint, and applies to the
-  // active library (the one being processed). `indexingId` is which library
-  // that is, so we can badge/disable just that card.
   const [indexingId, setIndexingId] = useState<string | null>(null);
   const pollRef = useRef<number | null>(null);
 
@@ -64,8 +62,6 @@ export default function Libraries() {
     };
   }, []);
 
-  // Poll every 3s while a library is indexing, so photo counts and the
-  // indexing flag stay fresh without a manual reload.
   useEffect(() => {
     if (indexingId && pollRef.current === null) {
       pollRef.current = window.setInterval(refresh, 3000);
@@ -144,17 +140,50 @@ export default function Libraries() {
   return (
     <div className="app">
       <Rail />
-      <div className="workspace">
+      <div
+        className="workspace"
+        style={{
+          display: "grid",
+          gridTemplateRows: "auto 1fr",
+          height: "100vh",
+          maxHeight: "100vh",
+          overflow: "hidden",
+        }}
+      >
+        <PageHeader
+          context="libraries"
+          title="Libraries"
+          subtitle={
+            loading
+              ? "loading..."
+              : `${libs.length} ${libs.length === 1 ? "library" : "libraries"}`
+          }
+          actions={
+            <form className="lib-add lib-add-inline" onSubmit={onAdd} aria-label="Add library">
+              <label className="onb-field lib-add-name">
+                <span className="onb-label">Name</span>
+                <input
+                  className="onb-input"
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="My Trip"
+                />
+              </label>
+              <div className="onb-field lib-add-path">
+                <span className="onb-label">Folder path</span>
+                <FolderPicker value={path} onChange={setPath} />
+              </div>
+              <button className="btn btn-filled lib-add-btn" type="submit" disabled={creating}>
+                {creating ? "Adding..." : "Add library"}
+              </button>
+            </form>
+          }
+        />
         <div className="lib-wrap">
-          <header className="lib-header">
-            <h1>Libraries</h1>
-            <span className="lib-sub">
-              {loading ? "loading…" : `${libs.length} ${libs.length === 1 ? "library" : "libraries"}`}
-            </span>
-          </header>
-
           {listErr && <p className="onb-error">{listErr}</p>}
           {rowErr && <p className="onb-error">{rowErr}</p>}
+          {formErr && <p className="onb-error">{formErr}</p>}
 
           <div className="lib-list">
             {libs.map((l) => {
@@ -167,12 +196,12 @@ export default function Libraries() {
                     <div className="lib-card-title">
                       <span className="lib-name">{l.name}</span>
                       {isActive && <span className="lib-badge">ACTIVE</span>}
-                      {indexing && <span className="lib-badge lib-badge-busy">INDEXING…</span>}
+                      {indexing && <span className="lib-badge lib-badge-busy">INDEXING...</span>}
                     </div>
                     <div className="lib-path">{l.path}</div>
                     <div className="lib-meta">
-                      <span>{l.photo_count == null ? "—" : `${l.photo_count.toLocaleString()} photos`}</span>
-                      <span className="lib-dot">·</span>
+                      <span>{l.photo_count == null ? "-" : `${l.photo_count.toLocaleString()} photos`}</span>
+                      <span className="lib-dot">-</span>
                       <span>{fmtDate(l.created_at)}</span>
                     </div>
                   </div>
@@ -191,7 +220,7 @@ export default function Libraries() {
                       onClick={() => onReindex(l.id)}
                       disabled={busy || indexing}
                     >
-                      {indexing ? "Re-indexing…" : "Re-index"}
+                      {indexing ? "Re-indexing..." : "Re-index"}
                     </button>
                     <button
                       className={"btn " + (confirmId === l.id ? "btn-filled lib-danger" : "btn-text")}
@@ -206,33 +235,9 @@ export default function Libraries() {
               );
             })}
             {!loading && libs.length === 0 && !listErr && (
-              <p className="lib-empty">No libraries yet — add one below.</p>
+              <p className="lib-empty">No libraries yet. Add one from the header.</p>
             )}
           </div>
-
-          <form className="lib-add" onSubmit={onAdd}>
-            <h2>Add library</h2>
-            <div className="lib-add-row">
-              <label className="onb-field">
-                <span className="onb-label">Name</span>
-                <input
-                  className="onb-input"
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="My Trip"
-                />
-              </label>
-              <div className="onb-field lib-add-path">
-                <span className="onb-label">Folder path</span>
-                <FolderPicker value={path} onChange={setPath} />
-              </div>
-              <button className="btn btn-filled lib-add-btn" type="submit" disabled={creating}>
-                {creating ? "Adding…" : "Add"}
-              </button>
-            </div>
-            {formErr && <p className="onb-error">{formErr}</p>}
-          </form>
 
           <ModelsCard />
 

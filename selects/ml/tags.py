@@ -5,7 +5,6 @@ import logging
 from typing import Callable
 
 import numpy as np
-import torch
 
 from selects.config import FolderConfig
 from selects.db import init_db, session_scope
@@ -61,17 +60,17 @@ def run_tag_stage(
             flat_prompts.append(p)
             tag_index.append(i)
 
-    txt_feats = encode_text_prompts(flat_prompts)              # [P, 1152] float32 (on whatever device encode uses)
-    device = txt_feats.device
+    txt_feats = encode_text_prompts(flat_prompts)              # [P, 1152] float32, L2-normalized
     n_tags = len(tag_names)
 
     # Mean-pool prompts per tag -> [T, 1152]
-    tag_feats = torch.zeros((n_tags, txt_feats.shape[1]), device=device, dtype=txt_feats.dtype)
-    counts = torch.zeros(n_tags, device=device, dtype=txt_feats.dtype)
+    tag_feats = np.zeros((n_tags, txt_feats.shape[1]), dtype=np.float32)
+    counts = np.zeros(n_tags, dtype=np.float32)
     for j, t_idx in enumerate(tag_index):
         tag_feats[t_idx] += txt_feats[j]
         counts[t_idx] += 1
-    tag_feats = torch.nn.functional.normalize(tag_feats / counts[:, None], dim=-1)
+    tag_feats = tag_feats / counts[:, None]
+    tag_feats /= np.linalg.norm(tag_feats, axis=-1, keepdims=True) + 1e-12
 
     # Load all embeddings that have embedding_done=True
     with session_scope(Session) as s:
@@ -89,33 +88,25 @@ def run_tag_stage(
     total = len(rows)
     log.info("tagging %d photos", total)
     ids = [r[0] for r in rows]
-    feats_np = np.stack([np.frombuffer(r[1], dtype=np.float16).copy() for r in rows])  # [N, 1152]
-    feats = torch.from_numpy(feats_np).float().to(device)   # same device as text features
-    feats = torch.nn.functional.normalize(feats, dim=-1)
+    feats = np.stack([np.frombuffer(r[1], dtype=np.float16).astype(np.float32) for r in rows])  # [N, 1152]
+    feats /= np.linalg.norm(feats, axis=-1, keepdims=True) + 1e-12
 
-    # Compute full [N, T] similarity matrix in chunks (avoid OOM on large folders)
-    chunk = 1024
-    all_sims: list[torch.Tensor] = []
-    for start in range(0, total, chunk):
-        sub = feats[start:start + chunk]
-        all_sims.append(sub @ tag_feats.T)                    # [chunk, T]
-    sims = torch.cat(all_sims, dim=0)                         # [N, T]
+    sims = feats @ tag_feats.T                                       # [N, T]
 
     # --- Per-tag z-score normalization ---
     # Subtract each tag's dataset-mean similarity so that only photos that match a tag
     # *unusually well* (relative to the whole dataset) get assigned to it.
     # This prevents generic background concepts (e.g. "mountain" for every Ladakh photo)
     # from winning everywhere.
-    tag_means = sims.mean(dim=0, keepdim=True)                       # [1, T]
-    # correction=0 avoids NaN when N=1 (Bessel's correction would give inf/NaN for single sample)
-    tag_std   = sims.std(dim=0, keepdim=True, correction=0).clamp(min=1e-6)  # [1, T]
-    sims_z    = (sims - tag_means) / tag_std                         # [N, T] — z-scores
+    tag_means = sims.mean(axis=0, keepdims=True)                     # [1, T]
+    # ddof=0 avoids NaN when N=1 (Bessel's correction would divide by zero)
+    tag_std = np.clip(sims.std(axis=0, keepdims=True, ddof=0), 1e-6, None)  # [1, T]
+    sims_z = (sims - tag_means) / tag_std                            # [N, T] — z-scores
 
-    # Top-k by z-score; we store z-scores as "score" in photo_tags
+    # Top-k by z-score (descending); we store z-scores as "score" in photo_tags
     k = min(top_k, n_tags)
-    top_v, top_i = torch.topk(sims_z, k=k, dim=-1)           # [N, k]
-    top_indices = top_i.cpu().numpy()
-    top_scores  = top_v.cpu().numpy()
+    top_indices = np.argsort(-sims_z, axis=-1)[:, :k]                # [N, k]
+    top_scores = np.take_along_axis(sims_z, top_indices, axis=-1)    # [N, k]
 
     # Write tags — idempotent: wipe this stage's existing rows first, then rewrite.
     # Bulk query delete (not ORM s.delete) because source is a nullable PK column

@@ -7,6 +7,7 @@ import {
   videoProcessStatus,
 } from "../api/videos";
 import type { VideoFramesResponse, VideoItem, VideoListResponse } from "../api/videos";
+import PageHeader from "../components/PageHeader";
 import Rail from "../components/Rail";
 import "../components/Videos.css";
 
@@ -232,20 +233,28 @@ export default function Videos() {
   return (
     <div className="app">
       <Rail />
-      <div className="workspace">
-        <div className="videos-wrap">
-          <header className="videos-header">
-            <div>
-              <h1>Videos</h1>
-              <span className="videos-sub">
-                {result
-                  ? `${result.total} video${result.total === 1 ? "" : "s"} · ${result.processed} analysed` +
-                    (result.dead_footage_count > 0
-                      ? ` · ${result.dead_footage_count} dead footage`
-                      : "")
-                  : "Loading…"}
-              </span>
-            </div>
+      <div
+        className="workspace"
+        style={{
+          display: "grid",
+          gridTemplateRows: "auto 1fr",
+          height: "100vh",
+          maxHeight: "100vh",
+          overflow: "hidden",
+        }}
+      >
+        <PageHeader
+          context="videos"
+          title="Videos"
+          subtitle={
+            result
+              ? `${result.total} video${result.total === 1 ? "" : "s"} · ${result.processed} analysed` +
+                (result.dead_footage_count > 0
+                  ? ` · ${result.dead_footage_count} dead footage`
+                  : "")
+              : "Loading…"
+          }
+          actions={
             <button
               className="btn btn-outlined"
               onClick={onAnalyse}
@@ -253,8 +262,9 @@ export default function Videos() {
             >
               {analysing ? "Analysing…" : pending > 0 ? `Analyse ${pending} pending` : "All analysed"}
             </button>
-          </header>
-
+          }
+        />
+        <div className="videos-wrap">
           {error && <p className="videos-error">{error}</p>}
 
           {result && videos.length === 0 && (

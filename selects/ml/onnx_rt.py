@@ -1,0 +1,154 @@
+"""Shared ONNX Runtime helpers.
+
+Picks the best execution provider available in the *installed* onnxruntime so a
+single ``.onnx`` model runs GPU-accelerated on Windows (DirectML), macOS
+(CoreML) and Linux/NVIDIA (CUDA), falling back to CPU everywhere.
+
+Packaging-agnostic on purpose: we intersect a priority list with
+``onnxruntime.get_available_providers()``, so swapping the bundled runtime
+(``onnxruntime-directml`` vs ``-gpu`` vs plain ``onnxruntime``) needs no code
+change — the provider simply appears (or doesn't) and we adapt.
+"""
+from __future__ import annotations
+
+import logging
+import os
+from pathlib import Path
+from typing import Sequence
+
+log = logging.getLogger(__name__)
+
+# All ONNX weights live in one public HF repo (see scratchpad upload_hf.py).
+HF_ONNX_REPO = "bihanikeshav/selects-onnx"
+
+# Logical model name -> files to fetch. The first entry is the graph passed to
+# make_session; the rest are external-data siblings that ORT resolves by bare
+# basename from the same directory, so they must be co-located (hf_hub_download
+# places every file from a repo into the same snapshot dir, so they are).
+_MODEL_FILES: dict[str, tuple[str, ...]] = {
+    "siglip_vision": ("siglip_vision.onnx",),          # fp16, self-contained
+    "siglip_text": ("siglip_text.onnx",),              # fp16, self-contained
+    "nafnet": ("nafnet.onnx",),                        # fp16, self-contained
+    "ram_plus": ("ram_plus.onnx", "ram_plus.onnx.data"),   # fp32 + external data
+    "csrnet": ("csrnet.onnx", "csrnet.onnx.data"),         # fp32 + external data
+    "zero_dce": ("zero_dce.onnx", "zero_dce.onnx.data"),   # fp32 + external data
+}
+
+# First available wins. CPU is always appended as the last-resort fallback.
+_EP_PRIORITY: tuple[str, ...] = (
+    "CUDAExecutionProvider",    # NVIDIA (Linux / Windows, onnxruntime-gpu)
+    "DmlExecutionProvider",     # any DX12 GPU (Windows, onnxruntime-directml)
+    "CoreMLExecutionProvider",  # Apple Silicon GPU / ANE (macOS)
+    "CPUExecutionProvider",
+)
+
+_SESSIONS: dict[str, "object"] = {}
+
+
+def available_providers() -> list[str]:
+    import onnxruntime as ort
+
+    return list(ort.get_available_providers())
+
+
+def select_providers(prefer: Sequence[str] | None = None) -> list[str]:
+    """Return the providers to use, highest-priority-available first, CPU last."""
+    import onnxruntime as ort
+
+    avail = set(ort.get_available_providers())
+    order = tuple(prefer) if prefer else _EP_PRIORITY
+    chosen = [ep for ep in order if ep in avail]
+    if "CPUExecutionProvider" not in chosen:
+        chosen.append("CPUExecutionProvider")
+    return chosen
+
+
+def make_session(onnx_path, prefer: Sequence[str] | None = None, cache: bool = True):
+    """Build (and optionally cache) an ORT InferenceSession on the best EP."""
+    import onnxruntime as ort
+
+    key = str(Path(onnx_path).resolve())
+    if cache and key in _SESSIONS:
+        return _SESSIONS[key]
+
+    providers = select_providers(prefer)
+    so = ort.SessionOptions()
+    so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+    sess = ort.InferenceSession(key, sess_options=so, providers=providers)
+    log.info("ONNX session %s on %s", Path(onnx_path).name, sess.get_providers())
+    if cache:
+        _SESSIONS[key] = sess
+    return sess
+
+
+def _onnx_dir() -> Path:
+    """Flat local dir for the downloaded ONNX files.
+
+    We download with ``local_dir`` (real filenames, co-located) rather than the
+    default HF blob cache: an external-data ``.onnx`` references its ``.data`` by
+    bare basename, and ORT resolves that against the graph's directory — which in
+    the blob cache is a hashed ``blobs/`` path where the sibling name doesn't exist.
+    """
+    env = os.environ.get("SELECTS_MODELS_DIR")
+    base = Path(env) if env else Path.home() / ".cache" / "selects" / "models"
+    d = base / "selects-onnx"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def repo_file(filename: str) -> str:
+    """Download a single file from the selects-onnx HF repo, return local path.
+
+    Used for the ONNX graphs, their external-data siblings, and companion assets
+    (ram_meta.npz, ram_tags.json, the SigLIP tokenizer). Downloaded into a flat
+    local dir so external-data references resolve; huggingface_hub skips the
+    transfer when the file is already present and unchanged.
+    """
+    from huggingface_hub import hf_hub_download
+
+    return hf_hub_download(HF_ONNX_REPO, filename, local_dir=str(_onnx_dir()))
+
+
+def model_path(name: str) -> str:
+    """Fetch a logical model's file(s) from HF and return its local .onnx path.
+
+    Downloads external-data siblings too (into the same snapshot dir) so ORT can
+    resolve them. ``name`` is a key of ``_MODEL_FILES``.
+    """
+    files = _MODEL_FILES[name]
+    graph_path: str | None = None
+    for fn in files:
+        p = repo_file(fn)
+        if graph_path is None:
+            graph_path = p  # the .onnx graph is always first
+    assert graph_path is not None
+    return graph_path
+
+
+def model_session(name: str, prefer: Sequence[str] | None = None, cache: bool = True):
+    """Convenience: download logical model *name* and build a cached ORT session."""
+    return make_session(model_path(name), prefer=prefer, cache=cache)
+
+
+# Every file the app needs from the repo: model graphs + external data + the
+# RAM++ post-processing metadata + the SigLIP tokenizer. Used by model_assets to
+# pre-fetch/verify the whole bundle in one place.
+ALL_FILES: tuple[str, ...] = tuple(
+    f for files in _MODEL_FILES.values() for f in files
+) + ("ram_meta.npz", "ram_tags.json", "spiece.model")
+
+
+def all_present() -> bool:
+    """True if every bundle file is already downloaded to the local onnx dir."""
+    d = _onnx_dir()
+    return all((d / f).exists() and (d / f).stat().st_size > 0 for f in ALL_FILES)
+
+
+def ensure_all(progress=None) -> None:
+    """Download every bundle file (skips those already present). ``progress`` is
+    an optional callback receiving ``(index, total, filename)`` before each fetch."""
+    total = len(ALL_FILES)
+    for i, fn in enumerate(ALL_FILES, 1):
+        if progress is not None:
+            progress(i, total, fn)
+        repo_file(fn)

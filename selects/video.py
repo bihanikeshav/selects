@@ -273,7 +273,7 @@ def _embed_best_frame(img: np.ndarray) -> Optional[bytes]:
         from selects.ml.embed import encode_image_batch
 
         feats, _iqa = encode_image_batch([Image.fromarray(img)])
-        return feats[0].numpy().astype(np.float16).tobytes()
+        return feats[0].astype(np.float16).tobytes()
     except Exception as exc:  # noqa: BLE001 — ML extras are optional
         log.debug("SigLIP embedding for video frame skipped: %s", exc)
         return None

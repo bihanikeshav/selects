@@ -41,35 +41,19 @@ log = logging.getLogger(__name__)
 # --------------------------------------------------------------------------- #
 
 # ``ref`` is the HF repo id (kind="hf"), the download URL (kind="url"), or the
-# insightface model-pack name/url (kind="insightface"). ``filename`` (url only)
-# is the on-disk basename under the shared models dir. Sizes are approximate
+# insightface model-pack name/url (kind="insightface"). kind="onnx" is the shared
+# selects-onnx bundle managed by selects.ml.onnx_rt (SigLIP + RAM++ + the three
+# enhancement nets + tokenizer/metadata) — all ML runs on ONNX Runtime now, so
+# there is no bundled torch and no per-model .pth downloads. Sizes are approximate
 # download footprints in MB.
 MANIFEST: list[dict] = [
     {
-        "id": "siglip",
-        "name": "SigLIP SO400M (image embeddings)",
-        "kind": "hf",
-        "ref": "google/siglip-so400m-patch14-384",
-        "approx_size_mb": 3400,
-        "required_for": "photo scoring",
-        "sha256": None,  # n/a for hf assets
-    },
-    {
-        "id": "qwen3vl",
-        "name": "Qwen3-VL-2B-Instruct (vision-language model)",
-        "kind": "hf",
-        "ref": "Qwen/Qwen3-VL-2B-Instruct",
-        "approx_size_mb": 4100,
-        "required_for": "captions and cluster naming",
-        "sha256": None,  # n/a for hf assets
-    },
-    {
-        "id": "ram_plus",
-        "name": "RAM++ (Recognize Anything Plus)",
-        "kind": "hf",
-        "ref": "xinyu1205/recognize-anything-plus-model",
-        "approx_size_mb": 2800,
-        "required_for": "tagging",
+        "id": "selects_onnx",
+        "name": "selects ONNX models (SigLIP, RAM++, enhancement)",
+        "kind": "onnx",
+        "ref": "bihanikeshav/selects-onnx",
+        "approx_size_mb": 3130,
+        "required_for": "photo scoring, tagging, enhancement",
         "sha256": None,  # n/a for hf assets
     },
     {
@@ -80,45 +64,6 @@ MANIFEST: list[dict] = [
         "approx_size_mb": 330,
         "required_for": "face recognition",
         "sha256": None,  # insightface manages/verifies its own pack
-    },
-    {
-        "id": "nafnet",
-        "name": "NAFNet GoPro width32 (deblur)",
-        "kind": "url",
-        "ref": (
-            "https://huggingface.co/mikestealth/nafnet-models/resolve/main/"
-            "NAFNet-GoPro-width32.pth"
-        ),
-        "filename": "nafnet_gopro_width32.pth",
-        "approx_size_mb": 70,
-        "required_for": "enhancement (deblur)",
-        "sha256": None,  # not cached at authoring time
-    },
-    {
-        "id": "zero_dce",
-        "name": "Zero-DCE++ Epoch99 (low-light)",
-        "kind": "url",
-        "ref": (
-            "https://raw.githubusercontent.com/Li-Chongyi/Zero-DCE_extension/master/"
-            "Zero-DCE++/snapshots_Zero_DCE++/Epoch99.pth"
-        ),
-        "filename": "zero_dce_plus_epoch99.pth",
-        "approx_size_mb": 1,
-        "required_for": "enhancement (low-light)",
-        "sha256": None,  # not cached at authoring time
-    },
-    {
-        "id": "csrnet",
-        "name": "CSRNet FiveK (retouch)",
-        "kind": "url",
-        "ref": (
-            "https://github.com/hejingwenhejingwen/CSRNet/raw/master/"
-            "experiments/pretrain_models/csrnet.pth"
-        ),
-        "filename": "csrnet_fivek.pth",
-        "approx_size_mb": 1,
-        "required_for": "enhancement (retouch)",
-        "sha256": None,  # not cached at authoring time
     },
 ]
 
@@ -227,6 +172,10 @@ def _hf_repo_cached(repo_id: str) -> bool:
 def asset_present(asset: dict, base_models_dir: Optional[Path] = None) -> bool:
     """Return True if *asset* is already available on disk."""
     kind = asset["kind"]
+    if kind == "onnx":
+        from selects.ml.onnx_rt import all_present
+
+        return all_present()
     if kind == "hf":
         return _hf_repo_cached(asset["ref"])
     if kind == "insightface":
@@ -273,7 +222,11 @@ def status(base_models_dir: Optional[Path] = None) -> dict:
 
 def _download_asset(asset: dict, base_models_dir: Optional[Path]) -> None:
     kind = asset["kind"]
-    if kind == "hf":
+    if kind == "onnx":
+        from selects.ml.onnx_rt import ensure_all
+
+        ensure_all()
+    elif kind == "hf":
         from huggingface_hub import snapshot_download
 
         snapshot_download(asset["ref"])
