@@ -163,13 +163,16 @@ a = Analysis(
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 # Branded splash shown the instant the exe launches, until the app window opens.
+# PyInstaller's splash screen is supported on Windows and Linux ONLY — creating
+# a Splash() on macOS raises at build time, so guard it off there.
 _splash_img = os.path.join(REPO_ROOT, "packaging", "splash.png")
+_splash_ok = os.path.exists(_splash_img) and sys.platform != "darwin"
 splash = Splash(
     _splash_img,
     binaries=a.binaries,
     datas=a.datas,
     always_on_top=True,
-) if os.path.exists(_splash_img) else None
+) if _splash_ok else None
 
 exe = EXE(
     pyz,
