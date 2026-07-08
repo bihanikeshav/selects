@@ -16,7 +16,7 @@ except Exception:
 
 log = logging.getLogger(__name__)
 
-from fastapi import Body, FastAPI, HTTPException, Query, Response
+from fastapi import Body, FastAPI, File, Form, HTTPException, Query, Response, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -909,6 +909,54 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
     @app.get("/api/preview/{sha256}")
     def preview(sha256: str):
         return _serve_image_for(cfg, sha256, kind="preview")
+
+    # ── in-app editor (non-destructive) ──────────────────────────────────────
+    @app.get("/api/editor/params/{sha256}")
+    def editor_params(sha256: str):
+        """Return the saved editor slider params for a photo, or null."""
+        import json
+
+        from selects.db.models import PhotoEdit
+
+        with session_scope(Session) as s:
+            photo = s.query(Photo).filter(Photo.sha256 == sha256).first()
+            if not photo:
+                raise HTTPException(404, detail="photo not found")
+            pe = s.get(PhotoEdit, photo.id)
+            return {"params": json.loads(pe.params) if pe else None}
+
+    @app.post("/api/editor/save/{sha256}")
+    async def editor_save(
+        sha256: str,
+        params: str = Form(...),
+        image: UploadFile = File(...),
+    ):
+        """Persist the editor params and the baked JPEG (<state>/edits/<sha>.jpg)."""
+        from datetime import datetime as _dt
+
+        from selects.db.models import PhotoEdit
+
+        data = await image.read()
+        with session_scope(Session) as s:
+            photo = s.query(Photo).filter(Photo.sha256 == sha256).first()
+            if not photo:
+                raise HTTPException(404, detail="photo not found")
+            edits_dir = cfg.state_dir / "edits"
+            edits_dir.mkdir(parents=True, exist_ok=True)
+            (edits_dir / f"{sha256}.jpg").write_bytes(data)
+            pe = s.get(PhotoEdit, photo.id) or PhotoEdit(photo_id=photo.id)
+            pe.params = params
+            pe.updated_at = _dt.utcnow()
+            s.add(pe)
+        return {"ok": True}
+
+    @app.get("/api/editor/result/{sha256}")
+    def editor_result(sha256: str):
+        """Serve the baked edited JPEG if one exists, else 404."""
+        out = cfg.state_dir / "edits" / f"{sha256}.jpg"
+        if not out.exists():
+            raise HTTPException(404, detail="no edit")
+        return FileResponse(str(out), media_type="image/jpeg")
 
     @app.get("/api/enhance/{sha256}")
     def enhance(

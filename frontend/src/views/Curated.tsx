@@ -7,6 +7,7 @@ import ModeViewBar from "../components/ModeViewBar";
 import PageHeader from "../components/PageHeader";
 import Rail from "../components/Rail";
 import TasteCard from "../components/TasteCard";
+import PhotoEditor from "../editor/PhotoEditor";
 
 type SortMode = "aesthetic" | "taken_at";
 
@@ -17,6 +18,7 @@ export default function Curated() {
   const [sortMode, setSortMode] = useState<SortMode>("aesthetic");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null);
+  const [editSha, setEditSha] = useState<string | null>(null);
   const [launching, setLaunching] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [focusedIdx, setFocusedIdx] = useState<number | null>(null);
@@ -367,8 +369,22 @@ export default function Curated() {
             alt=""
             style={{ maxWidth: "94vw", maxHeight: "94vh" }}
           />
+          <button
+            className="btn btn-filled"
+            style={{ position: "absolute", top: 20, right: 20, cursor: "pointer" }}
+            onClick={(e) => {
+              e.stopPropagation();
+              const p = photos[lightboxIdx];
+              setLightboxIdx(null);
+              if (p) setEditSha(p.sha256);
+            }}
+          >
+            Edit
+          </button>
         </div>
       )}
+
+      {editSha && <PhotoEditor sha={editSha} onClose={() => setEditSha(null)} />}
     </div>
   );
 }
