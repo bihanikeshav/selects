@@ -86,7 +86,19 @@ export default function Onboarding() {
   const libIdRef = useRef<string | null>(null);
   const [sys, setSys] = useState<SystemInfo | null>(null);
   const [nPhotos, setNPhotos] = useState(0);
+  const [stopping, setStopping] = useState(false);
   const [, setTick] = useState(0);
+
+  async function stopIndexing() {
+    setStopping(true);
+    try {
+      await fetch("/api/libraries/cancel", { method: "POST" });
+    } catch {
+      // best-effort — navigate away regardless
+    }
+    // Partial progress is kept; the user lands back in the app and can resume.
+    navigate("/");
+  }
   const stageStartRef = useRef<{ stage: string; at: number }>({ stage: "", at: 0 });
 
   useEffect(() => {
@@ -419,6 +431,19 @@ export default function Onboarding() {
                     ? `${fmtDuration(remainingSec)} remaining`
                     : "estimating…"}
                 </span>
+              </div>
+            )}
+
+            {phase === "indexing" && (
+              <div style={{ display: "flex", justifyContent: "center", margin: "4px 0 12px" }}>
+                <button
+                  className="btn btn-text"
+                  type="button"
+                  onClick={stopIndexing}
+                  disabled={stopping}
+                >
+                  {stopping ? "Stopping…" : "Stop and go back"}
+                </button>
               </div>
             )}
 

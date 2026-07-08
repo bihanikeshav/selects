@@ -81,12 +81,18 @@ def register_libraries(
 
         def worker():
             try:
-                run_pipeline_stages(cfg, publish)
+                run_pipeline_stages(cfg, publish, should_cancel=manager.should_cancel)
             finally:
                 manager.end_indexing()
 
         threading.Thread(target=worker, daemon=True).start()
         return {"started": True}
+
+    @app.post("/api/libraries/cancel")
+    def cancel_indexing():
+        """Ask the in-progress indexing run to stop at the next checkpoint."""
+        stopping = manager.request_cancel()
+        return {"stopping": stopping}
 
     @app.get("/api/libraries/status")
     def libraries_status():

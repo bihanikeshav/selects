@@ -86,6 +86,7 @@ class LibraryManager:
         self._active_id: Optional[str] = None
         self._active_cfg: Optional[FolderConfig] = None
         self._indexing = False
+        self._cancel = threading.Event()
         self._loop = None
         self._load()
         if bootstrap_cfg is not None:
@@ -279,11 +280,24 @@ class LibraryManager:
             if self._indexing:
                 return False
             self._indexing = True
+            self._cancel.clear()
             return True
 
     def end_indexing(self) -> None:
         with self._lock:
             self._indexing = False
+            self._cancel.clear()
+
+    def request_cancel(self) -> bool:
+        """Ask the running index to stop. Returns True if a run was active."""
+        with self._lock:
+            if not self._indexing:
+                return False
+            self._cancel.set()
+            return True
+
+    def should_cancel(self) -> bool:
+        return self._cancel.is_set()
 
 
 class ActiveConfigProxy:
