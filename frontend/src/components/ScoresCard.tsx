@@ -42,7 +42,7 @@ function MiniHistogram({ histogram }: { histogram: Histogram | null }) {
     1,
   );
   const w = 160;
-  const h = 50;
+  const h = 56; // match the empty-state box height so switching photos never jumps
   const bw = w / histogram.bins;
 
   const channels = [
@@ -85,13 +85,17 @@ export default function ScoresCard({ photo }: ScoresCardProps) {
   const [hist, setHist] = useState<Histogram | null>(null);
 
   useEffect(() => {
-    setHist(null);
-    if (!photo?.sha256) return;
+    // Don't blank the histogram on switch — keep the previous one until the new
+    // one arrives so the panel morphs instead of flashing to an empty box.
+    if (!photo?.sha256) {
+      setHist(null);
+      return;
+    }
     let cancelled = false;
     fetch(`/api/doctor/histogram/${photo.sha256}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => {
-        if (!cancelled) setHist(j);
+        if (!cancelled && j) setHist(j);
       })
       .catch(() => undefined);
     return () => {
