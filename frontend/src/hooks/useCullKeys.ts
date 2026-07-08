@@ -7,10 +7,10 @@ import { useEffect, useRef } from "react";
  * focused, and while any of Ctrl/Meta/Alt is held so browser shortcuts pass
  * through):
  *
- *   ArrowUp            -> onPrev      (navigate back)
- *   ArrowDown          -> onNext      (navigate forward)
- *   X / ArrowLeft      -> onReject    (reject + advance, caller decides)
- *   C / ArrowRight / Space -> onKeep  (keep + advance, caller decides)
+ *   ArrowUp / ArrowLeft   -> onPrev   (navigate back)
+ *   ArrowDown / ArrowRight -> onNext  (navigate forward)
+ *   X                  -> onReject    (reject + advance, caller decides)
+ *   C / Space          -> onKeep      (keep + advance, caller decides)
  *   U                  -> onUndo      (undo last decision)
  *   Z                  -> onZoomToggle (100% zoom at cursor point)
  *   Tab                -> onNextGroup (jump to next burst group)
@@ -59,20 +59,20 @@ export function useCullKeys(handlers: CullKeyHandlers): void {
 
       switch (e.key) {
         case "ArrowUp":
+        case "ArrowLeft":
           e.preventDefault();
           h.onPrev?.();
           break;
         case "ArrowDown":
+        case "ArrowRight":
           e.preventDefault();
           h.onNext?.();
           break;
-        case "ArrowLeft":
         case "x":
         case "X":
           e.preventDefault();
           h.onReject?.();
           break;
-        case "ArrowRight":
         case " ":
         case "c":
         case "C":

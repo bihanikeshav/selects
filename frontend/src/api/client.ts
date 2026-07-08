@@ -20,6 +20,7 @@ export async function listPhotos(opts: {
   collapse?: "moments" | "none";
   sort?: "taken_at" | "aesthetic" | "iqa" | "random";
   min_aesthetic_pct?: number;
+  quality?: "underexposed" | "overexposed" | "out_of_focus" | "blurry_keepers";
 } = {}): Promise<PhotoList> {
   const params = new URLSearchParams();
   if (opts.offset !== undefined) params.set("offset", String(opts.offset));
@@ -29,6 +30,7 @@ export async function listPhotos(opts: {
   if (opts.collapse !== undefined) params.set("collapse", opts.collapse);
   if (opts.sort !== undefined) params.set("sort", opts.sort);
   if (opts.min_aesthetic_pct !== undefined) params.set("min_aesthetic_pct", String(opts.min_aesthetic_pct));
+  if (opts.quality !== undefined) params.set("quality", opts.quality);
   const res = await fetch(`${BASE}/photos?${params}`);
   if (!res.ok) throw new Error(`listPhotos ${res.status}`);
   return res.json();

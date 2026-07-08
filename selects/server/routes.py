@@ -239,6 +239,13 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
             0.0, ge=0.0, le=100.0,
             description="Drop photos whose combined-aesthetic percentile is below this value",
         ),
+        quality: Optional[str] = Query(
+            None,
+            description=(
+                "Quick-sort quality bucket (from the retired Doctor): "
+                "underexposed | overexposed | out_of_focus | blurry_keepers"
+            ),
+        ),
     ):
         from sqlalchemy import func as _func
 
@@ -275,6 +282,27 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
             if tag is not None:
                 base = base.join(PhotoTag, Photo.id == PhotoTag.photo_id).where(
                     PhotoTag.tag == tag
+                )
+
+            # Quality-bucket filter for quick sorting (the 4 buckets the old
+            # Doctor surfaced). Same thresholds, applied straight in SQL on the
+            # stored ClassicalScore/AestheticScore columns — no preview decode.
+            if quality == "underexposed":
+                base = base.where(ClassicalScore.luma_mean < 0.32)
+            elif quality == "overexposed":
+                base = base.where(
+                    (ClassicalScore.luma_mean > 0.78)
+                    | (ClassicalScore.clipped_high > 0.07)
+                )
+            elif quality == "out_of_focus":
+                base = base.where(ClassicalScore.blur < 150.0)
+            elif quality == "blurry_keepers":
+                _combined = (
+                    cfg.ap_weight * AestheticScore.ap25_score
+                    + cfg.nima_weight * AestheticScore.nima_score
+                )
+                base = base.where(
+                    ClassicalScore.blur < 400.0, ClassicalScore.blur >= 150.0, _combined >= 5.8
                 )
 
             # Aesthetic-percentile floor needs the library distribution

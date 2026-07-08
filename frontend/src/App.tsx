@@ -10,7 +10,6 @@ import Clusters from "./views/Clusters";
 import ClusterDetail from "./views/ClusterDetail";
 import Curated from "./views/Curated";
 import Dedup from "./views/Dedup";
-import Doctor from "./views/Doctor";
 import Libraries from "./views/Libraries";
 import MapView from "./views/Map";
 import Onboarding from "./views/Onboarding";
@@ -87,7 +86,6 @@ export default function App() {
         <Route path="/duplicates" element={<Dedup />} />
         <Route path="/videos" element={<Videos />} />
         <Route path="/best/:facet/:value" element={<BestOf />} />
-        <Route path="/doctor" element={<Doctor />} />
         <Route path="/calibrate" element={<Calibrate />} />
         <Route path="/calibrate/dashboard" element={<CalibrateDashboard />} />
 
