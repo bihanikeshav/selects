@@ -83,6 +83,20 @@ export default function Rail() {
         Curated
       </NavLink>
 
+      <NavLink
+        to="/cull/stories"
+        className={({ isActive }) => "rail-item" + (isActive ? " is-active" : "")}
+        title="Stories — your trip grouped into moments"
+      >
+        <span className="icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M4 5a2 2 0 0 1 2-2h6v16H6a2 2 0 0 0-2 2z" />
+            <path d="M20 5a2 2 0 0 0-2-2h-6v16h6a2 2 0 0 1 2 2z" />
+          </svg>
+        </span>
+        Stories
+      </NavLink>
+
       <div className="rail-divider" aria-hidden="true" />
 
       {/* Cross-cutting tools */}
@@ -159,6 +173,22 @@ export default function Rail() {
       </NavLink>
 
       <NavLink
+        to="/doctor"
+        className={({ isActive }) => "rail-item" + (isActive ? " is-active" : "")}
+        title="Image Doctor — detect & fix problem photos"
+      >
+        <span className="icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9 3v18M15 3v18M3 9h18M3 15h18" />
+            <circle cx="12" cy="12" r="3" fill="currentColor" opacity="0.4" />
+          </svg>
+        </span>
+        Doctor
+      </NavLink>
+
+      <div className="rail-spacer"></div>
+
+      <NavLink
         to="/libraries"
         className={({ isActive }) => "rail-item" + (isActive ? " is-active" : "")}
         title="Libraries — switch or add photo libraries"
@@ -171,22 +201,6 @@ export default function Rail() {
           </svg>
         </span>
         Library
-      </NavLink>
-
-      <div className="rail-spacer"></div>
-
-      <NavLink
-        to="/doctor"
-        className={({ isActive }) => "rail-item" + (isActive ? " is-active" : "")}
-        title="Image Doctor — detect & fix problem photos"
-      >
-        <span className="icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M9 3v18M15 3v18M3 9h18M3 15h18" />
-            <circle cx="12" cy="12" r="3" fill="currentColor" opacity="0.4" />
-          </svg>
-        </span>
-        Doctor
       </NavLink>
 
       <NavLink

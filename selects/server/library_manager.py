@@ -240,14 +240,45 @@ class LibraryManager:
             lib = self._get(lib_id)
             if lib is None:
                 raise KeyError(lib_id)
-            if lib_id == self._active_id and len(self._libraries) > 1:
-                raise ActiveLibraryError(lib_id)
+            was_active = lib_id == self._active_id
             self._libraries = [l for l in self._libraries if l["id"] != lib_id]
-            if lib_id == self._active_id:
-                # Was the only library — clear active.
+            if was_active:
+                # Deleting the active library is allowed: fall back to another one
+                # if any remain, otherwise clear active (back to onboarding).
                 self._active_id = None
                 self._active_cfg = None
+                if self._libraries:
+                    self.activate(self._libraries[0]["id"])  # RLock is reentrant
             self._save()
+
+    def cover_thumb(self, lib_id: str) -> Optional[Path]:
+        """Return an on-disk thumbnail path to represent *lib_id* as a cover, or
+        None. Opens the library's own DB (covers work for non-active libraries)."""
+        lib = self.get(lib_id)
+        if lib is None:
+            return None
+        try:
+            cfg = get_folder_config(lib["path"])
+            if not cfg.db_path.exists():
+                return None
+            from selects.db import init_db, session_scope
+            from selects.db.models import AestheticScore, Photo
+
+            Session = init_db(cfg.db_path)
+            with session_scope(Session) as s:
+                # Prefer the best-scoring photo as the cover, else the first.
+                q = (
+                    s.query(Photo.sha256)
+                    .outerjoin(AestheticScore, AestheticScore.photo_id == Photo.id)
+                    .order_by(AestheticScore.nima_score.desc().nullslast(), Photo.id)
+                )
+                for (sha,) in q.limit(25):
+                    thumb = cfg.thumbs_dir / f"{sha}.jpg"
+                    if thumb.exists():
+                        return thumb
+        except Exception:
+            return None
+        return None
 
     def status(self) -> dict:
         with self._lock:

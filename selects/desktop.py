@@ -133,7 +133,15 @@ def run_app(host: str = "127.0.0.1", port: int = 8000) -> None:
         # Start matched to the light theme; the web UI calls set_theme() on load
         # and on every toggle to keep the caption in sync with the app theme.
         window.events.shown += lambda *_: _apply_windows_chrome(window, dark=False)
-        webview.start()  # blocks on the main thread until the window is closed
+        # private_mode=False + a persistent storage_path so the WebView keeps
+        # localStorage across launches (theme choice, UI prefs). The default
+        # (private_mode=True) uses an ephemeral profile that is wiped on exit, so
+        # the app always reopened in light mode.
+        from pathlib import Path
+
+        storage = Path.home() / ".selects" / "webview"
+        storage.mkdir(parents=True, exist_ok=True)
+        webview.start(private_mode=False, storage_path=str(storage))
     except Exception as exc:  # noqa: BLE001
         log.warning("native window unavailable (%s); using browser fallback", exc)
         print(f"[selects] native window unavailable ({exc}); opening in browser")

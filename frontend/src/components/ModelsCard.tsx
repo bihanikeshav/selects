@@ -14,6 +14,19 @@ function gb(mb: number): string {
   return (mb / 1024).toFixed(1);
 }
 
+// Human-readable labels for the average user. The real model names are still
+// shown (muted, underneath) — masked, not hidden.
+const FRIENDLY: Record<string, { title: string; tech: string }> = {
+  selects_onnx: {
+    title: "Photo understanding & enhancement",
+    tech: "SigLIP · RAM++ · image restoration",
+  },
+  buffalo_l: {
+    title: "Face recognition",
+    tech: "InsightFace buffalo_l",
+  },
+};
+
 /** Compact "AI models" card: per-model status dots, total missing size, and a
  *  "Download missing" button that streams `stage:"models"` progress over the
  *  shared `/ws/progress` socket. */
@@ -110,8 +123,8 @@ export default function ModelsCard() {
                 className={"lib-model-dot" + (m.present ? " is-present" : " is-missing")}
                 aria-hidden="true"
               />
-              <span className="lib-model-name">{m.name}</span>
-              <span className="lib-model-for">{m.required_for}</span>
+              <span className="lib-model-name">{FRIENDLY[m.id]?.title ?? m.name}</span>
+              <span className="lib-model-for">{FRIENDLY[m.id]?.tech ?? m.required_for}</span>
               <span className="lib-model-size">{gb(m.approx_size_mb)} GB</span>
             </li>
           ))}

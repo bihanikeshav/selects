@@ -91,13 +91,15 @@
 .video-card-thumb {
   position: relative;
   aspect-ratio: 16 / 9;
-  background: var(--md-surface-c);
+  background: #000;   /* black bars behind letterboxed portrait/odd-ratio videos */
 }
 
 .video-card-thumb img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  /* contain (not cover) so portrait/vertical videos show whole with black bars
+     instead of being cropped to a horizontal slice. */
+  object-fit: contain;
   display: block;
 }
 

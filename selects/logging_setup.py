@@ -43,6 +43,11 @@ def setup_logging(level: int = logging.INFO) -> Path:
     root = logging.getLogger()
     root.setLevel(level)
     root.addHandler(fh)
+
+    # Third-party libraries log HTTP/transfer chatter at INFO — e.g. httpx logs
+    # every HuggingFace HEAD/GET. Quiet them so the log (and console) stays useful.
+    for noisy in ("httpx", "httpcore", "huggingface_hub", "urllib3", "filelock"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
     # Keep console output too when a console exists (dev / CLI).
     if sys.stderr is not None:
         sh = logging.StreamHandler(sys.stderr)
