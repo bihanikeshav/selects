@@ -6,6 +6,8 @@ import KbdFooter from "../components/KbdFooter";
 import Rail from "../components/Rail";
 import StatusRow from "../components/StatusRow";
 import Topbar from "../components/Topbar";
+import Viewer from "../components/Viewer";
+import PhotoEditor from "../editor/PhotoEditor";
 
 export default function PersonDetail() {
   const { id } = useParams();
@@ -14,8 +16,8 @@ export default function PersonDetail() {
   const [err, setErr] = useState<string | null>(null);
   const [label, setLabel] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [lightbox, setLightbox] = useState<string | null>(null);
-  const [launching, setLaunching] = useState(false);
+  const [lightbox, setLightbox] = useState<number | null>(null);
+  const [editShas, setEditShas] = useState<string[] | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
@@ -37,26 +39,9 @@ export default function PersonDetail() {
     setSelected(next);
   }
 
-  async function openInDarktable() {
+  function openInEditor() {
     if (selected.size === 0) return;
-    setLaunching(true);
-    try {
-      const res = await fetch("/api/edit/darktable", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sha256s: Array.from(selected) }),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({ detail: res.statusText }));
-        throw new Error(j.detail);
-      }
-      const j = await res.json();
-      setToast(`Launched darktable with ${j.opened} photos`);
-    } catch (e) {
-      setToast(String(e));
-    } finally {
-      setLaunching(false);
-    }
+    setEditShas(Array.from(selected));
   }
 
   const displayName = label || `P${id}`;
@@ -155,17 +140,18 @@ export default function PersonDetail() {
             </button>
             <button
               className="btn btn-filled"
-              onClick={openInDarktable}
-              disabled={selected.size === 0 || launching}
+              onClick={openInEditor}
+              disabled={selected.size === 0}
+              title="Edit the selected photos in the built-in editor"
             >
-              {launching ? "Launching…" : `Edit ${selected.size} in darktable`}
+              {`Edit ${selected.size || ""}`}
             </button>
           </div>
 
           {toast && <div className="cluster-detail-toast">{toast}</div>}
 
           <div className="cluster-detail-grid">
-            {photos.map(p => (
+            {photos.map((p, i) => (
               <div key={p.sha256} className={`cluster-photo${selected.has(p.sha256) ? " is-selected" : ""}`} style={{ position: "relative" }}>
                 <button
                   onClick={() => toggle(p.sha256)}
@@ -176,7 +162,7 @@ export default function PersonDetail() {
                 </button>
                 {selected.has(p.sha256) && <span className="cluster-photo-check">✓</span>}
                 <button
-                  onClick={() => setLightbox(p.sha256)}
+                  onClick={() => setLightbox(i)}
                   title="Enlarge"
                   style={{
                     position: "absolute", top: 6, right: 6, width: 24, height: 24,
@@ -195,14 +181,27 @@ export default function PersonDetail() {
         <KbdFooter />
       </div>
 
-      {lightbox && (
-        <div onClick={() => setLightbox(null)} style={{
-          position: "fixed", inset: 0, background: "rgba(0,0,0,0.92)", zIndex: 90,
-          display: "grid", placeItems: "center", cursor: "zoom-out",
-        }}>
-          <img src={`/api/preview/${lightbox}`} alt="" style={{ maxWidth: "94vw", maxHeight: "94vh" }} />
-        </div>
+      {lightbox !== null && photos[lightbox] && (
+        <Viewer
+          items={photos.map((p) => ({ sha256: p.sha256 }))}
+          index={lightbox}
+          onIndex={setLightbox}
+          onClose={() => setLightbox(null)}
+          renderActions={(it) => (
+            <button
+              className="btn btn-filled"
+              onClick={() => {
+                setLightbox(null);
+                setEditShas([it.sha256]);
+              }}
+            >
+              Edit
+            </button>
+          )}
+        />
       )}
+
+      {editShas && <PhotoEditor shas={editShas} onClose={() => setEditShas(null)} />}
     </div>
   );
 }
