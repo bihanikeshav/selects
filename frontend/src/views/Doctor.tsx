@@ -2,8 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 
 import PageHeader from "../components/PageHeader";
 import Rail from "../components/Rail";
+import "../components/Doctor.css";
 
-type Bucket = "underexposed" | "overexposed" | "blurry" | "blurry_keepers";
+type Bucket = "underexposed" | "overexposed" | "out_of_focus" | "blurry_keepers";
 type Model = "clahe" | "zero-dce-plus" | "csrnet" | "nafnet";
 
 interface Issue {
@@ -22,7 +23,7 @@ interface Issue {
 interface DoctorResp {
   underexposed: Issue[];
   overexposed: Issue[];
-  blurry: Issue[];
+  out_of_focus: Issue[];
   blurry_keepers: Issue[];
   counts: Record<Bucket, number>;
 }
@@ -33,19 +34,19 @@ const BUCKET_META: Record<
 > = {
   underexposed: {
     label: "Underexposed",
-    hint: "Too dark — Zero-DCE++ can lift shadows naturally",
+    hint: "Too dark — Brighten (low-light) can lift shadows naturally",
     suggestedModel: "zero-dce-plus",
     accent: "var(--g-blue)",
   },
   overexposed: {
     label: "Overexposed",
-    hint: "Highlights clipped — CLAHE roll-off helps recover sky/snow detail",
+    hint: "Highlights clipped — Auto fix roll-off helps recover sky/snow detail",
     suggestedModel: "clahe",
     accent: "var(--g-yellow)",
   },
-  blurry: {
-    label: "Blurry",
-    hint: "Genuinely soft — NAFNet deblur (TODO) would rescue these",
+  out_of_focus: {
+    label: "Out of focus",
+    hint: "Genuinely soft — sharpness below threshold — Deblur can rescue these",
     suggestedModel: "nafnet",
     accent: "var(--g-red)",
   },
@@ -57,14 +58,29 @@ const BUCKET_META: Record<
   },
 };
 
+/** Human-friendly labels for the fix models. The backend `model=` values
+ * (clahe / zero-dce-plus / csrnet / nafnet) never change — this is presentation only. */
+const MODEL_META: Record<Model, { label: string; sub: string }> = {
+  clahe: { label: "Auto fix (contrast & colour)", sub: "CLAHE · classical, fast" },
+  "zero-dce-plus": { label: "Brighten (low-light)", sub: "Zero-DCE++ · ICCV'19" },
+  csrnet: { label: "Pro retouch", sub: "CSRNet · experimental" },
+  nafnet: { label: "Sharpen / deblur", sub: "NAFNet · GoPro-trained" },
+};
+
+const MODEL_ORDER: Model[] = ["clahe", "zero-dce-plus", "csrnet", "nafnet"];
+
 export default function Doctor() {
   const [data, setData] = useState<DoctorResp | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [bucket, setBucket] = useState<Bucket>("underexposed");
-  const [lightboxSha, setLightboxSha] = useState<string | null>(null);
   const [showFix, setShowFix] = useState<Record<string, boolean>>({});
   const [perPhotoModel, setPerPhotoModel] = useState<Record<string, Model>>({});
+
+  // Full-image viewer state
+  const [viewerSha, setViewerSha] = useState<string | null>(null);
+  const [viewerShowFixed, setViewerShowFixed] = useState(false);
+  const [viewerLoading, setViewerLoading] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -97,16 +113,33 @@ export default function Doctor() {
   const modelFor = (sha: string): Model =>
     perPhotoModel[sha] ?? BUCKET_META[bucket].suggestedModel;
 
-  // Lightbox keyboard
+  const openViewer = useCallback((sha: string) => {
+    setViewerSha(sha);
+    setViewerShowFixed(false);
+  }, []);
+
+  const closeViewer = useCallback(() => setViewerSha(null), []);
+
+  // Viewer keyboard (Esc to close, Left/Right to toggle original/fixed)
   useEffect(() => {
-    if (!lightboxSha) return;
+    if (!viewerSha) return;
     function onKey(e: KeyboardEvent) {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-      if (e.key === "Escape") setLightboxSha(null);
+      if (e.key === "Escape") setViewerSha(null);
+      if (e.key === "ArrowLeft") setViewerShowFixed(false);
+      if (e.key === "ArrowRight") setViewerShowFixed(true);
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [lightboxSha]);
+  }, [viewerSha]);
+
+  const viewerPhoto = viewerSha ? photos.find((p) => p.sha256 === viewerSha) ?? null : null;
+  const viewerModel = viewerSha ? modelFor(viewerSha) : "clahe";
+  const viewerSrc = viewerSha
+    ? viewerShowFixed
+      ? `/api/enhance/${viewerSha}?model=${viewerModel}&grade=true`
+      : `/api/preview/${viewerSha}`
+    : "";
 
   return (
     <div className="app">
@@ -124,7 +157,7 @@ export default function Doctor() {
         <PageHeader
           context="image doctor"
           title="Doctor"
-          subtitle="Photos with detectable issues. Pick a model, preview the fix."
+          subtitle="Photos with detectable issues. Pick a fix, preview the result."
           controls={(Object.keys(BUCKET_META) as Bucket[]).map((b) => {
             const meta = BUCKET_META[b];
             const n = counts?.[b] ?? 0;
@@ -171,170 +204,86 @@ export default function Doctor() {
           })}
         />
 
-        <div
-          style={{
-            padding: "12px 24px 16px",
-            overflowY: "auto",
-            minHeight: 0,
-          }}
-        >
-          {err && (
-            <div
-              style={{
-                padding: 12,
-                color: "var(--g-red)",
-                background: "color-mix(in srgb, var(--g-red) 12%, transparent)",
-                borderRadius: 8,
-                marginBottom: 12,
-              }}
-            >
-              {err}
-            </div>
-          )}
+        <div className="doctor-body">
+          {err && <div className="doctor-error">{err}</div>}
 
           {loading ? (
-            <div style={{ color: "var(--md-on-surface-var)", padding: 24 }}>Loading…</div>
+            <div className="doctor-loading">Loading…</div>
           ) : photos.length === 0 ? (
-            <div
-              style={{
-                padding: 36,
-                textAlign: "center",
-                color: "var(--md-on-surface-var)",
-                fontSize: 14,
-              }}
-            >
+            <div className="doctor-empty">
               No photos in the <b>{BUCKET_META[bucket].label}</b> bucket — clean library on this axis.
             </div>
           ) : (
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
-                gap: 12,
-              }}
-            >
+            <div className="doctor-grid">
               {photos.map((p) => {
                 const fix = !!showFix[p.sha256];
                 const m = modelFor(p.sha256);
+                const meta = MODEL_META[m];
                 const fixUrl = `/api/enhance/${p.sha256}?model=${m}&grade=true`;
                 return (
-                  <div
-                    key={p.photo_id}
-                    style={{
-                      background: "var(--md-surface-c-low)",
-                      border: "1px solid var(--md-outline-var)",
-                      borderRadius: 12,
-                      overflow: "hidden",
-                      display: "grid",
-                      gridTemplateRows: "auto auto auto",
-                    }}
-                  >
+                  <div key={p.photo_id} className="doctor-card">
                     <div
-                      style={{
-                        position: "relative",
-                        aspectRatio: "4/3",
-                        background: "#0d0d0f",
-                        cursor: "zoom-in",
-                      }}
-                      onClick={() => setLightboxSha(p.sha256)}
-                      title="Click to enlarge"
+                      className="doctor-thumb-wrap"
+                      onClick={() => openViewer(p.sha256)}
+                      title="Click to open full viewer"
                     >
                       <img
-                        src={fix ? fixUrl : p.thumb_url}
+                        className="doctor-thumb"
+                        src={fix ? fixUrl : p.preview_url}
                         alt=""
-                        style={{
-                          width: "100%",
-                          height: "100%",
-                          objectFit: "cover",
-                          display: "block",
-                          transition: "opacity 160ms ease",
-                        }}
                       />
                       {fix && (
                         <span
-                          style={{
-                            position: "absolute",
-                            top: 8,
-                            left: 8,
-                            background: BUCKET_META[bucket].accent,
-                            color: "#000",
-                            padding: "3px 8px",
-                            borderRadius: 999,
-                            fontSize: 11,
-                            fontFamily: "var(--font-mono)",
-                            fontWeight: 600,
-                          }}
+                          className="doctor-thumb-badge"
+                          style={{ background: BUCKET_META[bucket].accent }}
                         >
-                          {m === "zero-dce-plus" ? "Zero-DCE++" : m.toUpperCase()}
+                          {meta.label}
                         </span>
                       )}
+                      <span className="doctor-thumb-expand">Open viewer ⤢</span>
                     </div>
 
-                    <div
-                      style={{
-                        padding: "8px 12px",
-                        display: "flex",
-                        gap: 10,
-                        flexWrap: "wrap",
-                        fontFamily: "var(--font-mono)",
-                        fontSize: 11,
-                        color: "var(--md-on-surface-var)",
-                      }}
-                    >
+                    <div className="doctor-stats">
                       {p.luma_mean !== undefined && (
                         <span>
-                          luma <span style={{ color: "var(--md-on-surface)" }}>{(p.luma_mean * 100).toFixed(0)}%</span>
+                          luma <b>{(p.luma_mean * 100).toFixed(0)}%</b>
                         </span>
                       )}
                       {p.clipped_high !== undefined && (
                         <span>
-                          clip <span style={{ color: "var(--md-on-surface)" }}>{(p.clipped_high * 100).toFixed(1)}%</span>
+                          clip <b>{(p.clipped_high * 100).toFixed(1)}%</b>
                         </span>
                       )}
                       <span>
-                        blur <span style={{ color: "var(--md-on-surface)" }}>{p.blur.toFixed(0)}</span>
+                        sharpness <b>{p.blur.toFixed(0)}</b>
                       </span>
                       {p.combined != null && (
                         <span>
-                          ★ <span style={{ color: "var(--md-on-surface)" }}>{p.combined.toFixed(2)}</span>
+                          ★ <b>{p.combined.toFixed(2)}</b>
                         </span>
                       )}
                     </div>
 
-                    <div
-                      style={{
-                        padding: "8px 10px 10px",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        borderTop: "1px solid var(--md-outline-var)",
-                      }}
-                    >
-                      <select
-                        value={m}
-                        onChange={(e) => setModel(p.sha256, e.target.value as Model)}
-                        style={{
-                          flex: 1,
-                          background: "var(--md-surface)",
-                          color: "var(--md-on-surface)",
-                          border: "1px solid var(--md-outline-var)",
-                          borderRadius: 6,
-                          padding: "5px 8px",
-                          fontFamily: "var(--font-mono)",
-                          fontSize: 11,
-                          cursor: "pointer",
-                        }}
-                        title="Model"
-                      >
-                        <option value="clahe">CLAHE (classical, fast)</option>
-                        <option value="zero-dce-plus">Zero-DCE++ (low-light, ICCV'19)</option>
-                        <option value="csrnet">CSRNet (retouch, experimental)</option>
-                        <option value="nafnet">NAFNet (deblur, GoPro-trained)</option>
-                      </select>
+                    <div className="doctor-controls-row">
+                      <div className="doctor-model-field">
+                        <select
+                          className="doctor-model-select"
+                          value={m}
+                          onChange={(e) => setModel(p.sha256, e.target.value as Model)}
+                          title="Fix"
+                        >
+                          {MODEL_ORDER.map((mv) => (
+                            <option key={mv} value={mv}>
+                              {MODEL_META[mv].label}
+                            </option>
+                          ))}
+                        </select>
+                        <span className="doctor-model-hint">{meta.sub}</span>
+                      </div>
                       <button
                         onClick={() => toggleFix(p.sha256)}
                         className={`btn ${fix ? "btn-filled" : "btn-tonal"}`}
-                        style={{ fontSize: 12, padding: "6px 10px" }}
+                        style={{ fontSize: 12, padding: "6px 10px", alignSelf: "flex-start" }}
                       >
                         {fix ? "Original" : "Preview fix"}
                       </button>
@@ -347,28 +296,63 @@ export default function Doctor() {
         </div>
       </div>
 
-      {lightboxSha && (
-        <div
-          onClick={() => setLightboxSha(null)}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.95)",
-            zIndex: 90,
-            display: "grid",
-            placeItems: "center",
-            cursor: "zoom-out",
-          }}
-        >
-          <img
-            src={
-              showFix[lightboxSha]
-                ? `/api/enhance/${lightboxSha}?model=${modelFor(lightboxSha)}&grade=true`
-                : `/api/preview/${lightboxSha}`
-            }
-            alt=""
-            style={{ maxWidth: "94vw", maxHeight: "94vh" }}
-          />
+      {viewerSha && (
+        <div className="doctor-viewer-backdrop" onClick={closeViewer}>
+          <div className="doctor-viewer-topbar" onClick={(e) => e.stopPropagation()}>
+            <div className="doctor-viewer-title">
+              <strong>{BUCKET_META[bucket].label}</strong>
+              {viewerPhoto?.taken_at && <span>{new Date(viewerPhoto.taken_at).toLocaleString()}</span>}
+            </div>
+            <button className="doctor-viewer-close" onClick={closeViewer} title="Close (Esc)">
+              ×
+            </button>
+          </div>
+
+          <div className="doctor-viewer-stage" onClick={(e) => e.stopPropagation()}>
+            {viewerLoading && <div className="doctor-viewer-spinner">Loading fix…</div>}
+            <img
+              key={viewerSrc}
+              className="doctor-viewer-img"
+              src={viewerSrc}
+              alt=""
+              onLoadStart={() => viewerShowFixed && setViewerLoading(true)}
+              onLoad={() => setViewerLoading(false)}
+              onError={() => setViewerLoading(false)}
+            />
+          </div>
+
+          <div className="doctor-viewer-toolbar" onClick={(e) => e.stopPropagation()}>
+            <div className="doctor-toggle">
+              <button
+                className={!viewerShowFixed ? "active" : ""}
+                onClick={() => setViewerShowFixed(false)}
+              >
+                Original
+              </button>
+              <button
+                className={viewerShowFixed ? "active" : ""}
+                onClick={() => setViewerShowFixed(true)}
+              >
+                Fixed
+              </button>
+            </div>
+
+            <div className="doctor-viewer-model-field">
+              <label htmlFor="doctor-viewer-model">Fix</label>
+              <select
+                id="doctor-viewer-model"
+                className="doctor-viewer-model-select"
+                value={viewerModel}
+                onChange={(e) => setModel(viewerSha, e.target.value as Model)}
+              >
+                {MODEL_ORDER.map((mv) => (
+                  <option key={mv} value={mv}>
+                    {MODEL_META[mv].label} — {MODEL_META[mv].sub}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
         </div>
       )}
     </div>

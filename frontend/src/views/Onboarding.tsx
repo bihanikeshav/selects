@@ -275,11 +275,11 @@ export default function Onboarding() {
           <button
             type="button"
             className="onb-close"
-            aria-label="Close"
+            aria-label="Back to libraries"
             title="Back to libraries"
             onClick={() => navigate("/libraries")}
           >
-            ✕
+            ‹
           </button>
         )}
         <header className="onb-hero">
