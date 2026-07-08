@@ -1345,27 +1345,33 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
                 .filter(PhotoPerson.person_id.in_(source_ids))
                 .all()
             )
+            # Track which target (photo_id) rows exist so two source persons in the
+            # same photo don't try to insert a duplicate (photo_id, target) PK.
+            target_photos: set[int] = {
+                r.photo_id for r in s.query(PhotoPerson.photo_id)
+                .filter(PhotoPerson.person_id == target_id).all()
+            }
             for row in source_rows:
-                existing = (
-                    s.query(PhotoPerson)
-                    .filter(
-                        PhotoPerson.photo_id == row.photo_id,
-                        PhotoPerson.person_id == target_id,
-                    )
-                    .first()
-                )
-                if existing is None:
+                if row.photo_id not in target_photos:
                     s.add(PhotoPerson(
                         photo_id=row.photo_id,
                         person_id=target_id,
                         face_embedding_id=row.face_embedding_id,
                         confidence=row.confidence,
                     ))
+                    target_photos.add(row.photo_id)
                     moved += 1
-                elif row.confidence > existing.confidence:
-                    existing.face_embedding_id = row.face_embedding_id
-                    existing.confidence = row.confidence
+                else:
+                    existing = s.get(PhotoPerson, (row.photo_id, target_id))
+                    if existing is not None and row.confidence > existing.confidence:
+                        existing.face_embedding_id = row.face_embedding_id
+                        existing.confidence = row.confidence
                 s.delete(row)
+
+            # Flush the photo_persons inserts/deletes BEFORE deleting the persons —
+            # SQLite enforces the FK immediately, so the referencing rows must be
+            # gone first (else "FOREIGN KEY constraint failed").
+            s.flush()
 
             for person in sources:
                 s.delete(person)

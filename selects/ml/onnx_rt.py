@@ -63,19 +63,63 @@ def select_providers(prefer: Sequence[str] | None = None) -> list[str]:
     return chosen
 
 
-def make_session(onnx_path, prefer: Sequence[str] | None = None, cache: bool = True):
-    """Build (and optionally cache) an ORT InferenceSession on the best EP."""
-    import onnxruntime as ort
+class _ResilientSession:
+    """ORT session that falls back to CPU when the GPU provider fails at runtime.
 
+    DirectML (and, less often, other GPU EPs) have incomplete op coverage — e.g.
+    DML cannot run the Reshape in the SigLIP/RAM++ transformer graphs and throws a
+    RUNTIME_EXCEPTION mid-run. Rather than crash the request, we transparently
+    rebuild the session on CPU (the models are all CPU-parity-verified) and use
+    CPU for that model from then on. Conv nets that DML handles keep the GPU.
+    """
+
+    def __init__(self, path: str, providers: list[str]):
+        self._path = path
+        self._providers = providers
+        self._sess = None       # active underlying InferenceSession
+        self._cpu_only = False
+
+    def _build(self, cpu_only: bool):
+        import onnxruntime as ort
+
+        so = ort.SessionOptions()
+        so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        provs = ["CPUExecutionProvider"] if cpu_only else self._providers
+        s = ort.InferenceSession(self._path, sess_options=so, providers=provs)
+        log.info("ONNX session %s on %s", Path(self._path).name, s.get_providers())
+        return s
+
+    def _session(self):
+        if self._sess is None:
+            self._sess = self._build(self._cpu_only)
+        return self._sess
+
+    def run(self, output_names, input_feed, run_options=None):
+        try:
+            return self._session().run(output_names, input_feed, run_options)
+        except Exception as exc:
+            if self._cpu_only:
+                raise
+            log.warning(
+                "ONNX run failed on %s for %s (%s); falling back to CPU for this model",
+                self._providers, Path(self._path).name, type(exc).__name__,
+            )
+            self._cpu_only = True
+            self._sess = self._build(True)
+            return self._sess.run(output_names, input_feed, run_options)
+
+    def __getattr__(self, name):
+        # Delegate everything else (get_inputs/get_outputs/get_providers/...).
+        return getattr(self._session(), name)
+
+
+def make_session(onnx_path, prefer: Sequence[str] | None = None, cache: bool = True):
+    """Build (and optionally cache) a CPU-fallback ORT session on the best EP."""
     key = str(Path(onnx_path).resolve())
     if cache and key in _SESSIONS:
         return _SESSIONS[key]
 
-    providers = select_providers(prefer)
-    so = ort.SessionOptions()
-    so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-    sess = ort.InferenceSession(key, sess_options=so, providers=providers)
-    log.info("ONNX session %s on %s", Path(onnx_path).name, sess.get_providers())
+    sess = _ResilientSession(key, select_providers(prefer))
     if cache:
         _SESSIONS[key] = sess
     return sess
