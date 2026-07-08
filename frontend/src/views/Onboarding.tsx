@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import {
   activateLibrary,
   createLibrary,
+  listLibraries,
   modelsStatus,
   startIndexing,
   startModelsDownload,
@@ -108,6 +109,13 @@ export default function Onboarding() {
   }, []);
 
   // Detect CPU vs GPU once so the indexing screen can set expectations.
+  // If libraries already exist, this page was opened via "Add library" — offer a
+  // way back instead of trapping the user on the onboarding screen.
+  const [canClose, setCanClose] = useState(false);
+  useEffect(() => {
+    listLibraries().then((d) => setCanClose(d.libraries.length > 0)).catch(() => {});
+  }, []);
+
   useEffect(() => {
     getSystem().then(setSys).catch(() => {});
   }, []);
@@ -263,12 +271,23 @@ export default function Onboarding() {
   return (
     <div className="onb">
       <div className="onb-inner">
+        {canClose && phase === "form" && (
+          <button
+            type="button"
+            className="onb-close"
+            aria-label="Close"
+            title="Back to libraries"
+            onClick={() => navigate("/libraries")}
+          >
+            ✕
+          </button>
+        )}
         <header className="onb-hero">
           <div className="onb-brand">
             <span className="dot" aria-hidden="true"></span>selects
           </div>
           <p className="onb-pitch">
-            Cull your travel photos locally with AI — nothing leaves your machine.
+            Sort your travel photos locally with AI — nothing leaves your machine.
           </p>
         </header>
 
@@ -303,7 +322,7 @@ export default function Onboarding() {
               </div>
               {err && <p className="onb-error">{err}</p>}
               <button className="btn btn-filled onb-submit" type="submit">
-                Start culling
+                Sort my photos
               </button>
             </form>
           </>

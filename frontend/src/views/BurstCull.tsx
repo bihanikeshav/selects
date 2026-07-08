@@ -455,8 +455,8 @@ export default function BurstCull() {
         }}
       >
         <PageHeader
-          context={loadState === "loaded" ? `cull · ${idx + 1} of ${total}` : "cull"}
-          title="Cull"
+          context={loadState === "loaded" ? `sort · ${idx + 1} of ${total}` : "sort"}
+          title="Sort"
           subtitle={
             loadState === "loaded"
               ? swipeSummary

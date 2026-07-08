@@ -1957,6 +1957,24 @@ button.rail-item {
 
 /* ── Onboarding (first-run) ───────────────────────────────────────────── */
 
+.onb-close {
+  position: absolute;
+  top: 18px;
+  right: 20px;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--md-outline-var);
+  border-radius: 999px;
+  background: var(--md-surface-c);
+  color: var(--md-on-surface-var);
+  font-size: 15px;
+  cursor: pointer;
+  z-index: 5;
+}
+.onb-close:hover { background: var(--md-surface-c-high); color: var(--md-on-surface); }
+
 .onb {
   min-height: 100vh;
   width: 100%;
@@ -1970,6 +1988,7 @@ button.rail-item {
 }
 
 .onb-inner {
+  position: relative;
   width: 100%;
   max-width: 640px;
   display: flex;
@@ -2491,11 +2510,17 @@ button.rail-item {
 }
 
 .fp-panel {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  right: 0;
-  z-index: 40;
+  /* Fixed, viewport-centered popover — an absolute dropdown near the bottom of
+     the onboarding page overflowed the viewport and added a page scrollbar.
+     Fixed positioning never grows the page; it scrolls internally instead. */
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(560px, 92vw);
+  max-height: 78vh;
+  overflow-y: auto;
+  z-index: 1000;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -2503,7 +2528,7 @@ button.rail-item {
   background: var(--md-surface-c-high);
   border: 1px solid var(--md-outline);
   border-radius: var(--r-lg);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
 }
 
 .fp-panel-head {
