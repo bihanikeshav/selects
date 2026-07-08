@@ -31,6 +31,19 @@ def setup_logging(level: int = logging.INFO) -> Path:
     if _CONFIGURED:
         return path
 
+    # Windowed (console=False) builds run with sys.stdout/stderr == None. Any
+    # stray print(), or a library that probes stream.isatty() (uvicorn's colour
+    # formatter does), then raises and can take down a thread. Give the streams
+    # a harmless sink so nothing crashes for lack of a console.
+    import os
+
+    for _name in ("stdout", "stderr"):
+        if getattr(sys, _name, None) is None:
+            try:
+                setattr(sys, _name, open(os.devnull, "w", encoding="utf-8"))
+            except Exception:
+                pass
+
     fmt = logging.Formatter(
         "%(asctime)s %(levelname)-7s %(name)s: %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
