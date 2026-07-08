@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "selects"
-version = "0.1.8"
+version = "0.1.9"
 description = "Local AI-assisted travel photo and video culling"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -30,17 +30,18 @@ dependencies = [
 
 [project.optional-dependencies]
 ml = [
-  "torch>=2.2",
-  "transformers>=4.40",
-  "insightface>=0.7",
-  "onnxruntime>=1.17",
+  # All models run on ONNX Runtime now — no torch, transformers, or the
+  # recognize-anything package. DirectML on Windows (any DX12 GPU incl. iGPU);
+  # plain onnxruntime elsewhere (its CoreML EP covers macOS, CPU everywhere).
+  "onnxruntime-directml>=1.17; sys_platform == 'win32'",
+  "onnxruntime>=1.17; sys_platform != 'win32'",
+  "sentencepiece>=0.2",       # SigLIP text tokenizer
+  "huggingface-hub>=0.23",    # fetch ONNX weights from the selects-onnx repo
+  "insightface>=0.7",         # face detection/recognition (already ONNX-based)
   "scikit-learn>=1.4",
   "hdbscan>=0.8.33",
   "umap-learn>=0.5.5",
   "requests>=2.31",
-  # NOTE: RAM++ tagging (recognize-anything) has no PyPI release. Install it
-  # separately for tag features:
-  #   pip install git+https://github.com/xinyu1205/recognize-anything.git
 ]
 dev = [
   "pytest>=8.0",

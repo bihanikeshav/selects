@@ -1,7 +1,7 @@
 """HDBSCAN + VLM cluster naming pass — M2 v3.
 
 Dual-resolution clustering with temporal/GPS pre-segmentation and
-collision-suppressed VLM naming.
+SigLIP zero-shot cluster naming (no VLM).
 
 Two-stage approach:
 1. Session-block pre-segmentation by time gaps (>90 min) or GPS jumps (>500m).
@@ -9,23 +9,17 @@ Two-stage approach:
    → tight visual groups for carousels.
 3. "Lookback" pass: HDBSCAN(min_cluster_size=20) globally
    → broad themes for browsing the trip.
-4. VLM (Qwen3-VL-2B) names each cluster using collision suppression.
+4. SigLIP zero-shot matches each cluster to a curated scene vocabulary.
 
 Usage (CLI): selects index <folder> --pass smart_tag
 """
 from __future__ import annotations
 
-import gc
 import logging
 import math
-import re
-import unicodedata
-from pathlib import Path
 from typing import Callable
 
 import numpy as np
-import torch
-from PIL import Image
 
 from selects.config import FolderConfig
 from selects.db import init_db, session_scope
@@ -154,165 +148,81 @@ def _run_hdbscan_on(embs: np.ndarray, min_cluster_size: int) -> np.ndarray:
     return labels.astype(np.int32)
 
 
-def _pick_representatives(embs: np.ndarray, cluster_mask: np.ndarray, n: int = 4) -> np.ndarray:
-    """Return global indices of the n photos closest to their cluster centroid."""
-    centroid = embs[cluster_mask].mean(axis=0)
-    dists = np.linalg.norm(embs[cluster_mask] - centroid, axis=1)
-    top_local = np.argsort(dists)[:n]
-    return np.where(cluster_mask)[0][top_local]
+# ───────────────────────────────────────────────────────────────────────────────── #
+# Zero-shot cluster naming (SigLIP text↔image — no VLM)                          #
+# ───────────────────────────────────────────────────────────────────────────────── #
+
+# Curated travel scene / subject vocabulary. Each cluster centroid is matched
+# against these with SigLIP — the same embedding space we already compute for
+# every photo — so naming needs no generative model and is deterministic.
+_VOCAB_TEMPLATE = "a travel photo of {}"
+
+TRAVEL_VOCAB: list[str] = [
+    "beach", "tropical beach", "rocky coastline", "harbor", "seaside promenade",
+    "old town streets", "narrow alley", "city skyline", "modern architecture",
+    "historic building", "cathedral", "church interior", "temple", "mosque",
+    "monastery", "castle", "palace", "ancient ruins", "monument", "statue",
+    "museum", "art gallery", "library", "market", "street food stall",
+    "food market", "restaurant meal", "cafe", "coffee shop", "bakery", "bar",
+    "nightlife", "rooftop bar", "mountain landscape", "hiking trail", "forest",
+    "jungle", "waterfall", "river", "lake", "reflection lake", "desert",
+    "sand dunes", "canyon", "glacier", "volcano", "hot spring", "cave",
+    "snow landscape", "ski slope", "countryside", "farmland", "vineyard",
+    "tea plantation", "rice terraces", "garden", "botanical garden", "city park",
+    "flower field", "wildlife", "birds", "safari", "marine life", "coral reef",
+    "aquarium", "zoo", "sunset", "sunrise", "golden hour", "night lights",
+    "city at night", "starry sky", "fireworks", "festival", "parade", "concert",
+    "live music", "sports event", "stadium", "amusement park", "ferris wheel",
+    "train station", "railway", "airport", "airplane window", "road trip",
+    "highway", "boat", "sailboat", "cruise ship", "kayaking", "snorkeling",
+    "diving", "surfing", "swimming pool", "beach resort", "hotel room", "spa",
+    "shopping street", "bookstore", "bridge", "fountain", "plaza", "lighthouse",
+    "windmill", "waterfront", "portrait", "group photo", "selfie",
+    "kids playing", "street performer", "local people", "traditional costume",
+    "pets", "dogs", "cats", "dessert", "breakfast", "seafood", "pizza", "pasta",
+    "sushi", "noodles", "street snacks", "cocktails", "wine", "latte art",
+    "autumn foliage", "cherry blossom", "christmas market", "rainy day",
+    "foggy morning", "misty mountains",
+]
 
 
-# ──────────────────────────────────────────────────────────────────────────── #
-# VLM helpers                                                                   #
-# ──────────────────────────────────────────────────────────────────────────── #
-
-_VLM_MODEL = None
-_VLM_PROC = None
-_VLM_NAME: str | None = None
-_VLM_DEVICE: str | None = None
-
-
-def _load_vlm(model_name: str = "Qwen/Qwen3-VL-2B-Instruct"):
-    global _VLM_MODEL, _VLM_PROC, _VLM_NAME, _VLM_DEVICE
-    if _VLM_MODEL is not None:
-        return _VLM_MODEL, _VLM_PROC
-
-    _VLM_DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-    dtype = torch.float16 if _VLM_DEVICE == "cuda" else torch.float32
-    log.info("loading VLM %s (device=%s)", model_name, _VLM_DEVICE)
-    from transformers import Qwen3VLForConditionalGeneration, Qwen3VLProcessor
-
-    _VLM_PROC = Qwen3VLProcessor.from_pretrained(model_name)
-    _VLM_MODEL = Qwen3VLForConditionalGeneration.from_pretrained(
-        model_name,
-        torch_dtype=dtype,
-        device_map=_VLM_DEVICE,
-    )
-    _VLM_MODEL.eval()
-    _VLM_NAME = model_name
-    if _VLM_DEVICE == "cuda":
-        vram_gb = torch.cuda.memory_allocated(0) / 1024 ** 3
-        log.info("VLM loaded (%.1f GB VRAM)", vram_gb)
-    else:
-        log.info("VLM loaded (cpu)")
-    return _VLM_MODEL, _VLM_PROC
+def _cluster_centroids(
+    labels_arr: np.ndarray, embs_n: np.ndarray, unique: list[int]
+) -> tuple[dict[int, np.ndarray], dict[int, int]]:
+    """Per-cluster L2-normalized mean embedding + member count."""
+    centroids: dict[int, np.ndarray] = {}
+    sizes: dict[int, int] = {}
+    for lbl in unique:
+        mask = labels_arr == lbl
+        c = embs_n[mask].mean(axis=0)
+        centroids[int(lbl)] = c / max(float(np.linalg.norm(c)), 1e-6)
+        sizes[int(lbl)] = int(mask.sum())
+    return centroids, sizes
 
 
-def _unload_vlm():
-    global _VLM_MODEL, _VLM_PROC, _VLM_NAME
-    if _VLM_MODEL is not None:
-        del _VLM_MODEL
-        del _VLM_PROC
-        _VLM_MODEL = None
-        _VLM_PROC = None
-        _VLM_NAME = None
-        gc.collect()
-        torch.cuda.empty_cache()
-        log.info("VLM unloaded")
-
-
-def _sanitize_label(raw: str) -> str:
-    """Lowercase, ASCII-only, max 4 words, no punctuation."""
-    text = raw.strip().strip('"\'.,;:!?')
-    text = unicodedata.normalize("NFKD", text)
-    text = text.encode("ascii", "ignore").decode("ascii")
-    text = re.sub(r"[^a-zA-Z0-9 _]", " ", text)
-    text = text.lower().strip()
-    text = re.sub(r"\s+", " ", text)
-    words = text.split()[:4]
-    return " ".join(words) if words else "uncategorized"
-
-
-def _call_vlm(images: list[Image.Image], prompt: str, model, proc) -> str:
-    """Run the VLM with given images and prompt; return sanitized label."""
-    from qwen_vl_utils import process_vision_info
-
-    content: list[dict] = []
-    for img in images:
-        content.append({"type": "image", "image": img})
-    content.append({"type": "text", "text": prompt})
-
-    messages = [{"role": "user", "content": content}]
-    text = proc.apply_chat_template(
-        messages,
-        tokenize=False,
-        add_generation_prompt=True,
-        add_thinking=False,
-    )
-    image_inputs, video_inputs = process_vision_info(messages)
-    inputs = proc(
-        text=[text],
-        images=image_inputs,
-        videos=video_inputs,
-        padding=True,
-        return_tensors="pt",
-        processor_kwargs={},
-    ).to(_VLM_DEVICE)
-
-    with torch.no_grad():
-        out = model.generate(**inputs, max_new_tokens=24, do_sample=False)
-    decoded = proc.decode(out[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True)
-    return _sanitize_label(decoded)
-
-
-def _name_clusters_iteratively(
-    cluster_representatives: dict[int, list[Image.Image]],
-    model,
-    proc,
+def _name_clusters_zeroshot(
+    centroids: dict[int, np.ndarray],
+    sizes: dict[int, int],
+    vocab_embs: np.ndarray,
+    labels: list[str],
 ) -> dict[int, str]:
-    """Name clusters with collision suppression.
-
-    Sorts clusters by size descending so the largest get the most "generic"
-    naming budget first. Each subsequent cluster is told not to reuse labels
-    already assigned.
-    """
-    used_labels: set[str] = set()
+    """Give each cluster its best-matching vocabulary label, largest cluster
+    first, skipping labels already taken so distinct clusters get distinct names.
+    Deterministic — replaces the VLM's collision-suppression prompting."""
     names: dict[int, str] = {}
-
-    # Sort by number of representative images (proxy for cluster size)
-    sorted_clusters = sorted(cluster_representatives.items(), key=lambda x: -len(x[1]))
-
-    for cluster_id, images in sorted_clusters:
-        used_list = sorted(used_labels)
-        used_str = ", ".join(f'"{l}"' for l in used_list[-20:])  # cap to 20 for prompt length
-
-        base_prompt = (
-            "These photos share a visual theme. "
-            "Describe the common theme in 2-4 words, lowercase, no punctuation. "
-            "Be very specific (e.g., 'monastery courtyard' beats 'buddhist temple', "
-            "'high altitude desert road' beats 'mountain road'). "
-        )
-        if used_str:
-            base_prompt += (
-                f"Labels already used for other clusters: {used_str}. "
-                "Do NOT reuse or closely rephrase any of these — pick something distinct. "
-            )
-        base_prompt += "Output only the label, nothing else."
-
-        try:
-            label = _call_vlm(images, base_prompt, model, proc)
-        except Exception as exc:
-            log.warning("VLM naming failed for cluster %d: %s", cluster_id, exc)
-            label = f"cluster {cluster_id}"
-
-        # If still a duplicate, retry once with stronger instruction
-        if label in used_labels:
-            retry_prompt = base_prompt + (
-                f" Your previous attempt produced '{label}' which is already used. "
-                "Try a completely different, more specific framing."
-            )
-            try:
-                label = _call_vlm(images, retry_prompt, model, proc)
-            except Exception:
-                pass
-            # If still a duplicate after retry, append cluster_id to disambiguate
-            if label in used_labels:
-                label = f"{label} {cluster_id}"
-
-        used_labels.add(label)
-        names[cluster_id] = label
-        log.info("cluster %d → %r", cluster_id, label)
-
+    used: set[str] = set()
+    for cid in sorted(centroids, key=lambda c: -sizes.get(c, 0)):
+        sims = vocab_embs @ centroids[cid]           # cosine — both normalized
+        chosen: str | None = None
+        for j in np.argsort(-sims):
+            cand = labels[int(j)]
+            if cand not in used:
+                chosen = cand
+                break
+        if chosen is None:  # more clusters than vocab labels — disambiguate
+            chosen = f"{labels[int(np.argmax(sims))]} {cid}"
+        used.add(chosen)
+        names[cid] = chosen
     return names
 
 
@@ -323,10 +233,8 @@ def _name_clusters_iteratively(
 def run_smart_cluster_stage(
     cfg: FolderConfig,
     on_progress: Callable[[int, int, str], None] | None = None,
-    n_reps: int = 4,
-    vlm_model: str = "Qwen/Qwen3-VL-2B-Instruct",
 ) -> int:
-    """Dual-resolution HDBSCAN clustering + VLM cluster naming → populate photo_tags.
+    """Dual-resolution HDBSCAN clustering + SigLIP zero-shot naming → populate photo_tags.
 
     Produces two sets of cluster tags per photo:
     - source='posting': tight session-block clusters (min_cluster_size=5)
@@ -363,7 +271,6 @@ def run_smart_cluster_stage(
     rows_sorted = sorted(rows, key=lambda r: (r[3] is None, r[3]))
 
     ids = np.array([r[0] for r in rows_sorted])
-    preview_paths = [r[2] for r in rows_sorted]
     embs_raw = np.stack([
         np.frombuffer(r[1], dtype=np.float16).copy().astype(np.float32)
         for r in rows_sorted
@@ -422,81 +329,19 @@ def run_smart_cluster_stage(
     if on_progress:
         on_progress(1, 2, f"clustered: {len(unique_posting)} posting, {len(unique_lookback)} lookback")
 
-    # ── 5. Free VRAM before loading VLM ────────────────────────────────── #
-    free_vram = torch.cuda.mem_get_info(0)[0] / 1024 ** 3
-    log.info("free VRAM before VLM load: %.1f GB", free_vram)
+    # ── 5. Zero-shot cluster naming (SigLIP text↔image, no VLM) ─────────── #
+    from selects.ml import embed as _embed
 
-    if free_vram < 4.5:
-        log.info("not enough free VRAM; attempting to unload other models first")
-        try:
-            from selects.ml import embed as _embed_mod
-            if hasattr(_embed_mod, "_MODEL") and _embed_mod._MODEL is not None:
-                del _embed_mod._MODEL
-                del _embed_mod._PROC
-                _embed_mod._MODEL = None
-                _embed_mod._PROC = None
-                gc.collect()
-                torch.cuda.empty_cache()
-                log.info("SigLIP unloaded; free VRAM now %.1f GB", torch.cuda.mem_get_info(0)[0] / 1024 ** 3)
-        except Exception as e:
-            log.warning("could not unload SigLIP: %s", e)
-        # Also unload RAM++ if present
-        try:
-            from selects.ml import ram_tags as _ram_mod
-            _ram_mod._unload_ram()
-        except Exception as e:
-            log.warning("could not unload RAM++: %s", e)
+    prompts = [_VOCAB_TEMPLATE.format(lbl) for lbl in TRAVEL_VOCAB]
+    vocab_embs = _embed.encode_text_prompts(prompts).astype(np.float32)
 
-    vlm, vlm_proc = _load_vlm(vlm_model)
+    lb_centroids, lb_sizes = _cluster_centroids(lookback_labels, embs_n, unique_lookback)
+    lookback_names = _name_clusters_zeroshot(lb_centroids, lb_sizes, vocab_embs, TRAVEL_VOCAB)
+    log.info("named %d lookback clusters (zero-shot)", len(lookback_names))
 
-    # ── 6. Name lookback clusters (collision-suppressed) ────────────────── #
-    lookback_reps: dict[int, list[Image.Image]] = {}
-    for lbl in unique_lookback:
-        cluster_mask = lookback_labels == lbl
-        cluster_size = int(cluster_mask.sum())
-        rep_indices = _pick_representatives(embs_n, cluster_mask, n=min(n_reps, cluster_size))
-        images: list[Image.Image] = []
-        for idx in rep_indices:
-            ppath = preview_paths[idx]
-            if ppath:
-                abs_path = cfg.state_dir / ppath
-                try:
-                    img = Image.open(abs_path).convert("RGB")
-                    img.thumbnail((336, 336), Image.LANCZOS)
-                    images.append(img)
-                except Exception as exc:
-                    log.warning("could not open preview %s: %s", ppath, exc)
-        if images:
-            lookback_reps[lbl] = images
-
-    log.info("naming %d lookback clusters (with collision suppression)", len(lookback_reps))
-    lookback_names = _name_clusters_iteratively(lookback_reps, vlm, vlm_proc)
-
-    # ── 7. Name posting clusters (collision-suppressed, separate set) ─── #
-    posting_reps: dict[int, list[Image.Image]] = {}
-    for lbl in unique_posting:
-        cluster_mask = posting_labels_global == lbl
-        cluster_size = int(cluster_mask.sum())
-        rep_indices = _pick_representatives(embs_n, cluster_mask, n=min(n_reps, cluster_size))
-        images = []
-        for idx in rep_indices:
-            ppath = preview_paths[idx]
-            if ppath:
-                abs_path = cfg.state_dir / ppath
-                try:
-                    img = Image.open(abs_path).convert("RGB")
-                    img.thumbnail((336, 336), Image.LANCZOS)
-                    images.append(img)
-                except Exception as exc:
-                    log.warning("could not open preview %s: %s", ppath, exc)
-        if images:
-            posting_reps[lbl] = images
-
-    log.info("naming %d posting clusters (with collision suppression)", len(posting_reps))
-    posting_names = _name_clusters_iteratively(posting_reps, vlm, vlm_proc)
-
-    # ── 8. Unload VLM ──────────────────────────────────────────────────── #
-    _unload_vlm()
+    post_centroids, post_sizes = _cluster_centroids(posting_labels_global, embs_n, unique_posting)
+    posting_names = _name_clusters_zeroshot(post_centroids, post_sizes, vocab_embs, TRAVEL_VOCAB)
+    log.info("named %d posting clusters (zero-shot)", len(posting_names))
 
     # ── 9. Write photo_tags ─────────────────────────────────────────────── #
     photo_ids_list = ids.tolist()

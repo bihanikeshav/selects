@@ -98,6 +98,7 @@
 /* ===== selects · Material 3 inspired theme ============================ */
 
 :root {
+  color-scheme: light;
   /* Google brand quartet — mapped to score axes for memorability */
   --g-blue:   #4285F4;
   --g-red:    #EA4335;
@@ -165,6 +166,7 @@
 }
 
 [data-theme="dark"] {
+  color-scheme: dark;  /* native scrollbars & form controls follow the theme */
   --md-primary:                  #B4C7FF;
   --md-on-primary:               #002E69;
   --md-primary-container:        #00429B;
@@ -217,6 +219,14 @@ body {
 
 button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
 
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
 img { display: block; max-width: 100%; }
 
 /* ===== shell layout ====================================================== */
@@ -246,6 +256,29 @@ img { display: block; max-width: 100%; }
 }
 .rail::-webkit-scrollbar { width: 4px; }
 .rail::-webkit-scrollbar-thumb { background: var(--md-outline-var); border-radius: 2px; }
+
+/* The Theme toggle is a <button>; strip UA styles so it lines up with the
+   <a> rail items instead of sitting slightly off-center. */
+button.rail-item {
+  appearance: none;
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+/* Themed scrollbars everywhere (WebView2/Chromium) so dark mode doesn't show
+   the ugly default white bars. color-scheme covers the native fallback. */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb {
+  background: var(--md-outline-var);
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--md-outline); }
+::-webkit-scrollbar-track { background: transparent; }
 
 .rail-brand {
   width: 48px; height: 48px;
@@ -282,7 +315,9 @@ img { display: block; max-width: 100%; }
   color: var(--md-on-surface-var);
   font-size: 11px;
   font-weight: 500;
+  line-height: 1;
   letter-spacing: 0.02em;
+  text-decoration: none;
   position: relative;
   transition: background-color var(--dur-short) var(--ease-standard),
               color var(--dur-short) var(--ease-standard);
@@ -305,7 +340,20 @@ img { display: block; max-width: 100%; }
   background: var(--md-secondary-container);
 }
 
-.rail-item svg { width: 22px; height: 22px; }
+.rail-item svg {
+  width: 22px;
+  height: 22px;
+  display: block;
+  flex-shrink: 0;
+}
+
+/* The crescent-moon glyph fills more of its viewBox than the line-drawn tab
+   icons, so at 22px it reads visibly larger. Nudge it down to match their
+   optical weight. */
+.rail-item.theme-toggle svg {
+  width: 19px;
+  height: 19px;
+}
 
 .rail-spacer { flex: 1; }
 
@@ -328,6 +376,79 @@ img { display: block; max-width: 100%; }
   max-height: 100vh;
   overflow: hidden;
   min-height: 0;
+}
+
+/* Standalone views (Libraries / Duplicates / Videos) drop a SINGLE content
+   wrapper straight into the .workspace grid, which is built for the 5-row Cull
+   layout. Without this the wrapper lands in the fixed topbar-height row (~64px)
+   and everything below it is clipped by the workspace's overflow:hidden — the
+   page looks empty below the header. Make the wrapper span all rows and scroll
+   internally instead. */
+/* Standalone-view content wrappers sit in the workspace grid's 1fr content row
+   (below the shared PageHeader); allow them to scroll internally. */
+.lib-wrap,
+.dedup-wrap,
+.videos-wrap {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Canonical page header — a fixed-height (170px) shell so EVERY tab's header
+   lines up, whether it carries a mode bar, a control strip, or neither. The
+   Topbar / above-bar / controls take their natural height; the title band
+   (.page-header) flexes to fill whatever is left, keeping the total at 170px. */
+.page-shell {
+  /* 170px is a FLOOR, not a fixed height: plain tabs sit at exactly 170 (the
+     title band flexes to fill), but content-rich headers (Search with its
+     filter strip, Duplicates with its summary tiles) grow past it instead of
+     clipping. The workspace grid gives the header an `auto` row, so a taller
+     header just shrinks the scrollable content row — the page never scrolls. */
+  min-height: 170px;
+  display: flex;
+  flex-direction: column;
+  background: var(--md-surface);
+}
+.page-header {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--md-outline-var);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.page-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 32px;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+.page-sub {
+  color: var(--md-on-surface-var);
+  font-size: 14px;
+  margin-top: 2px;
+}
+.page-header-titles {
+  min-width: 0;
+}
+.page-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-shrink: 0;
+}
+/* Secondary control strip (bucket tabs, filters) pinned under the title row. */
+.page-controls {
+  flex: 0 0 auto;
+  padding: 8px 24px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-bottom: 1px solid var(--md-outline-var);
+  overflow: hidden;
 }
 
 /* The Topbar (row 1) and KbdFooter (row 5) are pinned by the grid; only the
@@ -353,7 +474,10 @@ img { display: block; max-width: 100%; }
   font-weight: 500;
   letter-spacing: -0.005em;
   display: flex;
-  align-items: baseline;
+  /* Center (not baseline): the crumb + context use different fonts/sizes, and
+     baseline alignment drifts when the display/body fonts fall back to system
+     fonts in the desktop WebView. Centering the line boxes keeps them level. */
+  align-items: center;
   gap: 12px;
 }
 
@@ -1096,8 +1220,10 @@ img { display: block; max-width: 100%; }
   color: var(--md-on-surface-var);
   line-height: 1.55;
   margin-bottom: 18px;
-  padding-left: 12px;
-  border-left: 3px solid var(--accent, var(--md-primary));
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent, var(--md-primary)) 35%, var(--md-outline-var));
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--accent, var(--md-primary)) 6%, transparent);
 }
 
 .story-actions { display: flex; gap: 10px; flex-wrap: wrap; }
@@ -1247,8 +1373,10 @@ img { display: block; max-width: 100%; }
   color: var(--md-on-surface-var);
   margin: 6px 0 14px;
   line-height: 1.5;
-  padding-left: 10px;
-  border-left: 2.5px solid var(--accent, var(--md-primary));
+  padding: 6px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent, var(--md-primary)) 30%, var(--md-outline-var));
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--accent, var(--md-primary)) 5%, transparent);
   letter-spacing: 0.01em;
 }
 
@@ -1536,6 +1664,125 @@ img { display: block; max-width: 100%; }
 .filter-chip-clear {
   white-space: nowrap;
   flex-shrink: 0;
+}
+
+/* ===== Search header + results ========================================= */
+
+.search-header-query {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: min(760px, 52vw);
+}
+
+.search-query-input {
+  flex: 1;
+  min-width: 260px;
+  height: 42px;
+  padding: 0 18px;
+  border-radius: var(--r-full);
+  border: 1px solid var(--md-outline);
+  background: var(--md-surface);
+  color: var(--md-on-surface);
+  font-family: var(--font-body);
+  font-size: 14px;
+  outline: none;
+}
+
+.search-query-input:focus,
+.search-tag-input:focus {
+  border-color: var(--md-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--md-primary) 14%, transparent);
+}
+
+.search-header-controls {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.search-chip-row {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.search-chip-row .filter-chip {
+  flex: 0 0 auto;
+}
+
+.search-tag-adder {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.search-tag-input {
+  width: 150px;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: var(--r-full);
+  border: 1px solid var(--md-outline-var);
+  background: var(--md-surface);
+  color: var(--md-on-surface);
+  font-family: var(--font-body);
+  font-size: 13px;
+  outline: none;
+}
+
+.search-filter-strip {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.search-results-pane {
+  grid-row: 2;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 24px 32px 32px;
+  background: var(--md-surface);
+}
+
+/* ===== People merge mode =============================================== */
+
+.person-card.is-merge-mode {
+  cursor: grab;
+}
+
+.person-card.is-merge-mode:active {
+  cursor: grabbing;
+}
+
+.person-card.is-merge-target {
+  box-shadow: 0 0 0 3px var(--md-primary), var(--md-elev-2);
+}
+
+.person-card.is-merge-source {
+  box-shadow: 0 0 0 3px var(--g-green), var(--md-elev-2);
+}
+
+.person-merge-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 2;
+  padding: 3px 8px;
+  border-radius: var(--r-full);
+  background: var(--md-primary-container);
+  color: var(--md-on-primary-container);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 /* ===== utility =========================================================== */
@@ -1894,7 +2141,6 @@ img { display: block; max-width: 100%; }
   height: 100%;
   border-radius: var(--r-full);
   background: var(--md-primary);
-  transition: width var(--dur-medium) var(--ease-standard);
 }
 
 .onb-progress-caption {
@@ -1933,12 +2179,11 @@ img { display: block; max-width: 100%; }
 /* ── Libraries manager ────────────────────────────────────────────────── */
 
 .lib-wrap {
-  padding: 32px 32px 48px;
+  padding: 24px 32px 48px;
   display: flex;
   flex-direction: column;
   gap: 24px;
   overflow-y: auto;
-  max-width: 900px;
   width: 100%;
 }
 
@@ -2064,6 +2309,28 @@ img { display: block; max-width: 100%; }
   font-family: var(--font-display);
   font-size: 18px;
   font-weight: 500;
+}
+
+.lib-add-inline {
+  width: min(780px, 56vw);
+  display: flex;
+  /* Override the .lib-add card: in the header it's a compact horizontal row,
+     not a padded standalone panel. */
+  flex-direction: row;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 0;
+  background: none;
+  border: none;
+}
+
+.lib-add-inline .onb-field {
+  gap: 4px;
+}
+
+.lib-add-name {
+  width: 150px;
+  flex: 0 0 150px;
 }
 
 .lib-add-row {

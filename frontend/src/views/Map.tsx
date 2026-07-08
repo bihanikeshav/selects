@@ -3,9 +3,8 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
 import KbdFooter from "../components/KbdFooter";
+import PageHeader from "../components/PageHeader";
 import Rail from "../components/Rail";
-import StatusRow from "../components/StatusRow";
-import Topbar from "../components/Topbar";
 
 interface MapMarker {
   lat: number;
@@ -102,27 +101,31 @@ export default function MapView() {
   return (
     <div className="app">
       <Rail />
-      <div className="workspace">
-        <Topbar folder="selects" context="map" />
-        <StatusRow
-          pos={`${markers.length} locations`}
-          keepersCount={totalPhotos}
-          details={loading ? "loading…" : `${totalPhotos} photos with GPS`}
+      <div
+        className="workspace"
+        style={{
+          display: "grid",
+          gridTemplateRows: "auto 1fr auto",
+          height: "100vh",
+          maxHeight: "100vh",
+          overflow: "hidden",
+        }}
+      >
+        <PageHeader
+          context="map"
+          title="Map"
+          subtitle={
+            loading
+              ? "loading…"
+              : `${markers.length} locations · ${totalPhotos} photos with GPS · tap a pin to jump to that location's cluster`
+          }
         />
 
-        <div style={{ gridColumn: 1, gridRow: "3 / span 3", padding: "16px 24px", overflow: "hidden", background: "var(--md-surface)" }}>
-          <div style={{ display: "flex", alignItems: "center", marginBottom: 12 }}>
-            <h1 style={{ margin: 0, fontFamily: "var(--font-display)", fontWeight: 500, fontSize: 26 }}>Map</h1>
-            <span style={{ flex: 1 }} />
-            <span style={{ color: "var(--md-on-surface-var)", fontSize: 13 }}>
-              Tap a pin to jump to that location's cluster
-            </span>
-          </div>
-
+        <div style={{ minHeight: 0, padding: "16px 24px", overflow: "hidden", background: "var(--md-surface)" }}>
           <div
             ref={mapDivRef}
             style={{
-              height: "calc(100vh - 250px)",
+              height: "100%",
               borderRadius: 16,
               overflow: "hidden",
               border: "1px solid var(--md-outline-var)",

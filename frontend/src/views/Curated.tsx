@@ -4,9 +4,9 @@ import { listCurated, recordSwipe } from "../api/client";
 import type { CuratedPhoto } from "../api/types";
 import ExportPanel from "../components/ExportPanel";
 import ModeViewBar from "../components/ModeViewBar";
+import PageHeader from "../components/PageHeader";
 import Rail from "../components/Rail";
 import TasteCard from "../components/TasteCard";
-import Topbar from "../components/Topbar";
 
 type SortMode = "aesthetic" | "taken_at";
 
@@ -119,91 +119,73 @@ export default function Curated() {
         className="workspace"
         style={{
           display: "grid",
-          gridTemplateRows: "auto auto auto 1fr",
+          gridTemplateRows: "auto 1fr",
           minHeight: 0,
           maxHeight: "100vh",
           overflow: "hidden",
         }}
       >
-        <Topbar folder="selects" context="curated" />
-        <ModeViewBar />
-
-        <div
-          style={{
-            padding: "12px 24px",
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-            borderBottom: "1px solid var(--md-outline-var)",
-          }}
-        >
-          <div>
-            <h1
-              style={{
-                margin: 0,
-                fontFamily: "var(--font-display)",
-                fontSize: 32,
-                fontWeight: 400,
-                letterSpacing: "-0.01em",
-              }}
-            >
-              Curated
-            </h1>
-            <div style={{ color: "var(--md-on-surface-var)", fontSize: 14 }}>
-              {loading
-                ? "Loading…"
-                : `${photos.length} liked photos · ready to edit & post · press F on a thumb to remove`}
-            </div>
-          </div>
-          <div style={{ flex: 1 }} />
-          <div style={{ display: "flex", gap: 4 }}>
-            <button
-              className={`btn ${sortMode === "aesthetic" ? "btn-filled" : "btn-text"}`}
-              onClick={() => setSortMode("aesthetic")}
-              style={{ fontSize: 12 }}
-            >
-              Best ★
-            </button>
-            <button
-              className={`btn ${sortMode === "taken_at" ? "btn-filled" : "btn-text"}`}
-              onClick={() => setSortMode("taken_at")}
-              style={{ fontSize: 12 }}
-            >
-              Time
-            </button>
-          </div>
-          <button
-            className="btn btn-text"
-            onClick={() => setSelected(new Set(photos.map((p) => p.sha256)))}
-            disabled={photos.length === 0}
-          >
-            Select all
-          </button>
-          <button
-            className="btn btn-text"
-            onClick={() => setSelected(new Set())}
-            disabled={selected.size === 0}
-          >
-            Clear
-          </button>
-          <button
-            className="btn btn-filled"
-            onClick={openInDarktable}
-            disabled={selected.size === 0 || launching}
-          >
-            {launching
-              ? "Launching…"
-              : `Edit ${selected.size || ""} in darktable`}
-          </button>
-          <button
-            className="btn btn-tonal"
-            onClick={() => setExportOpen(true)}
-            disabled={photos.length === 0}
-            title="Export keepers — copy/zip originals or write XMP ratings back"
-          >
-            Export…
-          </button>
-        </div>
+        <PageHeader
+          context="curated"
+          title="Curated"
+          subtitle={
+            loading
+              ? "Loading…"
+              : `${photos.length} liked photos · ready to edit & post · press F on a thumb to remove`
+          }
+          above={<ModeViewBar />}
+          actions={
+            <>
+              <div style={{ display: "flex", gap: 4 }}>
+                <button
+                  className={`btn ${sortMode === "aesthetic" ? "btn-filled" : "btn-text"}`}
+                  onClick={() => setSortMode("aesthetic")}
+                  style={{ fontSize: 12 }}
+                >
+                  Best ★
+                </button>
+                <button
+                  className={`btn ${sortMode === "taken_at" ? "btn-filled" : "btn-text"}`}
+                  onClick={() => setSortMode("taken_at")}
+                  style={{ fontSize: 12 }}
+                >
+                  Time
+                </button>
+              </div>
+              <button
+                className="btn btn-text"
+                onClick={() => setSelected(new Set(photos.map((p) => p.sha256)))}
+                disabled={photos.length === 0}
+              >
+                Select all
+              </button>
+              <button
+                className="btn btn-text"
+                onClick={() => setSelected(new Set())}
+                disabled={selected.size === 0}
+              >
+                Clear
+              </button>
+              <button
+                className="btn btn-filled"
+                onClick={openInDarktable}
+                disabled={selected.size === 0 || launching}
+              >
+                {launching
+                  ? "Launching…"
+                  : `Edit ${selected.size || ""} in darktable`}
+              </button>
+              <button
+                className="btn btn-tonal"
+                onClick={() => setExportOpen(true)}
+                disabled={photos.length === 0}
+                title="Export keepers — copy/zip originals or write XMP ratings back"
+              >
+                Export…
+              </button>
+            </>
+          }
+        />
 
         <div style={{ padding: "12px 24px 16px", overflow: "auto", minHeight: 0 }}>
           <div style={{ marginBottom: 12 }}>

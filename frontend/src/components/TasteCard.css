@@ -4,17 +4,26 @@
   background: var(--md-surface-c-low);
   border: 1px solid var(--md-outline-var);
   border-radius: var(--r-lg, 12px);
-  padding: 16px;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 20px;
+  width: 100%;
+  flex-wrap: wrap;
+}
+
+/* Left cluster: title + the one-line stat, stacked. */
+.taste-main {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  max-width: 420px;
+  gap: 3px;
+  flex-shrink: 0;
 }
 
 .taste-head {
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
   gap: 8px;
 }
 
@@ -47,6 +56,13 @@
   font-size: 0.75rem;
   line-height: 1.4;
   color: var(--md-on-surface-var);
+  flex: 1;
+  min-width: 220px;
+}
+
+.taste-card .btn {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .taste-error {

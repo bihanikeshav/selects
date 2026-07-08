@@ -20,8 +20,7 @@ def search_photos(cfg: FolderConfig, query: str, k: int = 60) -> list[tuple[int,
     """Return [(photo_id, sha256, score), ...] sorted by relevance desc."""
     from selects.ml.embed import encode_text_prompts
 
-    txt = encode_text_prompts([query])           # [1, 1152] cuda
-    txt = (txt / txt.norm(dim=-1, keepdim=True)).cpu().float().numpy().squeeze(0)
+    txt = encode_text_prompts([query])[0]        # [1152] float32, already L2-normalized
 
     Session = init_db(cfg.db_path)
     with session_scope(Session) as s:
@@ -51,9 +50,7 @@ def embed_query(query: str) -> np.ndarray:
     """
     from selects.ml.embed import encode_text_prompts
 
-    txt = encode_text_prompts([query])
-    txt = (txt / txt.norm(dim=-1, keepdim=True)).cpu().float().numpy().squeeze(0)
-    return txt
+    return encode_text_prompts([query])[0]       # [1152] float32, already L2-normalized
 
 
 def siglip_bytes_to_matrix(blobs: list[bytes]) -> np.ndarray:

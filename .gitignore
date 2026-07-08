@@ -10,6 +10,10 @@ build/
 .eggs/
 *.whl
 
+# Bundled third-party binaries fetched for packaging (e.g. darktable, ~700 MB).
+# Populated by packaging/fetch_darktable.py; never committed.
+vendor/
+
 # Virtual environments
 .venv/
 venv/

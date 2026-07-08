@@ -37,17 +37,7 @@ def probe(path: Path) -> VideoMeta:
 
 
 def decode_first_frame(path: Path) -> np.ndarray:
-    """Decode a single representative frame. Prefers NVDEC via torchcodec."""
-    try:
-        from torchcodec.decoders import VideoDecoder
-
-        dec = VideoDecoder(str(path), device="cuda")
-        frame = dec[0]
-        arr = frame.permute(1, 2, 0).cpu().numpy()
-        return np.ascontiguousarray(arr, dtype=np.uint8)
-    except Exception:
-        pass
-
+    """Decode a single representative frame via ffmpeg."""
     meta = probe(path)
     cmd = [
         "ffmpeg", "-v", "error", "-i", str(path),

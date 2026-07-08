@@ -11,11 +11,10 @@ Usage:
     python packaging/build.py [--no-frontend] [--ml]
 
     --no-frontend   Skip the npm build (reuse an existing frontend/dist).
-    --ml            Bundle the ML stack (torch/transformers/...). Large + slow.
-                    Equivalent to setting SELECTS_BUNDLE_ML=1.
-
-CPU-only torch tip (much smaller than the CUDA wheels):
-    pip install torch --index-url https://download.pytorch.org/whl/cpu
+    --ml            Bundle the ML stack (onnxruntime/insightface/sklearn/...).
+                    Equivalent to setting SELECTS_BUNDLE_ML=1. Model weights are
+                    ONNX and fetched at runtime from the selects-onnx HF repo, so
+                    they are NOT baked into the bundle.
 """
 from __future__ import annotations
 

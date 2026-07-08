@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import PageHeader from "../components/PageHeader";
 import Rail from "../components/Rail";
 import TasteCard from "../components/TasteCard";
-import Topbar from "../components/Topbar";
 
 type Scores = {
   iqa: number | null;
@@ -164,24 +164,28 @@ export default function CalibrateDashboard() {
   return (
     <div className="app">
       <Rail />
-      <div className="workspace">
-        <Topbar folder="selects" context="calibration dashboard" />
+      <div
+        className="workspace"
+        style={{
+          display: "grid",
+          gridTemplateRows: "auto 1fr",
+          height: "100vh",
+          maxHeight: "100vh",
+          overflow: "hidden",
+        }}
+      >
+        <PageHeader
+          context="calibration dashboard"
+          title="Calibration dashboard"
+          subtitle={`${rows.length} photos · ${ratedCount} rated`}
+          actions={
+            <Link to="/calibrate" className="btn btn-text">
+              ← Back to rating
+            </Link>
+          }
+        />
 
-        <div style={{ gridRow: "2 / span 4", overflow: "auto", padding: "16px 24px 24px" }}>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 16, marginBottom: 16 }}>
-            <h1 style={{ margin: 0, fontFamily: "var(--font-display)", fontSize: 22 }}>
-              Calibration dashboard
-            </h1>
-            <div style={{ color: "var(--md-on-surface-var)", fontSize: 13 }}>
-              {rows.length} photos · {ratedCount} rated
-            </div>
-            <div style={{ marginLeft: "auto" }}>
-              <Link to="/calibrate" className="btn btn-text">
-                ← Back to rating
-              </Link>
-            </div>
-          </div>
-
+        <div style={{ minHeight: 0, overflow: "auto", padding: "16px 24px 24px" }}>
           {loading ? (
             <div style={{ color: "var(--md-on-surface-var)" }}>Loading…</div>
           ) : (

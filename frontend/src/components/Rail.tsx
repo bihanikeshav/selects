@@ -3,15 +3,24 @@ import { NavLink, useLocation } from "react-router-dom";
 
 import { modeFromPath } from "./ModeViewBar";
 
+/** Retint the native desktop title bar to match the theme. No-op in a browser
+ *  (window.pywebview only exists inside the pywebview desktop shell). */
+function syncNativeTheme(isDark: boolean) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (window as any).pywebview?.api?.set_theme?.(isDark);
+}
+
 function toggleTheme() {
   const root = document.documentElement;
   const isDark = root.getAttribute("data-theme") === "dark";
   if (isDark) {
     root.removeAttribute("data-theme");
     localStorage.setItem("tc-theme", "light");
+    syncNativeTheme(false);
   } else {
     root.setAttribute("data-theme", "dark");
     localStorage.setItem("tc-theme", "dark");
+    syncNativeTheme(true);
   }
 }
 
@@ -24,10 +33,16 @@ function toggleTheme() {
  */
 export default function Rail() {
   useEffect(() => {
-    const saved = localStorage.getItem("tc-theme");
-    if (saved === "dark") {
+    const isDark = localStorage.getItem("tc-theme") === "dark";
+    if (isDark) {
       document.documentElement.setAttribute("data-theme", "dark");
     }
+    // Sync the native title bar once pywebview is ready (and immediately, in
+    // case it already is). Harmless in a browser.
+    const apply = () => syncNativeTheme(isDark);
+    apply();
+    window.addEventListener("pywebviewready", apply);
+    return () => window.removeEventListener("pywebviewready", apply);
   }, []);
 
   const { pathname } = useLocation();
@@ -38,10 +53,6 @@ export default function Rail() {
 
   return (
     <nav className="rail" aria-label="Primary">
-      <div className="rail-brand" title="Selects">
-        <span className="dot" aria-hidden="true"></span>
-      </div>
-
       {/* Workflow modes */}
       <NavLink
         to="/cull"
@@ -193,7 +204,7 @@ export default function Rail() {
       </NavLink>
 
       <button
-        className="rail-item"
+        className="rail-item theme-toggle"
         onClick={toggleTheme}
         title="Toggle light / dark"
       >

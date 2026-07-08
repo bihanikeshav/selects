@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { dedupReport, dedupRescan } from "../api/dedup";
 import type { DedupGroup, DedupPhotoRef, DedupReportResult } from "../api/dedup";
+import PageHeader from "../components/PageHeader";
 import Rail from "../components/Rail";
 import "../components/Dedup.css";
 
@@ -21,7 +22,7 @@ function shortPath(path: string): string {
   const norm = path.replace(/\\/g, "/");
   const parts = norm.split("/").filter(Boolean);
   if (parts.length <= 2) return norm;
-  return `…/${parts.slice(-2).join("/")}`;
+  return `.../${parts.slice(-2).join("/")}`;
 }
 
 function GroupThumb({ member, isKeeper }: { member: DedupPhotoRef; isKeeper: boolean }) {
@@ -33,14 +34,14 @@ function GroupThumb({ member, isKeeper }: { member: DedupPhotoRef; isKeeper: boo
       ) : (
         <div className="dedup-thumb-fallback" title={member.path}>
           <span className="dedup-thumb-fallback-icon" aria-hidden="true">
-            ⧉
+            files
           </span>
           <span className="dedup-thumb-fallback-path">{shortPath(member.path)}</span>
         </div>
       )}
       <div className="dedup-thumb-meta">
         <span className="dedup-lib-name">{member.library_name}</span>
-        <span className="dedup-size">{member.size_bytes != null ? fmtBytes(member.size_bytes) : "—"}</span>
+        <span className="dedup-size">{member.size_bytes != null ? fmtBytes(member.size_bytes) : "-"}</span>
       </div>
     </div>
   );
@@ -99,10 +100,12 @@ export default function Dedup() {
   useEffect(() => {
     poll();
     return () => {
-      if (pollRef.current !== null) window.clearInterval(pollRef.current);
+      if (pollRef.current !== null) {
+        window.clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [poll]);
 
   useEffect(() => {
     if (status === "loading" || status === "scanning") {
@@ -134,57 +137,68 @@ export default function Dedup() {
   return (
     <div className="app">
       <Rail />
-      <div className="workspace">
+      <div
+        className="workspace"
+        style={{
+          display: "grid",
+          gridTemplateRows: "auto 1fr",
+          height: "100vh",
+          maxHeight: "100vh",
+          overflow: "hidden",
+        }}
+      >
+        <PageHeader
+          context="duplicates"
+          title="Duplicates"
+          subtitle={
+            result
+              ? `${result.libraries_scanned} ${result.libraries_scanned === 1 ? "library" : "libraries"} - ${result.photos_scanned.toLocaleString()} photos scanned`
+              : "Scanning your libraries for duplicates..."
+          }
+          actions={
+            <>
+              {result && (
+                <div className="dedup-summary dedup-summary-header">
+                  <div className="dedup-summary-tile dedup-summary-tile-hero">
+                    <span className="dedup-summary-value">{fmtBytes(result.total_reclaimable_bytes)}</span>
+                    <span className="dedup-summary-label">reclaimable</span>
+                  </div>
+                  <div className="dedup-summary-tile">
+                    <span className="dedup-summary-value">{result.exact_group_count}</span>
+                    <span className="dedup-summary-label">exact groups</span>
+                  </div>
+                  <div className="dedup-summary-tile">
+                    <span className="dedup-summary-value">{result.near_group_count}</span>
+                    <span className="dedup-summary-label">near groups</span>
+                  </div>
+                </div>
+              )}
+              <button className="btn btn-outlined" onClick={onRescan} disabled={status === "scanning"}>
+                {status === "scanning" ? "Scanning..." : "Rescan"}
+              </button>
+            </>
+          }
+          controls={
+            result && result.groups.length > 0 ? (
+              <div className="dedup-filters">
+                {(["all", "exact", "near"] as Filter[]).map((f) => (
+                  <button
+                    key={f}
+                    className={"dedup-filter-btn" + (filter === f ? " is-active" : "")}
+                    onClick={() => setFilter(f)}
+                  >
+                    {f === "all" ? "All" : f === "exact" ? "Exact" : "Near"}
+                  </button>
+                ))}
+              </div>
+            ) : null
+          }
+        />
         <div className="dedup-wrap">
-          <header className="dedup-header">
-            <div>
-              <h1>Duplicates</h1>
-              <span className="dedup-sub">
-                {result
-                  ? `${result.libraries_scanned} ${result.libraries_scanned === 1 ? "library" : "libraries"} · ${result.photos_scanned.toLocaleString()} photos scanned`
-                  : "Scanning your libraries for duplicates…"}
-              </span>
-            </div>
-            <button className="btn btn-outlined" onClick={onRescan} disabled={status === "scanning"}>
-              {status === "scanning" ? "Scanning…" : "Rescan"}
-            </button>
-          </header>
-
           {error && <p className="onb-error">{error}</p>}
 
-          {result && (
-            <div className="dedup-summary">
-              <div className="dedup-summary-tile dedup-summary-tile-hero">
-                <span className="dedup-summary-value">{fmtBytes(result.total_reclaimable_bytes)}</span>
-                <span className="dedup-summary-label">reclaimable</span>
-              </div>
-              <div className="dedup-summary-tile">
-                <span className="dedup-summary-value">{result.exact_group_count}</span>
-                <span className="dedup-summary-label">exact-duplicate groups</span>
-              </div>
-              <div className="dedup-summary-tile">
-                <span className="dedup-summary-value">{result.near_group_count}</span>
-                <span className="dedup-summary-label">near-duplicate groups</span>
-              </div>
-            </div>
-          )}
-
-          {result && result.groups.length > 0 && (
-            <div className="dedup-filters">
-              {(["all", "exact", "near"] as Filter[]).map((f) => (
-                <button
-                  key={f}
-                  className={"dedup-filter-btn" + (filter === f ? " is-active" : "")}
-                  onClick={() => setFilter(f)}
-                >
-                  {f === "all" ? "All" : f === "exact" ? "Exact" : "Near"}
-                </button>
-              ))}
-            </div>
-          )}
-
           {(status === "loading" || status === "scanning") && !result && (
-            <p className="dedup-empty">Scanning all registered libraries — this can take a moment…</p>
+            <p className="dedup-empty">Scanning all registered libraries. This can take a moment...</p>
           )}
 
           {status === "done" && result && result.groups.length === 0 && (

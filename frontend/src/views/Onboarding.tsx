@@ -410,7 +410,7 @@ export default function Onboarding() {
                 <span>
                   {sys
                     ? sys.backend === "gpu"
-                      ? `GPU · ${sys.device_name ?? "CUDA"}`
+                      ? `GPU · ${sys.device_name ?? "GPU"}`
                       : "Running on CPU"
                     : "…"}
                 </span>
