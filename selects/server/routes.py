@@ -991,20 +991,12 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
         sha256: str,
         preset: str = Query("film"),
         straighten: bool = Query(False, description="Apply quick auto-straighten"),
-        grade: bool = Query(True, description="Apply aesthetic colour grading"),
-        model: str = Query(
-            "clahe",
-            description=(
-                "Which enhancement model. 'clahe' = the assertive classical auto_tone "
-                "(Lightroom-Auto style; default, fast). 'retinexformer' = ICCV'23 "
-                "low-light enhancer (FiveK)."
-            ),
-        ),
+        grade: bool = Query(True, description="Apply the classical auto_tone edit"),
     ):
         """Render an edited preview. Either or both of grade/straighten can be
         applied independently.
 
-        Cached per-(sha, model, grade, straighten).
+        Cached per-(sha, preset, grade, straighten).
         """
         from io import BytesIO
         from PIL import Image
@@ -1013,13 +1005,11 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
 
         if preset not in ("film", "clarity", "portrait"):
             preset = "film"
-        if model not in ("clahe", "retinexformer"):
-            model = "clahe"
 
         # Build a cache key reflecting all toggles independently.
         parts = []
         if grade:
-            parts.append(model if model != "clahe" else preset)
+            parts.append(preset)
         if straighten:
             parts.append("straight")
         if not parts:
@@ -1052,19 +1042,10 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
             if straighten:
                 out, _angle = do_straighten(out)
             if grade:
-                # "clahe"/auto = assertive Lightroom-style classical auto_tone
-                # (default, fast). "retinexformer" = Retinexformer low-light.
-                # (zero-dce/csrnet/nafnet retired as broken/weak; Restormer deblur
-                # dropped — too memory-heavy for a marginal gain.)
-                if model == "retinexformer":
-                    try:
-                        from selects.ml.lowlight import enhance_with_retinexformer
-                        out = enhance_with_retinexformer(out, cfg)
-                    except Exception as exc:
-                        log.warning("retinexformer failed: %s — falling back to auto", exc)
-                        out = aesthetic_grade(out, preset=preset, has_face=has_face)
-                else:
-                    out = aesthetic_grade(out, preset=preset, has_face=has_face)
+                # Enhancement is the assertive Lightroom-style classical auto_tone
+                # (the primary, and now only, enhance — it looks good and is
+                # instant). All ML enhancers were retired.
+                out = aesthetic_grade(out, preset=preset, has_face=has_face)
             buf = BytesIO()
             out.convert("RGB").save(buf, "JPEG", quality=90)
             cached.write_bytes(buf.getvalue())

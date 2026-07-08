@@ -29,13 +29,11 @@ _MODEL_FILES: dict[str, tuple[str, ...]] = {
     "siglip_vision": ("siglip_vision.onnx",),          # fp16, self-contained
     "siglip_text": ("siglip_text.onnx",),              # fp16, self-contained
     "ram_plus": ("ram_plus.onnx", "ram_plus.onnx.data"),   # fp32 + external data
-    # Enhancement models (opset-17, legacy TorchScript export → DirectML-safe):
-    "retinexformer": ("retinexformer.onnx",),          # low-light (FiveK), fp32
-    # NOTE: csrnet / zero_dce / nafnet were retired (broken or weak). Restormer
-    # (deblur) was also dropped from the app: as a full-image transformer it
-    # needed several GB of activation memory (OOM'd DirectML, swap-thrashed CPU)
-    # for a marginal deblur gain. Its restormer.onnx stays in the HF repo (not
-    # downloaded) in case we revisit it with tiled inference.
+    # NOTE: all ML enhancers were retired. csrnet/zero_dce produced broken output;
+    # nafnet was weak; Restormer (deblur) needed GBs of activation memory; and
+    # Retinexformer (low-light) was dropped in favour of the classical auto_tone,
+    # which looks good and is instant. Their .onnx files stay in the HF repo (not
+    # downloaded) if we ever revisit them. Enhancement is now purely classical.
 }
 
 # First available wins. CPU is always appended as the last-resort fallback.
