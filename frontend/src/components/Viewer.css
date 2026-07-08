@@ -6,6 +6,7 @@
   flex-direction: column;
   background: rgba(8, 8, 10, 0.97);
   backdrop-filter: blur(2px);
+  font-family: var(--font-body);
 }
 
 .viewer-topbar {
@@ -13,23 +14,37 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 16px;
+  padding: 12px 20px;
   color: #fff;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
-.viewer-count { font-family: var(--font-mono); font-size: 12px; opacity: 0.7; }
+.viewer-count {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
 .viewer-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
 
 .viewer-icon-btn {
-  width: 34px; height: 34px;
+  width: 36px; height: 36px;
   display: grid; place-items: center;
   border: none;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: rgba(255, 255, 255, 0.1);
   color: #fff;
   font-size: 15px;
   cursor: pointer;
+  transition: background-color var(--dur-short) var(--ease-standard),
+              transform var(--dur-short) var(--ease-standard);
 }
 .viewer-icon-btn:hover { background: rgba(255, 255, 255, 0.2); }
+.viewer-icon-btn:active { transform: scale(0.94); }
+.viewer-icon-btn:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
 
 .viewer-stage {
   flex: 1;
@@ -38,13 +53,13 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 8px 24px;
+  padding: 8px 32px;
 }
 .viewer-img {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
-  border-radius: 4px;
+  border-radius: var(--r-sm);
   box-shadow: 0 10px 50px rgba(0, 0, 0, 0.6);
 }
 
@@ -55,16 +70,23 @@
   width: 46px; height: 46px;
   display: grid; place-items: center;
   border: none;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: rgba(255, 255, 255, 0.12);
   color: #fff;
   font-size: 26px;
   line-height: 1;
   cursor: pointer;
+  transition: background-color var(--dur-short) var(--ease-standard),
+              transform var(--dur-short) var(--ease-standard);
 }
-.viewer-nav:hover { background: rgba(255, 255, 255, 0.24); }
-.viewer-prev { left: 14px; }
-.viewer-next { right: 14px; }
+.viewer-nav:hover { background: rgba(255, 255, 255, 0.24); transform: translateY(-50%) scale(1.06); }
+.viewer-nav:active { transform: translateY(-50%) scale(0.94); }
+.viewer-nav:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+.viewer-prev { left: 18px; }
+.viewer-next { right: 18px; }
 
 .viewer-caption {
   flex: 0 0 auto;
@@ -79,24 +101,35 @@
   display: flex;
   gap: 8px;
   overflow-x: auto;
-  padding: 12px 16px 16px;
+  padding: 12px 20px 18px;
   scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
 }
+.viewer-strip::-webkit-scrollbar { height: 6px; }
+.viewer-strip::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.25); border-radius: 3px; }
+
 .viewer-thumb {
   position: relative;
   flex: 0 0 auto;
   width: 84px; height: 84px;
   border: 2px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   overflow: hidden;
   padding: 0;
   background: none;
   cursor: pointer;
   opacity: 0.6;
-  transition: opacity 120ms ease, border-color 120ms ease;
+  transition: opacity var(--dur-short) var(--ease-standard),
+              border-color var(--dur-short) var(--ease-standard),
+              transform var(--dur-short) var(--ease-standard);
 }
 .viewer-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.viewer-thumb:hover { opacity: 0.9; }
+.viewer-thumb:hover { opacity: 0.9; transform: translateY(-2px); }
+.viewer-thumb:focus-visible {
+  opacity: 1;
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
 .viewer-thumb.is-current { opacity: 1; border-color: #fff; }
 .viewer-thumb.is-marked { border-color: var(--g-green, #34a853); opacity: 1; }
 .viewer-thumb-mark {
@@ -104,12 +137,14 @@
   top: 3px; right: 3px;
   min-width: 16px; height: 16px;
   padding: 0 4px;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: var(--g-green, #34a853);
   color: #0b1f10;
   font-size: 9px;
   font-weight: 700;
+  font-family: var(--font-display);
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
 }
