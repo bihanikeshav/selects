@@ -2013,12 +2013,14 @@ button.rail-item {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 12px;
+  line-height: 1;
 }
 
 .onb-brand .dot {
-  display: inline-block;
-  width: 14px; height: 14px;
+  display: block;
+  width: 22px; height: 22px;
+  flex: 0 0 auto;
   border-radius: 50%;
   background:
     conic-gradient(from 0deg,
@@ -2026,7 +2028,8 @@ button.rail-item {
       var(--g-red) 90deg 180deg,
       var(--g-yellow) 180deg 270deg,
       var(--g-green) 270deg 360deg);
-  margin-right: 6px;
+  /* nudge down to sit at the optical centre of the lowercase wordmark */
+  transform: translateY(1px);
 }
 
 .onb-pitch {
