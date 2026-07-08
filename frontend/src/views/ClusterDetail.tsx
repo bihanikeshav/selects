@@ -91,9 +91,7 @@ export default function ClusterDetail() {
             <Link to="/cull/clusters" className="btn btn-text" style={{ paddingLeft: 8 }}>
               ← All clusters
             </Link>
-            <h1 style={{ margin: 0, fontFamily: "var(--font-display)", fontWeight: 500, fontSize: 28 }}>
-              {decoded}
-            </h1>
+            <h1>{decoded}</h1>
 
             <div style={{ flex: 1 }} />
 
@@ -110,18 +108,7 @@ export default function ClusterDetail() {
             </button>
           </div>
 
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 12,
-              padding: "8px 0",
-              borderTop: "1px solid var(--md-outline-var)",
-              borderBottom: "1px solid var(--md-outline-var)",
-              fontSize: 12,
-              color: "var(--md-on-surface-var)",
-            }}
-          >
+          <div className="cluster-detail-filter-row">
             <span>Aesthetic ≥ p{aestheticPct}</span>
             <input
               type="range"
@@ -130,13 +117,12 @@ export default function ClusterDetail() {
               step={5}
               value={aestheticPct}
               onChange={(e) => setAestheticPct(Number(e.target.value))}
-              style={{ width: 220 }}
             />
-            <span style={{ fontFamily: "var(--font-mono)", color: "var(--md-on-surface)" }}>
+            <span className="val">
               {visiblePhotos.length} / {photos.length}
             </span>
-            <div style={{ flex: 1 }} />
-            <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+            <div className="spacer" />
+            <label className="sort-toggle">
               <input
                 type="checkbox"
                 checked={sortByAesthetic}
@@ -158,10 +144,10 @@ export default function ClusterDetail() {
             {visiblePhotos.map((p, i) => {
               const sel = selected.has(p.sha256);
               return (
-                <div key={p.sha256} className={`cluster-photo${sel ? " is-selected" : ""}`} style={{ position: "relative" }}>
+                <div key={p.sha256} className={`cluster-photo${sel ? " is-selected" : ""}`}>
                   <button
                     onClick={() => toggle(p.sha256)}
-                    style={{ display: "block", width: "100%", height: "100%", padding: 0, border: 0, background: "transparent", cursor: "pointer" }}
+                    className="cluster-photo-btn"
                     aria-pressed={sel}
                     aria-label={`select photo ${p.sha256.slice(0, 8)}`}
                   >
@@ -172,21 +158,7 @@ export default function ClusterDetail() {
                     onClick={() => setLightbox(i)}
                     aria-label="enlarge"
                     title="Enlarge"
-                    style={{
-                      position: "absolute",
-                      top: 6,
-                      right: 6,
-                      width: 24,
-                      height: 24,
-                      borderRadius: "50%",
-                      background: "rgba(0,0,0,0.55)",
-                      color: "#fff",
-                      border: 0,
-                      cursor: "zoom-in",
-                      fontSize: 14,
-                      display: "grid",
-                      placeItems: "center",
-                    }}
+                    className="cluster-photo-zoom-btn"
                   >
                     ↗
                   </button>

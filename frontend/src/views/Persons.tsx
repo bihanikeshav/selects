@@ -203,11 +203,8 @@ export default function Persons() {
           }
         />
 
-        <div className="cluster-detail-wrap" style={{ gridRow: "2", minHeight: 0, overflowY: "auto" }}>
-          <div
-            className="cluster-detail-grid"
-            style={{ gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))" }}
-          >
+        <div className="cluster-detail-wrap cluster-detail-wrap--persons">
+          <div className="cluster-detail-grid cluster-detail-grid--wide">
             {persons.map(p => {
               const isEditing = editing === p.id;
               const displayName = p.label || `P${p.id}`;
@@ -217,7 +214,6 @@ export default function Persons() {
                 <div
                   key={p.id}
                   className={`cluster-photo person-card${mergeMode ? " is-merge-mode" : ""}${isTarget ? " is-merge-target" : ""}${isSource ? " is-merge-source" : ""}`}
-                  style={{ position: "relative", aspectRatio: "1/1" }}
                   draggable={mergeMode}
                   onDragStart={e => e.dataTransfer.setData("text/person-id", String(p.id))}
                   onDragOver={e => {
@@ -237,7 +233,8 @@ export default function Persons() {
                 >
                   <Link
                     to={`/people/${p.id}`}
-                    style={{ display: "block", width: "100%", height: "100%" }}
+                    className="cluster-card-link"
+                    style={{ width: "100%", height: "100%" }}
                     onClick={e => { if (isEditing || mergeMode) e.preventDefault(); }}
                   >
                     <img src={p.cover_url} alt={displayName} loading="lazy" />
@@ -252,47 +249,24 @@ export default function Persons() {
                   {!mergeMode && (
                     <button
                       type="button"
+                      className="person-hide-btn"
                       title={p.hidden ? "Unhide this person" : "Hide this person"}
                       onClick={e => {
                         e.preventDefault();
                         e.stopPropagation();
                         toggleHidden(p.id, !p.hidden);
                       }}
-                      style={{
-                        position: "absolute",
-                        top: 6,
-                        right: 6,
-                        zIndex: 2,
-                        background: "rgba(0,0,0,0.55)",
-                        color: "#fff",
-                        border: 0,
-                        borderRadius: 4,
-                        padding: "3px 7px",
-                        fontSize: 11,
-                        cursor: "pointer",
-                      }}
                     >
                       {p.hidden ? "Unhide" : "Hide"}
                     </button>
                   )}
 
-                  <div
-                    style={{
-                      position: "absolute",
-                      inset: "auto 0 0 0",
-                      background: "linear-gradient(180deg, transparent, rgba(0,0,0,0.7))",
-                      padding: "20px 10px 8px",
-                      color: "#fff",
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "flex-end",
-                      gap: 8,
-                    }}
-                  >
+                  <div className="person-card-footer">
                     {isEditing ? (
                       <input
                         autoFocus
                         type="text"
+                        className="person-name-input"
                         value={draft}
                         onChange={e => setDraft(e.target.value)}
                         onBlur={() => commitLabel(p.id)}
@@ -301,20 +275,10 @@ export default function Persons() {
                           if (e.key === "Escape") { setEditing(null); setDraft(""); }
                         }}
                         placeholder={`P${p.id}`}
-                        style={{
-                          flex: 1,
-                          background: "rgba(255,255,255,0.95)",
-                          color: "#1B1B1F",
-                          border: 0,
-                          padding: "4px 8px",
-                          borderRadius: 4,
-                          fontFamily: "var(--font-body)",
-                          fontSize: 13,
-                          outline: "none",
-                        }}
                       />
                     ) : (
                       <button
+                        className="person-name-btn"
                         onClick={e => {
                           e.preventDefault();
                           e.stopPropagation();
@@ -325,24 +289,12 @@ export default function Persons() {
                           setEditing(p.id);
                           setDraft(p.label ?? "");
                         }}
-                        style={{
-                          background: "transparent",
-                          border: 0,
-                          color: "#fff",
-                          fontFamily: "var(--font-display)",
-                          fontSize: 14,
-                          fontWeight: 500,
-                          cursor: "pointer",
-                          padding: 0,
-                          textAlign: "left",
-                          flex: 1,
-                        }}
                         title={mergeMode ? "Select for merge" : "Click to name this person"}
                       >
-                        {p.label || <em style={{ opacity: 0.7 }}>name...</em>}
+                        {p.label || <em>name...</em>}
                       </button>
                     )}
-                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, opacity: 0.85 }}>
+                    <span className="person-count-badge">
                       {p.photo_count}p
                     </span>
                   </div>

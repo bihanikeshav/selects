@@ -70,8 +70,3 @@
   font-size: 0.8rem;
   color: var(--md-error);
 }
-
-.taste-card .btn[disabled] {
-  opacity: 0.55;
-  cursor: default;
-}

@@ -268,16 +268,8 @@ function StoryCard({ story }: { story: StoryEntry }) {
 
         {exportResult && (
           <div
-            style={{
-              marginTop: 10,
-              padding: "8px 12px",
-              borderRadius: 10,
-              background: "color-mix(in srgb, var(--g-green) 14%, transparent)",
-              color: "color-mix(in srgb, var(--g-green) 78%, var(--md-on-surface))",
-              fontSize: 12,
-              fontFamily: "var(--font-mono)",
-              wordBreak: "break-all",
-            }}
+            className="cluster-detail-toast"
+            style={{ marginTop: 10, fontFamily: "var(--font-mono)", wordBreak: "break-all" }}
           >
             {exportResult}
           </div>
@@ -808,22 +800,7 @@ function BestOfDropdown() {
         Best of ▾
       </button>
       {open && (
-        <div
-          style={{
-            position: "absolute",
-            top: "calc(100% + 6px)",
-            right: 0,
-            zIndex: 50,
-            minWidth: 380,
-            maxHeight: 480,
-            overflowY: "auto",
-            background: "var(--md-surface)",
-            border: "1px solid var(--md-outline-var)",
-            borderRadius: 12,
-            boxShadow: "0 12px 32px rgba(0,0,0,0.25)",
-            padding: 12,
-          }}
-        >
+        <div className="bestof-menu">
           {!facets ? (
             <div style={{ padding: 12, color: "var(--md-on-surface-var)", fontSize: 13 }}>
               Loading…
@@ -958,79 +935,26 @@ export default function Stories() {
 
         <div className="stories-wrap" style={{ gridRow: "3 / span 3" }}>
           {loading && (
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                height: 240,
-                color: "var(--md-on-surface-var)",
-                fontFamily: "var(--font-display)",
-                fontSize: 15,
-              }}
-            >
-              Loading stories…
+            <div className="stories-state">
+              <span className="stories-state-sub">Loading stories…</span>
             </div>
           )}
 
           {!loading && error && (
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                height: 240,
-                gap: 12,
-              }}
-            >
-              <div
-                style={{
-                  color: "var(--md-on-surface)",
-                  fontFamily: "var(--font-display)",
-                  fontSize: 18,
-                }}
-              >
-                Stories not yet available
-              </div>
-              <div style={{ color: "var(--md-on-surface-var)", fontSize: 13 }}>
+            <div className="stories-state">
+              <div className="stories-state-title">Stories not yet available</div>
+              <div className="stories-state-sub">
                 Run{" "}
-                <code
-                  style={{
-                    fontFamily: "var(--font-mono)",
-                    background: "var(--md-surface-c)",
-                    padding: "2px 6px",
-                    borderRadius: 4,
-                  }}
-                >
-                  selects index &lt;folder&gt; --pass story
-                </code>{" "}
+                <code>selects index &lt;folder&gt; --pass story</code>{" "}
                 to build narrative sequences
               </div>
             </div>
           )}
 
           {!loading && !error && stories.length === 0 && (
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                height: 240,
-                gap: 12,
-              }}
-            >
-              <div
-                style={{
-                  color: "var(--md-on-surface)",
-                  fontFamily: "var(--font-display)",
-                  fontSize: 18,
-                }}
-              >
-                No stories yet
-              </div>
-              <div style={{ color: "var(--md-on-surface-var)", fontSize: 13 }}>
+            <div className="stories-state">
+              <div className="stories-state-title">No stories yet</div>
+              <div className="stories-state-sub">
                 Run the story stage to build narrative sequences from your photos.
               </div>
             </div>

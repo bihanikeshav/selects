@@ -127,7 +127,8 @@
 .dedup-empty {
   font-size: 14px;
   color: var(--md-on-surface-var);
-  padding: 24px 0;
+  padding: 36px 0;
+  text-align: center;
 }
 
 .dedup-groups {

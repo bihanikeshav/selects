@@ -118,18 +118,16 @@ export default function Curated() {
           }
           actions={
             <>
-              <div style={{ display: "flex", gap: 4 }}>
+              <div className="curated-sort-toggle">
                 <button
                   className={`btn ${sortMode === "aesthetic" ? "btn-filled" : "btn-text"}`}
                   onClick={() => setSortMode("aesthetic")}
-                  style={{ fontSize: 12 }}
                 >
                   Best ★
                 </button>
                 <button
                   className={`btn ${sortMode === "taken_at" ? "btn-filled" : "btn-text"}`}
                   onClick={() => setSortMode("taken_at")}
-                  style={{ fontSize: 12 }}
                 >
                   Time
                 </button>
@@ -172,67 +170,20 @@ export default function Curated() {
           <div style={{ marginBottom: 12 }}>
             <TasteCard />
           </div>
-          {err && (
-            <div
-              style={{
-                padding: 12,
-                color: "var(--g-red)",
-                background: "color-mix(in srgb, var(--g-red) 12%, transparent)",
-                borderRadius: 8,
-                marginBottom: 12,
-              }}
-            >
-              {err}
-            </div>
-          )}
+          {err && <div className="view-banner view-banner-error">{err}</div>}
           {toast && (
-            <div
-              style={{
-                padding: "8px 12px",
-                color: "var(--md-on-surface)",
-                background: "var(--md-surface-c)",
-                border: "1px solid var(--md-outline-var)",
-                borderRadius: 8,
-                marginBottom: 12,
-                fontSize: 12,
-              }}
-            >
+            <div className="view-banner view-banner-info" style={{ fontSize: 12 }}>
               {toast}
             </div>
           )}
           {!loading && photos.length === 0 && (
-            <div
-              style={{
-                padding: 36,
-                textAlign: "center",
-                color: "var(--md-on-surface-var)",
-                fontSize: 14,
-              }}
-            >
+            <div className="cluster-detail-empty">
               Nothing curated yet. Open Stories or a Best-Of view and press{" "}
-              <kbd
-                style={{
-                  background: "var(--md-surface-c)",
-                  border: "1px solid var(--md-outline-var)",
-                  borderRadius: 4,
-                  padding: "1px 6px",
-                  fontFamily: "var(--font-mono)",
-                  fontSize: 12,
-                }}
-              >
-                F
-              </kbd>{" "}
-              on the photos you want to ship.
+              <kbd className="curated-kbd">F</kbd> on the photos you want to ship.
             </div>
           )}
           {!loading && photos.length > 0 && (
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
-                gap: 8,
-              }}
-            >
+            <div className="curated-grid">
               {photos.map((p, i) => {
                 const isSel = selected.has(p.sha256);
                 const isFocused = focusedIdx === i;
@@ -242,51 +193,16 @@ export default function Curated() {
                     onMouseEnter={() => setFocusedIdx(i)}
                     onClick={() => toggleSelected(p.sha256)}
                     onDoubleClick={() => setLightboxIdx(i)}
-                    style={{
-                      position: "relative",
-                      border: isSel
-                        ? "3px solid var(--md-primary)"
-                        : "1px solid var(--md-outline-var)",
-                      outline: isFocused ? "2px solid var(--md-primary)" : "none",
-                      outlineOffset: 1,
-                      borderRadius: 10,
-                      overflow: "hidden",
-                      background: "var(--md-surface-c-low)",
-                      cursor: "pointer",
-                      aspectRatio: "4/3",
-                    }}
+                    className={`curated-tile${isSel ? " is-selected" : ""}${isFocused ? " is-focused" : ""}`}
                   >
-                    <img
-                      src={p.thumb_url}
-                      alt=""
-                      loading="lazy"
-                      style={{
-                        width: "100%",
-                        height: "100%",
-                        objectFit: "cover",
-                        display: "block",
-                      }}
-                    />
+                    <img src={p.thumb_url} alt="" loading="lazy" />
                     <button
+                      className="curated-tile-unlike"
                       onClick={(e) => {
                         e.stopPropagation();
                         unlike(p.sha256);
                       }}
                       title="Unlike (F)"
-                      style={{
-                        position: "absolute",
-                        top: 6,
-                        left: 6,
-                        width: 26,
-                        height: 26,
-                        display: "grid",
-                        placeItems: "center",
-                        background: "var(--g-red)",
-                        color: "#fff",
-                        border: 0,
-                        borderRadius: "50%",
-                        cursor: "pointer",
-                      }}
                     >
                       <svg
                         viewBox="0 0 24 24"
@@ -302,21 +218,7 @@ export default function Curated() {
                       </svg>
                     </button>
                     {p.combined != null && (
-                      <span
-                        style={{
-                          position: "absolute",
-                          top: 6,
-                          right: 6,
-                          background: "rgba(0,0,0,0.75)",
-                          color: "#fff",
-                          fontSize: 10,
-                          padding: "2px 6px",
-                          borderRadius: 4,
-                          fontFamily: "var(--font-mono)",
-                        }}
-                      >
-                        {p.combined.toFixed(2)}
-                      </span>
+                      <span className="curated-tile-score">{p.combined.toFixed(2)}</span>
                     )}
                   </div>
                 );

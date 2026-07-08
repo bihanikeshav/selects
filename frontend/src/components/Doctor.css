@@ -6,12 +6,54 @@
   min-height: 0;
 }
 
-.doctor-error {
-  padding: 12px;
-  color: var(--g-red);
-  background: color-mix(in srgb, var(--g-red) 12%, transparent);
-  border-radius: 8px;
-  margin-bottom: 12px;
+/* Bucket tabs in the page-controls strip. Background/border colour flips to
+   the bucket's accent when active — that part stays inline (dynamic per
+   bucket) — everything else (sizing, hover, focus) lives here so the tabs
+   match the rest of the app's interactive states. */
+.doctor-bucket-tab {
+  background: var(--md-surface-c);
+  color: var(--md-on-surface);
+  border: 1px solid var(--md-outline-var);
+  padding: 8px 14px;
+  border-radius: var(--r-full);
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+  transition:
+    background-color var(--dur-short) var(--ease-standard),
+    border-color var(--dur-short) var(--ease-standard),
+    transform var(--dur-short) var(--ease-standard);
+}
+
+.doctor-bucket-tab:hover {
+  transform: translateY(-1px);
+}
+
+.doctor-bucket-tab:focus-visible {
+  outline: 2px solid var(--md-primary);
+  outline-offset: 2px;
+}
+
+.doctor-bucket-tab.is-active {
+  color: #000;
+  font-weight: 600;
+}
+
+.doctor-bucket-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: var(--md-surface);
+  padding: 1px 7px;
+  border-radius: var(--r-full);
+}
+
+.doctor-bucket-tab.is-active .doctor-bucket-count {
+  background: rgba(0, 0, 0, 0.18);
 }
 
 .doctor-loading,

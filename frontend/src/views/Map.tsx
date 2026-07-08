@@ -126,7 +126,7 @@ export default function MapView() {
             ref={mapDivRef}
             style={{
               height: "100%",
-              borderRadius: 16,
+              borderRadius: "var(--r-lg)",
               overflow: "hidden",
               border: "1px solid var(--md-outline-var)",
               background: "var(--md-surface-c-low)",

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, Link } from "react-router-dom";
+import PageHeader from "../components/PageHeader";
 import Rail from "../components/Rail";
 import StackPhoto from "../components/StackPhoto";
-import Topbar from "../components/Topbar";
 import Viewer from "../components/Viewer";
 import PhotoEditor from "../editor/PhotoEditor";
 import type { CuratedPhoto } from "../api/types";
@@ -115,69 +115,54 @@ export default function BestOf() {
         className="workspace"
         style={{
           display: "grid",
-          gridTemplateRows: "auto auto 1fr",
+          gridTemplateRows: "auto 1fr",
           minHeight: 0,
           maxHeight: "100vh",
           overflow: "hidden",
         }}
       >
-        <Topbar folder="selects" context={`best of: ${facet}=${value}`} />
-
-        <div
-          style={{
-            padding: "10px 24px",
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-            borderBottom: "1px solid var(--md-outline-var)",
-          }}
-        >
-          <div>
-            <h1
-              style={{
-                margin: 0,
-                fontFamily: "var(--font-display)",
-                fontSize: 22,
-                fontWeight: 500,
-              }}
-            >
-              {title}
-            </h1>
-            <div style={{ color: "var(--md-on-surface-var)", fontSize: 12 }}>
+        <PageHeader
+          context={`best of: ${facet}=${value}`}
+          title={title}
+          subtitle={
+            <>
               {data ? `${data.total} curated photos` : loading ? "Loading…" : ""}
               {" · "}
               <span style={{ fontFamily: "var(--font-mono)" }}>
                 {FACET_LABELS[facet || ""] ?? facet}: {value}
               </span>
-            </div>
-          </div>
-          <div style={{ flex: 1 }} />
-          <button
-            className="btn btn-text"
-            onClick={selectAll}
-            disabled={!data || data.photos.length === 0}
-          >
-            Select all
-          </button>
-          <button
-            className="btn btn-text"
-            onClick={clearSelection}
-            disabled={selected.size === 0}
-          >
-            Clear
-          </button>
-          <button
-            className="btn btn-tonal"
-            onClick={openInEditor}
-            disabled={selected.size === 0}
-            title="Edit the selected photos in the built-in editor"
-          >
-            {`Edit ${selected.size || ""}`}
-          </button>
-          <Link to="/cull/stories" className="btn btn-text">
-            ← Stories
-          </Link>
-        </div>
+            </>
+          }
+          actions={
+            <>
+              <button
+                className="btn btn-text"
+                onClick={selectAll}
+                disabled={!data || data.photos.length === 0}
+              >
+                Select all
+              </button>
+              <button
+                className="btn btn-text"
+                onClick={clearSelection}
+                disabled={selected.size === 0}
+              >
+                Clear
+              </button>
+              <button
+                className="btn btn-tonal"
+                onClick={openInEditor}
+                disabled={selected.size === 0}
+                title="Edit the selected photos in the built-in editor"
+              >
+                {`Edit ${selected.size || ""}`}
+              </button>
+              <Link to="/cull/stories" className="btn btn-text">
+                ← Stories
+              </Link>
+            </>
+          }
+        />
 
         <div style={{ padding: "12px 24px 16px", overflow: "auto", minHeight: 0 }}>
           {err && (

@@ -252,7 +252,7 @@ export default function Dedup() {
           }
         />
         <div className="dedup-wrap">
-          {error && <p className="onb-error">{error}</p>}
+          {error && <div className="view-banner view-banner-error">{error}</div>}
 
           {(status === "loading" || status === "scanning") && !result && (
             <p className="dedup-empty">Scanning all registered libraries. This can take a moment...</p>
