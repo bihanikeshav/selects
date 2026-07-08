@@ -94,12 +94,21 @@
 .video-card-thumb {
   position: relative;
   width: 100%;
-  aspect-ratio: 16 / 9;
-  flex: 0 0 auto;    /* never let the flex column stretch the thumb taller */
+  /* Deterministic 16:9 box: height is ALWAYS 56.25% of the width via padding —
+     no dependence on the image's intrinsic size, aspect-ratio support, or flex
+     sizing quirks. The image is absolutely positioned inside and letterboxed. */
+  height: 0;
+  padding-bottom: 56.25%;
+  flex: 0 0 auto;
   background: #000;   /* black bars behind letterboxed portrait/odd-ratio videos */
 }
 
 .video-card-thumb img {
+  /* Absolutely positioned so the portrait image's intrinsic height can't feed
+     back and stretch the aspect-ratio box — the 16/9 container stays 16/9 and
+     the image is letterboxed inside it. */
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   /* contain (not cover) so portrait/vertical videos show whole with black bars
@@ -109,6 +118,8 @@
 }
 
 .video-card-thumb-fallback {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   display: flex;
