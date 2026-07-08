@@ -103,7 +103,12 @@ def run_app(host: str = "127.0.0.1", port: int = 8000) -> None:
     url = f"http://{host}:{port}"
 
     def _serve() -> None:
-        uvicorn.run(app, host=host, port=port, log_level="warning")
+        # log_config=None is REQUIRED in the windowed (console=False) build:
+        # with no console, sys.stdout/stderr are None, and uvicorn's default
+        # ColourizedFormatter calls stream.isatty() → AttributeError → the
+        # server thread dies and the app never loads. We route logs through our
+        # own handler anyway (setup_logging), so uvicorn's config isn't needed.
+        uvicorn.run(app, host=host, port=port, log_level="warning", log_config=None)
 
     threading.Thread(target=_serve, daemon=True).start()
 
