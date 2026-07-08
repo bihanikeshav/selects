@@ -29,14 +29,20 @@ def upgrade() -> None:
 
     if "persons" not in insp.get_table_names():
         return
+    # Recover from an earlier failed batch_alter_table attempt (its temp table is
+    # left behind and makes every retry fail with "table ... already exists").
+    op.execute("DROP TABLE IF EXISTS _alembic_tmp_persons")
+
     existing = {c["name"] for c in insp.get_columns("persons")}
     if "hidden" in existing:
         return
 
-    with op.batch_alter_table("persons", schema=None) as batch_op:
-        batch_op.add_column(
-            sa.Column("hidden", sa.Boolean(), nullable=False, server_default=sa.false())
-        )
+    # Plain ADD COLUMN — SQLite supports NOT NULL + constant DEFAULT directly, so
+    # no table-recreating batch mode (which races across threads) is needed.
+    op.add_column(
+        "persons",
+        sa.Column("hidden", sa.Boolean(), nullable=False, server_default=sa.false()),
+    )
 
 
 def downgrade() -> None:
@@ -49,5 +55,4 @@ def downgrade() -> None:
     if "hidden" not in existing:
         return
 
-    with op.batch_alter_table("persons", schema=None) as batch_op:
-        batch_op.drop_column("hidden")
+    op.drop_column("persons", "hidden")
