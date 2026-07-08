@@ -127,8 +127,20 @@ def run_app(host: str = "127.0.0.1", port: int = 8000) -> None:
             width=1440,
             height=900,
             min_size=(1024, 720),
+            maximized=True,     # open filling the screen
             js_api=chrome,
         )
+
+        def _close_splash(*_):
+            # Dismiss the PyInstaller boot splash once our window is visible.
+            try:
+                import pyi_splash  # type: ignore
+
+                pyi_splash.close()
+            except Exception:
+                pass
+
+        window.events.shown += _close_splash
         chrome._window = window
         # Start matched to the light theme; the web UI calls set_theme() on load
         # and on every toggle to keep the caption in sync with the app theme.
