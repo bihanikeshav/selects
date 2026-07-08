@@ -221,12 +221,12 @@ export default function Search() {
 
               {showFilters && (
                 <div className="search-filter-strip">
-                  <label style={filterFieldStyle}>
-                    <span style={filterLabelStyle}>Person</span>
+                  <label className="search-filter-field">
+                    <span className="search-filter-label">Person</span>
                     <select
                       value={personId}
                       onChange={e => setPersonId(e.target.value ? Number(e.target.value) : "")}
-                      style={filterInputStyle}
+                      className="search-filter-input"
                     >
                       <option value="">Anyone</option>
                       {persons.map(p => (
@@ -237,28 +237,28 @@ export default function Search() {
                     </select>
                   </label>
 
-                  <label style={filterFieldStyle}>
-                    <span style={filterLabelStyle}>From</span>
+                  <label className="search-filter-field">
+                    <span className="search-filter-label">From</span>
                     <input
                       type="date"
                       value={dateFrom}
                       onChange={e => setDateFrom(e.target.value)}
-                      style={filterInputStyle}
+                      className="search-filter-input"
                     />
                   </label>
 
-                  <label style={filterFieldStyle}>
-                    <span style={filterLabelStyle}>To</span>
+                  <label className="search-filter-field">
+                    <span className="search-filter-label">To</span>
                     <input
                       type="date"
                       value={dateTo}
                       onChange={e => setDateTo(e.target.value)}
-                      style={filterInputStyle}
+                      className="search-filter-input"
                     />
                   </label>
 
-                  <label style={filterFieldStyle}>
-                    <span style={filterLabelStyle}>Min aesthetic ({minAesthetic.toFixed(1)})</span>
+                  <label className="search-filter-field">
+                    <span className="search-filter-label">Min aesthetic ({minAesthetic.toFixed(1)})</span>
                     <input
                       type="range"
                       min={0}
@@ -266,7 +266,7 @@ export default function Search() {
                       step={0.5}
                       value={minAesthetic}
                       onChange={e => setMinAesthetic(Number(e.target.value))}
-                      style={{ width: 140 }}
+                      className="search-filter-range"
                     />
                   </label>
 
@@ -348,28 +348,3 @@ export default function Search() {
     </div>
   );
 }
-
-const filterFieldStyle: React.CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 4,
-};
-
-const filterLabelStyle: React.CSSProperties = {
-  fontFamily: "var(--font-display)",
-  fontSize: 11,
-  letterSpacing: "0.04em",
-  textTransform: "uppercase",
-  color: "var(--md-on-surface-var)",
-};
-
-const filterInputStyle: React.CSSProperties = {
-  height: 34,
-  padding: "0 10px",
-  borderRadius: 8,
-  border: "1px solid var(--md-outline-var)",
-  background: "var(--md-surface)",
-  color: "var(--md-on-surface)",
-  fontFamily: "var(--font-body)",
-  fontSize: 13,
-};

@@ -238,30 +238,12 @@ function SourceToggle({
   onChange: (v: ClusterSource) => void;
 }) {
   return (
-    <div
-      style={{
-        display: "inline-flex",
-        border: "1px solid var(--md-outline-var)",
-        borderRadius: 20,
-        overflow: "hidden",
-        fontSize: 13,
-        fontFamily: "var(--font-display)",
-      }}
-    >
+    <div className="story-group-tabs">
       {(["thematic", "date", "lookback", "posting"] as ClusterSource[]).map(src => (
         <button
           key={src}
+          className={`story-group-tab${value === src ? " is-active" : ""}`}
           onClick={() => onChange(src)}
-          style={{
-            padding: "5px 16px",
-            cursor: "pointer",
-            border: "none",
-            background: value === src ? "var(--md-primary)" : "transparent",
-            color: value === src ? "var(--md-on-primary)" : "var(--md-on-surface-var)",
-            fontFamily: "inherit",
-            fontSize: "inherit",
-            transition: "background 0.15s, color 0.15s",
-          }}
         >
           {SOURCE_LABELS[src].label}
         </button>

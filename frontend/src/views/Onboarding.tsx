@@ -378,7 +378,7 @@ export default function Onboarding() {
                 {installedCount > 0 && (
                   <p
                     className="onb-models-note"
-                    style={{ marginTop: 0, color: "var(--md-tertiary, #1a7f37)" }}
+                    style={{ marginTop: 0, color: "var(--g-green)" }}
                   >
                     ✓ Already installed: {installedCount} model
                     {installedCount === 1 ? "" : "s"} ({fmtSize(installedMb)})
@@ -434,7 +434,7 @@ export default function Onboarding() {
                   justifyContent: "space-between",
                   alignItems: "center",
                   fontSize: 13,
-                  color: "#5f6368",
+                  color: "var(--md-on-surface-var)",
                   margin: "2px 0 10px",
                 }}
               >
@@ -467,43 +467,18 @@ export default function Onboarding() {
             )}
 
             {phase !== "done" && mode === "cpu" && nPhotos > 0 && (
-              <div
-                style={{
-                  fontSize: 13,
-                  lineHeight: 1.5,
-                  color: "#3c4043",
-                  background: "rgba(251,188,4,0.12)",
-                  border: "1px solid rgba(251,188,4,0.35)",
-                  borderRadius: 10,
-                  padding: "10px 12px",
-                  margin: "0 0 12px",
-                }}
-              >
+              <div className="onb-warn">
                 <strong>Heads up:</strong> {nPhotos.toLocaleString()} photos on CPU
                 take about {fmtDuration(estimateTotalSeconds(nPhotos, "cpu"))}. An
                 NVIDIA GPU would cut this to roughly{" "}
                 {fmtDuration(estimateTotalSeconds(nPhotos, "gpu"))}. You can leave
                 this running — it keeps going in the background.
-                <details style={{ marginTop: 8 }}>
-                  <summary style={{ cursor: "pointer", fontWeight: 600 }}>
-                    Have an NVIDIA GPU? Enable it
-                  </summary>
+                <details>
+                  <summary>Have an NVIDIA GPU? Enable it</summary>
                   <div style={{ marginTop: 6, fontSize: 12.5 }}>
                     Install a CUDA build of PyTorch, then restart selects — it
                     detects the GPU automatically on the next launch:
-                    <code
-                      style={{
-                        display: "block",
-                        marginTop: 6,
-                        padding: "6px 8px",
-                        borderRadius: 6,
-                        background: "rgba(0,0,0,0.06)",
-                        fontFamily: "var(--font-mono)",
-                        fontSize: 12,
-                        whiteSpace: "pre-wrap",
-                        wordBreak: "break-all",
-                      }}
-                    >
+                    <code>
                       pip install torch --index-url
                       https://download.pytorch.org/whl/cu124
                     </code>

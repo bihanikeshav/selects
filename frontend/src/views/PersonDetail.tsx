@@ -82,6 +82,7 @@ export default function PersonDetail() {
             {editingLabel ? (
               <input
                 autoFocus
+                className="person-detail-title-input"
                 value={labelDraft}
                 onChange={(e) => setLabelDraft(e.target.value)}
                 onKeyDown={(e) => {
@@ -90,36 +91,15 @@ export default function PersonDetail() {
                 }}
                 onBlur={saveLabel}
                 placeholder={`P${id} (clear to unset)`}
-                style={{
-                  fontFamily: "var(--font-display)",
-                  fontSize: 26,
-                  fontWeight: 500,
-                  background: "var(--md-surface-c-low)",
-                  border: "1px solid var(--md-outline-var)",
-                  borderRadius: 8,
-                  padding: "4px 10px",
-                  color: "var(--md-on-surface)",
-                  outline: "none",
-                  minWidth: 220,
-                }}
               />
             ) : (
               <h1
+                className="person-detail-title"
                 onClick={() => {
                   setLabelDraft(label || "");
                   setEditingLabel(true);
                 }}
                 title="Click to rename"
-                style={{
-                  margin: 0,
-                  fontFamily: "var(--font-display)",
-                  fontWeight: 500,
-                  fontSize: 28,
-                  cursor: "text",
-                  borderBottom: "1px dashed transparent",
-                }}
-                onMouseEnter={(e) => (e.currentTarget.style.borderBottomColor = "var(--md-outline-var)")}
-                onMouseLeave={(e) => (e.currentTarget.style.borderBottomColor = "transparent")}
               >
                 {displayName}
               </h1>
@@ -155,7 +135,7 @@ export default function PersonDetail() {
               <div key={p.sha256} className={`cluster-photo${selected.has(p.sha256) ? " is-selected" : ""}`} style={{ position: "relative" }}>
                 <button
                   onClick={() => toggle(p.sha256)}
-                  style={{ display: "block", width: "100%", height: "100%", padding: 0, border: 0, background: "transparent", cursor: "pointer" }}
+                  className="cluster-photo-btn"
                   aria-pressed={selected.has(p.sha256)}
                 >
                   <img src={p.thumb_url} alt="" loading="lazy" />
@@ -164,12 +144,7 @@ export default function PersonDetail() {
                 <button
                   onClick={() => setLightbox(i)}
                   title="Enlarge"
-                  style={{
-                    position: "absolute", top: 6, right: 6, width: 24, height: 24,
-                    borderRadius: "50%", background: "rgba(0,0,0,0.55)", color: "#fff",
-                    border: 0, cursor: "zoom-in", fontSize: 14,
-                    display: "grid", placeItems: "center",
-                  }}
+                  className="cluster-photo-zoom"
                 >
                   ↗
                 </button>

@@ -124,7 +124,9 @@ export default function PhotoEditor({ shas, onClose }: Props) {
   return (
     <div className="editor-overlay" role="dialog" aria-modal="true">
       <div className="editor-topbar">
-        <button className="btn btn-text" onClick={onClose} disabled={saving}>Close</button>
+        <div className="editor-top-actions editor-top-actions-left">
+          <button className="btn btn-text" onClick={onClose} disabled={saving}>Close</button>
+        </div>
         <span className="editor-title">Edit{shas.length > 1 ? ` · ${cur + 1}/${shas.length}` : ""}</span>
         <div className="editor-top-actions">
           <button

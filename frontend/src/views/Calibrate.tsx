@@ -442,8 +442,8 @@ export default function Calibrate() {
               <div style={cardHeaderStyle}>
                 Agreement
                 <button
-                  className="btn btn-text"
-                  style={{ marginLeft: "auto", fontSize: 11, padding: "2px 8px" }}
+                  className="btn btn-text btn-sm"
+                  style={{ marginLeft: "auto" }}
                   onClick={retrain}
                   disabled={retraining}
                   title="Retrain personal model (R)"

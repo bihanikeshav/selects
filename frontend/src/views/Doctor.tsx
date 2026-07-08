@@ -167,45 +167,22 @@ export default function Doctor() {
                 key={b}
                 onClick={() => setBucket(b)}
                 title={meta.hint}
-                style={{
-                  background: active
-                    ? meta.accent
-                    : "var(--md-surface-c)",
-                  color: active ? "#000" : "var(--md-on-surface)",
-                  border: `1px solid ${active ? meta.accent : "var(--md-outline-var)"}`,
-                  padding: "8px 14px",
-                  borderRadius: 999,
-                  fontFamily: "var(--font-display)",
-                  fontSize: 13,
-                  fontWeight: active ? 600 : 500,
-                  cursor: "pointer",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 7,
-                  whiteSpace: "nowrap",
-                }}
+                className={`doctor-bucket-tab${active ? " is-active" : ""}`}
+                style={
+                  active
+                    ? { background: meta.accent, borderColor: meta.accent }
+                    : undefined
+                }
               >
                 {meta.label}
-                <span
-                  style={{
-                    fontFamily: "var(--font-mono)",
-                    fontSize: 11,
-                    background: active
-                      ? "rgba(0,0,0,0.18)"
-                      : "var(--md-surface)",
-                    padding: "1px 7px",
-                    borderRadius: 999,
-                  }}
-                >
-                  {n}
-                </span>
+                <span className="doctor-bucket-count">{n}</span>
               </button>
             );
           })}
         />
 
         <div className="doctor-body">
-          {err && <div className="doctor-error">{err}</div>}
+          {err && <div className="view-banner view-banner-error">{err}</div>}
 
           {loading ? (
             <div className="doctor-loading">Loading…</div>

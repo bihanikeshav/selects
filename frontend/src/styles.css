@@ -335,8 +335,13 @@ button.rail-item {
 }
 
 .rail-item:hover .icon { background: color-mix(in srgb, var(--md-on-surface) 8%, transparent); }
+.rail-item:active .icon { transform: scale(0.94); }
 .rail-item:focus-visible { outline: none; }
-.rail-item:focus-visible .icon { background: color-mix(in srgb, var(--md-on-surface) 12%, transparent); }
+.rail-item:focus-visible .icon {
+  background: color-mix(in srgb, var(--md-on-surface) 12%, transparent);
+  outline: 2px solid var(--md-primary);
+  outline-offset: 2px;
+}
 
 .rail-item.is-active { color: var(--md-on-secondary-container); }
 .rail-item.is-active .icon {
@@ -533,6 +538,11 @@ button.rail-item {
   transition: background-color var(--dur-short) var(--ease-standard);
 }
 .icon-btn:hover { background: color-mix(in srgb, var(--md-on-surface) 8%, transparent); }
+.icon-btn:active { transform: scale(0.94); }
+.icon-btn:focus-visible {
+  outline: 2px solid var(--md-primary);
+  outline-offset: 2px;
+}
 .icon-btn svg { width: 22px; height: 22px; }
 
 /* ===== status row ======================================================== */
@@ -1307,6 +1317,14 @@ button.rail-item {
   background: color-mix(in srgb, var(--md-primary) 10%, transparent);
 }
 
+/* Compact modifier for buttons embedded in tight card headers (e.g. a
+   "Retrain" action inline with a card title) where the default .btn padding
+   would overpower the surrounding content. */
+.btn-sm {
+  padding: 4px 10px;
+  font-size: 11px;
+}
+
 .story-strip {
   display: flex;
   gap: 10px;
@@ -1669,6 +1687,121 @@ button.rail-item {
   opacity: 0.8;
 }
 
+/* ===== Shared inline banners (error / info) reused across standalone views ===== */
+
+.view-banner {
+  padding: 10px 14px;
+  border-radius: var(--r-sm);
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+.view-banner-error {
+  color: var(--md-error);
+  background: color-mix(in srgb, var(--md-error) 12%, transparent);
+}
+
+.view-banner-info {
+  color: var(--md-on-surface);
+  background: var(--md-surface-c);
+  border: 1px solid var(--md-outline-var);
+}
+
+/* ===== Curated view ===================================================== */
+
+.curated-sort-toggle {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.curated-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.curated-tile {
+  position: relative;
+  border: 1px solid var(--md-outline-var);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--md-surface-c-low);
+  cursor: pointer;
+  aspect-ratio: 4 / 3;
+  transition:
+    transform var(--dur-short) var(--ease-standard),
+    box-shadow var(--dur-short) var(--ease-standard),
+    border-color var(--dur-short) var(--ease-standard);
+}
+
+.curated-tile:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--md-elev-2);
+}
+
+.curated-tile.is-selected {
+  border: 3px solid var(--md-primary);
+}
+
+.curated-tile.is-focused {
+  outline: 2px solid var(--md-primary);
+  outline-offset: 1px;
+}
+
+.curated-tile img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.curated-tile-unlike {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  background: var(--g-red);
+  color: #fff;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform var(--dur-short) var(--ease-standard), filter var(--dur-short) var(--ease-standard);
+}
+
+.curated-tile-unlike:hover {
+  transform: scale(1.08);
+  filter: brightness(1.1);
+}
+
+.curated-tile-unlike:focus-visible {
+  outline: 2px solid var(--md-on-surface);
+  outline-offset: 2px;
+}
+
+.curated-tile-score {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: var(--r-xs);
+  font-family: var(--font-mono);
+}
+
+.curated-kbd {
+  background: var(--md-surface-c);
+  border: 1px solid var(--md-outline-var);
+  border-radius: var(--r-xs);
+  padding: 1px 6px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
 .filter-chip-clear {
   white-space: nowrap;
   flex-shrink: 0;
@@ -1751,6 +1884,41 @@ button.rail-item {
   flex-shrink: 0;
 }
 
+.search-filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.search-filter-label {
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--md-on-surface-var);
+}
+
+.search-filter-input {
+  height: 34px;
+  padding: 0 10px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--md-outline-var);
+  background: var(--md-surface);
+  color: var(--md-on-surface);
+  font-family: var(--font-body);
+  font-size: 13px;
+}
+
+.search-filter-input:focus-visible,
+.search-filter-range:focus-visible {
+  outline: 2px solid var(--md-primary);
+  outline-offset: 2px;
+}
+
+.search-filter-range {
+  width: 140px;
+}
+
 .search-results-pane {
   grid-row: 2;
   min-height: 0;
@@ -1793,6 +1961,105 @@ button.rail-item {
   text-transform: uppercase;
 }
 
+/* Hide/unhide toggle pinned to the top-right of a person card thumbnail. */
+.person-hide-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  border: 0;
+  border-radius: var(--r-sm);
+  padding: 3px 8px;
+  font-size: 11px;
+  font-family: var(--font-body);
+  cursor: pointer;
+  transition: background-color var(--dur-short) var(--ease-standard);
+}
+.person-hide-btn:hover {
+  background: rgba(0, 0, 0, 0.72);
+}
+.person-hide-btn:focus-visible {
+  outline: 2px solid var(--md-primary);
+  outline-offset: 2px;
+}
+
+/* Bottom gradient bar carrying the editable name + photo count. */
+.person-card-footer {
+  position: absolute;
+  inset: auto 0 0 0;
+  background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.72));
+  padding: 20px 10px 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.person-name-input {
+  flex: 1;
+  min-width: 0;
+  background: rgba(255, 255, 255, 0.95);
+  color: #1b1b1f;
+  border: 0;
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+  font-family: var(--font-body);
+  font-size: 13px;
+  outline: none;
+}
+.person-name-input:focus-visible {
+  outline: 2px solid var(--md-primary);
+  outline-offset: 1px;
+}
+
+.person-name-btn {
+  background: transparent;
+  border: 0;
+  color: #fff;
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.person-name-btn:focus-visible {
+  outline: 2px solid var(--md-primary);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+.person-name-btn em {
+  opacity: 0.7;
+  font-style: italic;
+}
+
+.person-count-badge {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: #fff;
+  opacity: 0.85;
+  flex-shrink: 0;
+}
+
+/* Persons view sits in a 3-row workspace grid (header / content / footer)
+   instead of the cluster-detail-wrap default of a 5-row grid — override the
+   grid slot and widen the tile minimum for the People grid specifically. */
+.cluster-detail-wrap--persons {
+  grid-row: 2;
+  min-height: 0;
+  overflow-y: auto;
+}
+.cluster-detail-grid--wide {
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+}
+
 /* ===== utility =========================================================== */
 
 [hidden] { display: none !important; }
@@ -1811,7 +2078,11 @@ button.rail-item {
 
 .cluster-detail-wrap {
   grid-column: 1;
-  grid-row: 3 / span 3;
+  /* Spans the status-row track + the content track only (rows 3–4), leaving
+     row 5 free for KbdFooter. ClusterDetail/PersonDetail both render a
+     footer after this wrap; spanning into row 5 here would push KbdFooter
+     into an implicit row 6, clipped by the workspace's overflow:hidden. */
+  grid-row: 3 / span 2;
   padding: 24px 32px 24px;
   display: flex;
   flex-direction: column;
@@ -1830,7 +2101,37 @@ button.rail-item {
 }
 
 .cluster-detail-toolbar h1 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: 28px;
   letter-spacing: -0.01em;
+}
+
+/* Secondary filter/sort strip under the toolbar (aesthetic percentile slider
+   + sort toggle) — reused wherever ClusterDetail needs a token-driven row
+   instead of ad-hoc inline styles. */
+.cluster-detail-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--md-outline-var);
+  border-bottom: 1px solid var(--md-outline-var);
+  font-size: 12px;
+  color: var(--md-on-surface-var);
+}
+.cluster-detail-filter-row input[type="range"] { width: 220px; }
+.cluster-detail-filter-row .val {
+  font-family: var(--font-mono);
+  color: var(--md-on-surface);
+}
+.cluster-detail-filter-row .spacer { flex: 1; }
+.cluster-detail-filter-row .sort-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
 }
 
 .editor-picker {
@@ -1845,7 +2146,7 @@ button.rail-item {
   font-weight: 500;
   cursor: pointer;
 }
-.editor-picker:focus { outline: 2px solid var(--md-primary); }
+.editor-picker:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
 
 .cluster-detail-toast {
   padding: 10px 14px;
@@ -1900,10 +2201,12 @@ button.rail-item {
   outline-offset: -2px;
 }
 
+/* Selection checkmark — top-LEFT so it never collides with the top-right
+   .cluster-photo-zoom-btn "enlarge" affordance also present on this tile. */
 .cluster-photo-check {
   position: absolute;
   top: 6px;
-  right: 6px;
+  left: 6px;
   width: 24px;
   height: 24px;
   border-radius: 50%;
@@ -1914,6 +2217,7 @@ button.rail-item {
   font-size: 14px;
   font-weight: 700;
   box-shadow: var(--md-elev-2);
+  z-index: 2;
 }
 
 .cluster-card-link {
@@ -1955,6 +2259,11 @@ button.rail-item {
   color: var(--md-on-surface);
 }
 
+.story-group-tab:focus-visible {
+  outline: 2px solid var(--md-primary);
+  outline-offset: 2px;
+}
+
 /* ===== libraries/onboarding ============================================= */
 
 /* ── Onboarding (first-run) ───────────────────────────────────────────── */
@@ -1978,6 +2287,34 @@ button.rail-item {
   z-index: 5;
 }
 .onb-close:hover { background: var(--md-surface-c-high); color: var(--md-on-surface); }
+.onb-close:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
+
+/* CPU-vs-GPU heads-up panel on the indexing screen — token-driven so it
+   reads correctly in both themes (a fixed dark-grey/black-tinted version
+   went illegible against the yellow tint in dark mode). */
+.onb-warn {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--md-on-surface);
+  background: color-mix(in srgb, var(--g-yellow) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--g-yellow) 35%, transparent);
+  border-radius: var(--r-md);
+  padding: 10px 12px;
+  margin: 0 0 12px;
+}
+.onb-warn details { margin-top: 8px; }
+.onb-warn summary { cursor: pointer; font-weight: 600; }
+.onb-warn code {
+  display: block;
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--md-surface-c-high);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
 
 .onb {
   min-height: 100vh;
@@ -2807,3 +3144,89 @@ button.rail-item {
 }
 
 .lib-models .btn-filled { align-self: flex-start; }
+
+/* ===== Videos / Persons / PersonDetail / Stories polish additions ======= */
+/* (.cluster-photo-btn / .cluster-photo-zoom used by PersonDetail's photo
+   grid are defined earlier alongside .cluster-photo.) */
+
+/* Person detail header title — click-to-rename affordance. */
+.person-detail-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: 28px;
+  cursor: text;
+  border-bottom: 1px dashed transparent;
+  transition: border-color var(--dur-short) var(--ease-standard);
+}
+.person-detail-title:hover {
+  border-bottom-color: var(--md-outline-var);
+}
+.person-detail-title:focus-visible {
+  outline: 2px solid var(--md-primary);
+  outline-offset: 2px;
+}
+
+.person-detail-title-input {
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 500;
+  background: var(--md-surface-c-low);
+  border: 1px solid var(--md-outline-var);
+  border-radius: var(--r-sm);
+  padding: 4px 10px;
+  color: var(--md-on-surface);
+  outline: none;
+  min-width: 220px;
+}
+.person-detail-title-input:focus-visible {
+  outline: 2px solid var(--md-primary);
+  outline-offset: 1px;
+}
+
+/* Stories — intentional dashed-panel loading / error / empty states. */
+.stories-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 240px;
+  padding: 32px;
+  text-align: center;
+  border: 1px dashed var(--md-outline-var);
+  border-radius: var(--r-lg);
+  background: var(--md-surface-c-low);
+}
+.stories-state-title {
+  color: var(--md-on-surface);
+  font-family: var(--font-display);
+  font-size: 18px;
+}
+.stories-state-sub {
+  color: var(--md-on-surface-var);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.stories-state-sub code {
+  font-family: var(--font-mono);
+  background: var(--md-surface-c);
+  padding: 2px 6px;
+  border-radius: var(--r-sm);
+}
+
+/* Best-of dropdown menu on the Stories header. */
+.bestof-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 50;
+  min-width: 380px;
+  max-height: 480px;
+  overflow-y: auto;
+  background: var(--md-surface);
+  border: 1px solid var(--md-outline-var);
+  border-radius: var(--r-lg);
+  box-shadow: var(--md-elev-3);
+  padding: 12px;
+}

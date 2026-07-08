@@ -125,7 +125,7 @@ export default function Libraries() {
           }
         />
 
-        <div className="lib-wrap" style={{ overflowY: "auto" }}>
+        <div className="lib-wrap">
           {listErr && <p className="onb-error">{listErr}</p>}
           {rowErr && <p className="onb-error">{rowErr}</p>}
 
