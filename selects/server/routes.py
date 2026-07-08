@@ -967,10 +967,9 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
         model: str = Query(
             "clahe",
             description=(
-                "Which enhancement model. 'clahe' = the classical CLAHE+WB pipeline "
-                "(default, fast). 'zero-dce-plus' = TPAMI'22 low-light specialist. "
-                "'csrnet' = ECCV'20 conditional MLP retoucher (FiveK-trained, experimental). "
-                "'nafnet' = CVPR'22 deblur (GoPro-trained, ~17M params)."
+                "Which enhancement model. 'clahe' = the assertive classical auto_tone "
+                "(Lightroom-Auto style; default, fast). 'retinexformer' = ICCV'23 "
+                "low-light enhancer (FiveK). 'restormer' = CVPR'22 motion-deblur (GoPro)."
             ),
         ),
     ):
@@ -986,7 +985,7 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
 
         if preset not in ("film", "clarity", "portrait"):
             preset = "film"
-        if model not in ("clahe", "nafnet"):
+        if model not in ("clahe", "retinexformer", "restormer"):
             model = "clahe"
 
         # Build a cache key reflecting all toggles independently.
@@ -1025,16 +1024,23 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
             if straighten:
                 out, _angle = do_straighten(out)
             if grade:
-                # zero-dce-plus (purple cast) and csrnet (solid-blue output) were
-                # removed — both ONNX exports are broken, verified via a Haiku
-                # before/after eval. "auto" is now the assertive Lightroom-style
-                # classical auto_tone; nafnet stays as the (mild) deblur option.
-                if model == "nafnet":
+                # "clahe"/auto = assertive Lightroom-style classical auto_tone
+                # (default). "retinexformer" = Retinexformer low-light. "restormer"
+                # = Restormer motion-deblur. (The old zero-dce/csrnet/nafnet were
+                # retired — broken or weak; verified via a Haiku before/after eval.)
+                if model == "retinexformer":
                     try:
-                        from selects.ml.deblur_nafnet import deblur_with_nafnet
-                        out = deblur_with_nafnet(out, cfg)
+                        from selects.ml.lowlight import enhance_with_retinexformer
+                        out = enhance_with_retinexformer(out, cfg)
                     except Exception as exc:
-                        log.warning("nafnet failed: %s — falling back to auto", exc)
+                        log.warning("retinexformer failed: %s — falling back to auto", exc)
+                        out = aesthetic_grade(out, preset=preset, has_face=has_face)
+                elif model == "restormer":
+                    try:
+                        from selects.ml.deblur_restormer import deblur_with_restormer
+                        out = deblur_with_restormer(out, cfg)
+                    except Exception as exc:
+                        log.warning("restormer failed: %s — falling back to auto", exc)
                         out = aesthetic_grade(out, preset=preset, has_face=has_face)
                 else:
                     out = aesthetic_grade(out, preset=preset, has_face=has_face)
