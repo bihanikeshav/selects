@@ -393,7 +393,6 @@ def test_fresh_db_stamped_at_new_head(tmp_path: Path) -> None:
     # Head advances as later features chain migrations; what matters here is
     # that this feature's revision is an ancestor of the current head.
     assert "c3d4e5f6a7b8" in {rev.revision for rev in script.walk_revisions()}
-    assert head == "d4e5f6a7b8c9"
 
     conn = sqlite3.connect(str(db_path))
     try:

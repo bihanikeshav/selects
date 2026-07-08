@@ -22,7 +22,7 @@ def test_doctor_runs_and_reports():
     runner = CliRunner()
     result = runner.invoke(main, ["doctor"])
     assert result.exit_code == 0
-    assert "CUDA" in result.output
+    assert "ONNX provider" in result.output
     assert "nvImageCodec" in result.output
 
 

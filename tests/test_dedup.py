@@ -73,6 +73,12 @@ def test_keeper_falls_back_to_largest_file_without_aesthetic_score(tmp_path):
 
 
 def test_near_duplicate_within_single_library(tmp_path):
+    # Near-dup grouping is now a two-stage check: SigLIP cosine casts a
+    # semantic candidate net, then 32x32 grayscale pixel-appearance
+    # correlation (computed from the library's on-disk thumbnail JPEGs)
+    # confirms the pair is actually visually near-identical. So the test
+    # must provide both matching SigLIP vectors AND real thumbnail files
+    # whose pixel content actually correlates (or doesn't).
     v1 = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
     v2 = np.array([0.999, 0.001, 0.0, 0.0], dtype=np.float32)  # near-identical to v1
     v3 = np.array([0.0, 1.0, 0.0, 0.0], dtype=np.float32)  # orthogonal -> not a dup
@@ -86,6 +92,23 @@ def test_near_duplicate_within_single_library(tmp_path):
             {"path": "/lib/3.jpg", "sha256": "s3", "size_bytes": 120, "siglip": v3, "aesthetic_iqa": 0.9},
         ],
     )
+
+    # Populate thumbs_dir with real images: s1/s2 are the same base image with
+    # a little pixel noise (near-identical appearance); s3 is unrelated content.
+    from PIL import Image
+
+    cfg = get_folder_config(tmp_path / "lib")
+    thumbs_dir = cfg.thumbs_dir
+    thumbs_dir.mkdir(parents=True, exist_ok=True)
+
+    rng = np.random.default_rng(42)
+    base = rng.integers(0, 256, (128, 128), dtype=np.uint8)
+    noisy = np.clip(base.astype(np.int16) + rng.integers(-5, 6, (128, 128)), 0, 255).astype(np.uint8)
+    unrelated = rng.integers(0, 256, (128, 128), dtype=np.uint8)
+
+    Image.fromarray(base, mode="L").save(thumbs_dir / "s1.jpg", quality=90)
+    Image.fromarray(noisy, mode="L").save(thumbs_dir / "s2.jpg", quality=90)
+    Image.fromarray(unrelated, mode="L").save(thumbs_dir / "s3.jpg", quality=90)
 
     report = scan_all_libraries([lib])
 
