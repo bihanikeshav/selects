@@ -10,6 +10,7 @@ import {
   startModelsDownload,
 } from "../api/client";
 import type { ModelInfo } from "../api/types";
+import Logo from "../components/Logo";
 import { getSystem, type SystemInfo } from "../api/system";
 import {
   estimateRemainingSeconds,
@@ -284,7 +285,7 @@ export default function Onboarding() {
         )}
         <header className="onb-hero">
           <div className="onb-brand">
-            <span className="dot" aria-hidden="true"></span>selects
+            <Logo size={34} />selects
           </div>
           <p className="onb-pitch">
             Sort your travel photos locally with AI — nothing leaves your machine.

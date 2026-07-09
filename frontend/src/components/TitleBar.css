@@ -62,16 +62,8 @@
 }
 
 .titlebar-dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: conic-gradient(
-    from 0deg,
-    #4285f4 0deg 90deg,
-    #ea4335 90deg 180deg,
-    #fbbc04 180deg 270deg,
-    #34a853 270deg 360deg
-  );
+  flex: 0 0 auto;
+  display: block;
 }
 
 .titlebar-controls {

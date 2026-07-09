@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="packaging/assets/selects-logo.svg" width="92" alt="selects logo" />
+
 # Selects
 
 **Cull thousands of travel photos down to your keepers — locally, privately, on your own machine.**

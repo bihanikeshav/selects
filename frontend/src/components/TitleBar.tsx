@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import Logo from "./Logo";
 import "./TitleBar.css";
 
 // pywebview injects window.pywebview + a `pywebviewready` event when running
@@ -45,7 +46,7 @@ export default function TitleBar() {
       <div className="titlebar-drag pywebview-drag-region" aria-hidden="true" />
       <div className="titlebar-accent" aria-hidden="true" />
       <div className="titlebar-center">
-        <span className="titlebar-dot" aria-hidden="true" />
+        <Logo size={13} className="titlebar-dot" />
         <span className="titlebar-title">Selects</span>
       </div>
       <div className="titlebar-controls">
