@@ -1,5 +1,7 @@
 import { useNavigate } from "react-router-dom";
 
+import Logo from "./Logo";
+
 interface TopbarProps {
   folder: string;
   context: string;
@@ -10,6 +12,7 @@ export default function Topbar({ folder, context }: TopbarProps) {
   return (
     <header className="topbar">
       <div className="topbar-folder">
+        <Logo size={18} className="topbar-logo" />
         <span className="crumb-folder">{folder}</span>
         <span className="crumb-sep">/</span>
         <span className="crumb-context">{context}</span>
