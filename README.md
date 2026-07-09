@@ -208,7 +208,7 @@ autogenerate a revision against a throwaway SQLite URL and review it — SQLite 
 | `selects/ml/` | Embedding, tagging, faces, clustering, stories, enhancement |
 | `selects/server/` | FastAPI app, routes, WebSocket progress bus |
 | `frontend/` | React + Vite + TypeScript web UI |
-| `tests/` · `scripts/` · `docs/` | Test suite · analysis scripts · landing page (GitHub Pages) |
+| `tests/` · `docs/` | Test suite · landing page (GitHub Pages) |
 
 **Desktop build** — `pip install "pyinstaller>=6.6"` then `python packaging/build.py [--ml]`. It
 builds the frontend into `selects/server/static/` (same-origin UI) and runs PyInstaller (onedir) via
