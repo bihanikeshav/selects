@@ -54,17 +54,30 @@ The only network call is an optional place-name lookup for geotagged shots.
 
 ## Install
 
-**Desktop app (recommended)** — download the bundle for your OS from
-[Releases](https://github.com/bihanikeshav/selects/releases) and run it. No Python required; it
-downloads its AI models on first launch.
-
-**Via pip** (Python 3.11+):
+**One line (recommended)** — installs via [uv](https://docs.astral.sh/uv/), which brings its own
+Python, so there is nothing to install first and no downloaded app for macOS Gatekeeper or Windows
+SmartScreen to flag. It opens the web UI; AI models download from the app's first-run setup screen.
 
 ```bash
-pip install selects          # app + web GUI + CLI
-pip install "selects[ml]"    # add the on-device AI (torch, insightface, …)
-selects serve                # open the web UI
-selects index /path/to/trip  # or run headless from the CLI
+# macOS / Linux
+curl -LsSf https://bihanikeshav.github.io/selects/install.sh | sh
+
+# Windows (PowerShell)
+irm https://bihanikeshav.github.io/selects/install.ps1 | iex
+```
+
+**Desktop bundle** — prefer a self-contained download? Grab the bundle for your OS from
+[Releases](https://github.com/bihanikeshav/selects/releases) and run it. No Python required; it
+downloads its AI models on first launch. (Unsigned, so the OS shows a one-time "unverified" prompt —
+right-click → Open on macOS, or More info → Run anyway on Windows.)
+
+**Via pip / uv** (Python 3.11+):
+
+```bash
+uv tool install "selects[ml]"  # or: pip install "selects[ml]"
+pip install selects            # base app + web GUI + CLI, no on-device AI
+selects serve                  # open the web UI
+selects index /path/to/trip    # or run headless from the CLI
 ```
 
 RAM++ tagging installs separately (no PyPI release):
