@@ -61,6 +61,36 @@ def _clean_name(name: str) -> str:
     return cleaned[:120] or "untitled"
 
 
+def _unique_fs_path(path: Path) -> Path:
+    """If *path* exists, return ``stem (n).suffix`` in the same directory."""
+    if not path.exists():
+        return path
+    stem, suffix, parent = path.stem, path.suffix, path.parent
+    n = 1
+    while True:
+        candidate = parent / f"{stem} ({n}){suffix}"
+        if not candidate.exists():
+            return candidate
+        n += 1
+
+
+def _unique_arcname(arcname: str, taken: set[str]) -> str:
+    """If *arcname* is already in the archive, return ``stem (n).suffix``."""
+    if arcname not in taken:
+        taken.add(arcname)
+        return arcname
+    p = Path(arcname)
+    stem, suffix, parent = p.stem, p.suffix, p.parent
+    n = 1
+    while True:
+        extra = f"{stem} ({n}){suffix}"
+        candidate = extra if str(parent) in (".", "") else str(parent / extra)
+        if candidate not in taken:
+            taken.add(candidate)
+            return candidate
+        n += 1
+
+
 def _dest_rel_path(item: ExportItem, structure: Structure) -> Path:
     """Relative path (under the export root) for *item*, honoring *structure*."""
     name = item.path.name
@@ -174,12 +204,13 @@ def export_photos(
 
         count = 0
         total_bytes = 0
+        taken_arcnames: set[str] = set()
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
             for i, item in enumerate(items):
                 if not item.path.exists():
                     skipped.append({"photo_id": item.photo_id, "reason": "missing"})
                     continue
-                arcname = str(_dest_rel_path(item, structure))
+                arcname = _unique_arcname(str(_dest_rel_path(item, structure)), taken_arcnames)
                 try:
                     zf.write(item.path, arcname=arcname)
                     total_bytes += item.path.stat().st_size
@@ -198,7 +229,7 @@ def export_photos(
         if not item.path.exists():
             skipped.append({"photo_id": item.photo_id, "reason": "missing"})
             continue
-        dst = target / _dest_rel_path(item, structure)
+        dst = _unique_fs_path(target / _dest_rel_path(item, structure))
         dst.parent.mkdir(exist_ok=True)
         try:
             shutil.copy2(item.path, dst)
@@ -276,11 +307,19 @@ def _minimal_xmp_sidecar(rating: int) -> str:
     )
 
 
+def _outside_library(path: Path, library_root: Path) -> bool:
+    try:
+        return not Path(path).resolve().is_relative_to(Path(library_root).resolve())
+    except (OSError, ValueError):
+        return True
+
+
 def plan_xmp_write(
     photo_id: int,
     path: Path,
     verdict: str,
     force: bool = False,
+    library_root: Optional[Path] = None,
 ) -> XmpPlan:
     """Compute what would be written for one photo, without writing anything.
 
@@ -293,6 +332,13 @@ def plan_xmp_write(
             photo_id=photo_id, path=str(path), verdict=verdict, new_rating=0,
             target=str(path), is_sidecar=False, existing_rating=None,
             action="no_op", reason=f"unknown verdict {verdict!r}",
+        )
+
+    if library_root is not None and _outside_library(path, library_root):
+        return XmpPlan(
+            photo_id=photo_id, path=str(path), verdict=verdict, new_rating=rating,
+            target=str(path), is_sidecar=False, existing_rating=None,
+            action="no_op", reason="outside library",
         )
 
     kind = classify(path)
@@ -337,14 +383,19 @@ def plan_xmp_write(
 def preview_xmp_writes(
     photos: Iterable[tuple[int, Path, str]],
     force: bool = False,
+    library_root: Optional[Path] = None,
 ) -> list[XmpPlan]:
     """Dry-run: compute the write plan for each (photo_id, path, verdict)."""
-    return [plan_xmp_write(pid, path, verdict, force=force) for pid, path, verdict in photos]
+    return [
+        plan_xmp_write(pid, path, verdict, force=force, library_root=library_root)
+        for pid, path, verdict in photos
+    ]
 
 
 def write_xmp_ratings(
     photos: Iterable[tuple[int, Path, str]],
     force: bool = False,
+    library_root: Optional[Path] = None,
 ) -> list[XmpPlan]:
     """Actually write the ratings, returning the same plan shape with results applied.
 
@@ -354,7 +405,7 @@ def write_xmp_ratings(
     """
     results: list[XmpPlan] = []
     for pid, path, verdict in photos:
-        plan = plan_xmp_write(pid, path, verdict, force=force)
+        plan = plan_xmp_write(pid, path, verdict, force=force, library_root=library_root)
         if plan.action != "write":
             results.append(plan)
             continue

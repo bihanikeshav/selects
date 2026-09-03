@@ -37,6 +37,19 @@ async def test_status_fresh_registry(registry_path):
         assert r2.json() == {"libraries": [], "active_id": None}
 
 
+async def test_status_registered_empty_library_is_not_onboarding(registry_path, tmp_path):
+    lib_dir = tmp_path / "trip"
+    lib_dir.mkdir()
+    app = _make_app(registry_path)
+    async with _client(app) as c:
+        r = await c.post("/api/libraries", json={"name": "Empty trip", "path": str(lib_dir)})
+        assert r.status_code == 200
+        status = (await c.get("/api/libraries/status")).json()
+        assert status["needs_onboarding"] is False
+        assert status["active"] is not None
+        assert status["photo_count"] == 0
+
+
 async def test_add_library(registry_path, tmp_path):
     lib_dir = tmp_path / "trip1"
     lib_dir.mkdir()

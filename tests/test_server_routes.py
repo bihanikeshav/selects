@@ -246,3 +246,64 @@ async def test_cluster_photos_empty_source_filters_null_tags(tmp_path):
         assert ram_sha in uncat_shas
         assert ram_other_sha in uncat_shas
         assert null_sha not in uncat_shas
+
+
+async def test_record_swipe_requires_hex_sha_and_known_decision(tmp_path):
+    from selects.db import session_scope
+    from selects.db.models import Photo, Swipe
+
+    cfg = get_folder_config(tmp_path)
+    Session = init_db(cfg.db_path)
+    sha = "a" * 64
+    with session_scope(Session) as s:
+        s.add(Photo(path=str(tmp_path / "a.jpg"), sha256=sha))
+
+    app = build_app(cfg, run_background=False)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        bad_sha = await client.post("/api/swipes/zz", json={"decision": "keep"})
+        assert bad_sha.status_code == 400
+        short = await client.post("/api/swipes/" + "a" * 63, json={"decision": "keep"})
+        assert short.status_code == 400
+        bad_decision = await client.post(f"/api/swipes/{sha}", json={"decision": "maybe"})
+        assert bad_decision.status_code == 400
+        ok = await client.post(f"/api/swipes/{sha}", json={"decision": "keep"})
+        assert ok.status_code == 200
+        assert ok.json()["decision"] == "keep"
+
+    with session_scope(Session) as s:
+        photo = s.query(Photo).filter(Photo.sha256 == sha).one()
+        swipe = s.get(Swipe, photo.id)
+        assert swipe is not None
+        assert swipe.decision == "keep"
+
+
+async def test_edit_open_rejects_non_allowlisted_editor(tmp_path, monkeypatch):
+    from unittest.mock import patch
+
+    from selects.db import session_scope
+    from selects.db.models import Photo
+
+    cfg = get_folder_config(tmp_path)
+    Session = init_db(cfg.db_path)
+    sha = "b" * 64
+    with session_scope(Session) as s:
+        s.add(Photo(path=str(tmp_path / "a.jpg"), sha256=sha))
+
+    app = build_app(cfg, run_background=False)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        with patch("shutil.which") as which:
+            r = await client.post(
+                "/api/edit/open",
+                json={"sha256s": [sha], "editor": "notepad"},
+            )
+            which.assert_not_called()
+        assert r.status_code == 400
+        assert "darktable" in r.json()["detail"]
+
+        r2 = await client.post(
+            "/api/edit/open",
+            json={"sha256s": [sha], "editor": "cmd.exe"},
+        )
+        assert r2.status_code == 400

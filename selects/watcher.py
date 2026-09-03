@@ -27,7 +27,7 @@ import threading
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from sqlalchemy import select
 
@@ -203,9 +203,11 @@ class LibraryWatcher:
         cfg: FolderConfig,
         publish: Optional[PublishFn] = None,
         interval: Optional[int] = None,
+        manager: Optional[Any] = None,
     ) -> None:
         self.cfg = cfg
         self.publish = publish
+        self.manager = manager
         settings = load_watch_settings(cfg)
         self.interval = interval or settings.interval or DEFAULT_INTERVAL_SECONDS
         self._debouncer = Debouncer()
@@ -279,17 +281,26 @@ class LibraryWatcher:
 
         added = 0
         if stable:
-            added = run_incremental_index(self.cfg, stable, self.publish)
-            settings.new_files_found = added
-            if added and self.publish:
-                self.publish(
-                    {
-                        "type": "watch",
-                        "stage": "watch",
-                        "new_files_found": added,
-                        "message": f"{added} new file(s) indexed",
-                    }
-                )
+            mgr = self.manager
+            if mgr is not None and not mgr.begin_indexing():
+                log.info("watch: skip poll, indexing already running")
+                save_watch_settings(self.cfg, settings)
+                return 0
+            try:
+                added = run_incremental_index(self.cfg, stable, self.publish)
+                settings.new_files_found = added
+                if added and self.publish:
+                    self.publish(
+                        {
+                            "type": "watch",
+                            "stage": "watch",
+                            "new_files_found": added,
+                            "message": f"{added} new file(s) indexed",
+                        }
+                    )
+            finally:
+                if mgr is not None:
+                    mgr.end_indexing()
         save_watch_settings(self.cfg, settings)
         return added
 
@@ -305,13 +316,17 @@ _watchers_lock = threading.Lock()
 def get_or_create_watcher(
     cfg: FolderConfig,
     publish: Optional[PublishFn] = None,
+    manager: Optional[Any] = None,
 ) -> LibraryWatcher:
     key = str(cfg.folder)
     with _watchers_lock:
         w = _watchers.get(key)
         if w is None:
-            w = LibraryWatcher(cfg, publish=publish)
+            w = LibraryWatcher(cfg, publish=publish, manager=manager)
             _watchers[key] = w
-        elif publish is not None:
-            w.publish = publish
+        else:
+            if publish is not None:
+                w.publish = publish
+            if manager is not None:
+                w.manager = manager
         return w

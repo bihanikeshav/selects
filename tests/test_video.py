@@ -284,3 +284,9 @@ class TestVideoRoutes:
     def test_frames_404_unknown_sha(self, client_with_videos):
         assert client_with_videos.get(f"/api/videos/{'f' * 64}/frames").status_code == 404
         assert client_with_videos.get(f"/api/videos/{'a' * 64}/frames/99").status_code == 404
+
+    def test_frames_rejects_non_hex_sha(self, client_with_videos):
+        assert client_with_videos.get("/api/videos/zz/frames").status_code == 400
+        assert client_with_videos.get("/api/videos/not-a-hash/frames").status_code == 400
+        assert client_with_videos.get("/api/videos/not-a-hash/frames/0").status_code == 400
+        assert client_with_videos.get(f"/api/videos/{'a' * 63}/frames").status_code == 400

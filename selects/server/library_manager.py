@@ -293,7 +293,7 @@ class LibraryManager:
             cfg = self._active_cfg or get_folder_config(active["path"])
             pc = count_photos(cfg) or 0
             return {
-                "needs_onboarding": pc == 0,
+                "needs_onboarding": False,
                 "active": self._api_dict(active),
                 "photo_count": pc,
                 "indexing": self._indexing,

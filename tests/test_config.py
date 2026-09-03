@@ -15,8 +15,8 @@ class TestFolderConfigDefaults:
         assert cfg.folder == tmp_path.resolve()
         assert cfg.web_port == 8000
         assert cfg.web_host == "127.0.0.1"
-        assert cfg.burst_window_seconds == 3
-        assert cfg.burst_similarity_threshold == 0.92
+        assert cfg.burst_window_seconds == 12
+        assert cfg.burst_similarity_threshold == 0.96
         assert cfg.speed_mode == "full"
 
     def test_state_dir_under_folder(self, tmp_path: Path) -> None:

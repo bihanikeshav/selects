@@ -16,6 +16,7 @@ Endpoints:
 from __future__ import annotations
 
 import json
+import re
 import threading
 from pathlib import Path
 from typing import Callable, Optional
@@ -30,6 +31,18 @@ from selects.db.models import Video
 from selects.video import frames_dir_for, run_video_stage
 
 PublishFn = Callable[[dict], None]
+
+_SHA256_RE = re.compile(r"[0-9a-f]{64}", re.I)
+
+
+def _require_sha256(sha256: str) -> None:
+    if (
+        not _SHA256_RE.fullmatch(sha256 or "")
+        or ".." in sha256
+        or "/" in sha256
+        or "\\" in sha256
+    ):
+        raise HTTPException(400, "invalid sha256")
 
 
 class VideoOut(BaseModel):
@@ -135,6 +148,7 @@ def register_video_routes(
 
     @router.get("/api/videos/{sha256}/frames", response_model=VideoFramesOut)
     def video_frames(sha256: str):
+        _require_sha256(sha256)
         Session = init_db(cfg.db_path)
         with session_scope(Session) as s:
             v = s.query(Video).filter(Video.sha256 == sha256).one_or_none()
@@ -159,6 +173,7 @@ def register_video_routes(
 
     @router.get("/api/videos/{sha256}/frames/{index}")
     def video_frame_image(sha256: str, index: int):
+        _require_sha256(sha256)
         if index < 0 or index > 999:
             raise HTTPException(404, detail="frame not found")
         path = frames_dir_for(cfg, sha256) / f"{index:02d}.jpg"

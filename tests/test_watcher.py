@@ -108,6 +108,86 @@ def test_run_incremental_index_still_runs_pipeline_when_nothing_added(tmp_path):
     mock_run.assert_called_once()
 
 
+class _FakeIndexManager:
+    def __init__(self, allow: bool = True) -> None:
+        self.allow = allow
+        self.began = 0
+        self.ended = 0
+
+    def begin_indexing(self) -> bool:
+        self.began += 1
+        return self.allow
+
+    def end_indexing(self) -> None:
+        self.ended += 1
+
+
+def test_poll_once_skips_when_indexing_lock_held(tmp_path):
+    cfg = _make_cfg(tmp_path)
+    from selects.db import init_db
+
+    init_db(cfg.db_path)
+    photo = cfg.folder / "photo.jpg"
+    photo.write_bytes(b"data")
+
+    mgr = _FakeIndexManager(allow=False)
+    w = LibraryWatcher(cfg, interval=60, manager=mgr)
+    w.poll_once()  # first sighting: not yet stable
+
+    with patch("selects.watcher.run_incremental_index") as mock_run:
+        added = w.poll_once()
+
+    assert added == 0
+    mock_run.assert_not_called()
+    assert mgr.began == 1
+    assert mgr.ended == 0
+
+
+def test_poll_once_acquires_and_releases_indexing_lock(tmp_path):
+    cfg = _make_cfg(tmp_path)
+    from selects.db import init_db
+
+    init_db(cfg.db_path)
+    photo = cfg.folder / "photo.jpg"
+    photo.write_bytes(b"data")
+
+    mgr = _FakeIndexManager(allow=True)
+    w = LibraryWatcher(cfg, interval=60, manager=mgr)
+    w.poll_once()
+
+    with patch("selects.watcher.run_incremental_index") as mock_run:
+        mock_run.return_value = 1
+        added = w.poll_once()
+
+    assert added == 1
+    mock_run.assert_called_once()
+    assert mgr.began == 1
+    assert mgr.ended == 1
+
+
+def test_poll_once_releases_lock_when_pipeline_raises(tmp_path):
+    cfg = _make_cfg(tmp_path)
+    from selects.db import init_db
+
+    init_db(cfg.db_path)
+    photo = cfg.folder / "photo.jpg"
+    photo.write_bytes(b"data")
+
+    mgr = _FakeIndexManager(allow=True)
+    w = LibraryWatcher(cfg, interval=60, manager=mgr)
+    w.poll_once()
+
+    with patch("selects.watcher.run_incremental_index") as mock_run:
+        mock_run.side_effect = RuntimeError("boom")
+        try:
+            w.poll_once()
+        except RuntimeError:
+            pass
+
+    assert mgr.began == 1
+    assert mgr.ended == 1
+
+
 def test_watcher_stop_then_start(tmp_path):
     cfg = _make_cfg(tmp_path)
     from selects.db import init_db

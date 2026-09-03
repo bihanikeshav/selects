@@ -31,7 +31,7 @@ _NOMINATIM_INTERVAL = 1.1  # seconds between calls
 
 _SESSION = requests.Session()
 _SESSION.headers.update({
-    "User-Agent": "selects/0.1 (research)",
+    "User-Agent": "selects/0.1.13 (https://github.com/bihanikeshav/selects)",
     "Accept-Language": "en",
 })
 
@@ -232,7 +232,7 @@ def reverse_geocode(
         row = GeocodeCache(lat_round=lat_r, lon_round=lon_r, payload=None,
                            display_name=landmark_name, wikipedia_summary=summary)
         session_db.add(row)
-        session_db.commit()
+        session_db.flush()
         log.info("Landmark match: (%.4f, %.4f) -> %s", lat, lon, landmark_name)
         return landmark_name, summary
 
@@ -262,7 +262,7 @@ def reverse_geocode(
         row = GeocodeCache(lat_round=lat_r, lon_round=lon_r, payload=None,
                            display_name="Unknown location", wikipedia_summary=None)
         session_db.add(row)
-        session_db.commit()
+        session_db.flush()
         return "Unknown location", None
 
     payload_text = json.dumps(data)
@@ -275,7 +275,7 @@ def reverse_geocode(
     row = GeocodeCache(lat_round=lat_r, lon_round=lon_r, payload=payload_text,
                        display_name=name, wikipedia_summary=summary)
     session_db.add(row)
-    session_db.commit()
+    session_db.flush()
     return name, summary
 
 
@@ -377,6 +377,7 @@ def build_visits_for_day(
         return []
 
     landmarks = load_landmarks(cfg) if cfg is not None else []
+    from selects.db import session_scope
 
     visits = []
     for rank, cluster in enumerate(clusters):
@@ -396,8 +397,10 @@ def build_visits_for_day(
         # Elevation: photos don't have elevation in the schema, skip
         elevation_m = None
 
-        # Reverse geocode using a fresh session
-        with Session() as s:
+        # Reverse geocode in a short-lived session the caller commits.
+        # reverse_geocode only add/flush — it must not commit a session that
+        # may also be holding story rows.
+        with session_scope(Session) as s:
             name, summary = reverse_geocode(lat_c, lon_c, s, landmarks)
 
         visits.append(VisitData(

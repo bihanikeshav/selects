@@ -26,8 +26,8 @@ class FolderConfig(BaseSettings):
     web_host: str = "127.0.0.1"
 
     # Burst detection
-    burst_window_seconds: int = 3
-    burst_similarity_threshold: float = 0.92
+    burst_window_seconds: int = 12
+    burst_similarity_threshold: float = 0.96
 
     # Aesthetic curation thresholds (combined = AP_WEIGHT*AP + NIMA_WEIGHT*NIMA).
     # Per-scope gate: photo must be in the top 25% of its scope (day/place/person).

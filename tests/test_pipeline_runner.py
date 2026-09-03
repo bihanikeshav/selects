@@ -18,6 +18,7 @@ def test_default_stage_order():
         "classical",
         "embed",
         "tag",
+        "category",
         "ram_tag",
         "smart_tag",
         "face_embed",
@@ -29,6 +30,8 @@ def test_default_stage_order():
     )
     assert DEFAULT_STAGE_ORDER.index("thematic") > DEFAULT_STAGE_ORDER.index("story")
     assert DEFAULT_STAGE_ORDER.index("persons") > DEFAULT_STAGE_ORDER.index("face_embed")
+    assert DEFAULT_STAGE_ORDER.index("category") > DEFAULT_STAGE_ORDER.index("tag")
+    assert DEFAULT_STAGE_ORDER.index("category") < DEFAULT_STAGE_ORDER.index("ram_tag")
 
 
 def _run_with_mocked_stages(tmp_path, monkeypatch, speed_mode: str = "full"):

@@ -99,7 +99,12 @@ def run_app(host: str = "127.0.0.1", port: int = 8000) -> None:
     """Start the server and open the native app window."""
     import uvicorn
 
+    from selects.cli import lan_bind_refused
     from selects.logging_setup import setup_logging
+
+    refused = lan_bind_refused(host)
+    if refused:
+        raise SystemExit(refused)
 
     log_path = setup_logging()
     log.info("selects desktop starting; logs at %s", log_path)
