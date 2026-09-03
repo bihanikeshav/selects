@@ -28,8 +28,8 @@ for d in "$HOME/.local/bin" "$HOME/.cargo/bin"; do
 done
 export PATH
 
-# 2. Install selects with the on-device AI extra (torch, onnxruntime,
-#    insightface, ...). --force makes a re-run upgrade an existing install.
+# 2. Install selects with the on-device AI extra (onnxruntime,
+#    insightface, sklearn, …). --force makes a re-run upgrade an existing install.
 say "Installing selects (pulls the AI stack; first launch also downloads models)..."
 uv tool install --python 3.11 --force "selects[ml]"
 
