@@ -1505,6 +1505,10 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
     def record_swipe(sha256: str, decision: str = Body(..., embed=True)):
         from selects.db.models import Swipe
 
+        _require_sha256(sha256)
+        if decision not in ("keep", "reject", "silver", "skip"):
+            raise HTTPException(400, detail="decision must be keep, reject, silver, or skip")
+
         with session_scope(Session) as s:
             photo = s.query(Photo).filter(Photo.sha256 == sha256).first()
             if not photo:
@@ -1863,6 +1867,28 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
             bundle_subdir="darktable",
         )
 
+    def _find_named_editor(editor: str) -> Optional[str]:
+        """Resolve an allowlisted editor name to a binary path."""
+        if editor == "darktable":
+            return _find_darktable()
+        if editor == "rawtherapee":
+            return _find_editor_binary(
+                ["rawtherapee"],
+                windows_candidates=[
+                    Path(r"C:\Program Files\RawTherapee\rawtherapee.exe"),
+                    Path(r"C:\Program Files (x86)\RawTherapee\rawtherapee.exe"),
+                ],
+            )
+        if editor == "gimp":
+            return _find_editor_binary(
+                ["gimp", "gimp-2.10", "gimp-3"],
+                windows_candidates=[
+                    Path(r"C:\Program Files\GIMP 3\bin\gimp-3.exe"),
+                    Path(r"C:\Program Files\GIMP 2\bin\gimp-2.10.exe"),
+                ],
+            )
+        return None
+
     @app.post("/api/edit/darktable")
     def launch_darktable(payload: dict = Body(...)):
         """Launch darktable with the selected originals in a per-session library.
@@ -1989,20 +2015,24 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
 
         Body: {sha256s: list[str], editor?: "darktable"|"rawtherapee"|"gimp"}.
         """
-        import shutil
         import subprocess
 
         sha256s = payload.get("sha256s") or []
         editor = payload.get("editor") or "darktable"
         if not isinstance(sha256s, list) or not sha256s:
             raise HTTPException(400, detail="sha256s must be a non-empty list")
+        if not isinstance(editor, str):
+            raise HTTPException(400, detail="editor must be darktable, rawtherapee, or gimp")
+        editor = editor.strip().lower()
+        if editor not in ("darktable", "rawtherapee", "gimp"):
+            raise HTTPException(400, detail="editor must be darktable, rawtherapee, or gimp")
 
-        editor_cmd = shutil.which(editor)
+        editor_cmd = _find_named_editor(editor)
         if not editor_cmd:
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    f"'{editor}' not found on PATH. Install it or pick a different "
+                    f"'{editor}' not found. Install it or pick a different "
                     "editor (darktable / rawtherapee / gimp)."
                 ),
             )

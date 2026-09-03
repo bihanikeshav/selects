@@ -12,6 +12,27 @@ from selects.server.pipeline_runner import STAGE_FUNCS, get_stage_callable, run_
 
 _PASS_CHOICES = ("all", *STAGE_FUNCS)
 
+_LAN_BIND_HOSTS = frozenset({"0.0.0.0", "::"})
+
+
+def lan_bind_refused(host: str) -> str | None:
+    """Return an error if *host* is a LAN bind and SELECTS_ALLOW_LAN is unset.
+
+    Allowed values for SELECTS_ALLOW_LAN: ``1`` or ``true`` (case-insensitive).
+    """
+    normalized = (host or "").strip().lower()
+    if normalized.startswith("[") and normalized.endswith("]"):
+        normalized = normalized[1:-1]
+    if normalized not in _LAN_BIND_HOSTS:
+        return None
+    flag = os.environ.get("SELECTS_ALLOW_LAN", "").strip().lower()
+    if flag in ("1", "true"):
+        return None
+    return (
+        f"Refusing to bind to {host} (LAN). "
+        "Set SELECTS_ALLOW_LAN=1 to allow connections from other devices."
+    )
+
 
 def _default_web_port() -> int:
     raw = os.environ.get("SELECTS_WEB_PORT")
@@ -77,6 +98,10 @@ def serve(folder: Path | None, port: int, host: str, no_browser: bool, no_backgr
     import threading
 
     import uvicorn
+
+    refused = lan_bind_refused(host)
+    if refused:
+        raise click.ClickException(refused)
 
     from selects.logging_setup import setup_logging
     setup_logging()

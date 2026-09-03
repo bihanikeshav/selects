@@ -33,13 +33,13 @@ def register_watch_routes(
 
     @app.get("/api/watch")
     def watch_status():
-        watcher = get_or_create_watcher(_active_cfg(), publish=publish)
+        watcher = get_or_create_watcher(_active_cfg(), publish=publish, manager=manager)
         return watcher.status()
 
     @app.post("/api/watch")
     def watch_update(payload: dict = Body(default={})):
         cfg = _active_cfg()
-        watcher = get_or_create_watcher(cfg, publish=publish)
+        watcher = get_or_create_watcher(cfg, publish=publish, manager=manager)
 
         interval = payload.get("interval")
         if interval is not None:

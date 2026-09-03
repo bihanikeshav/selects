@@ -212,7 +212,7 @@ def register_export_routes(app: FastAPI, cfg: FolderConfig) -> None:
     ):
         with session_scope(Session) as s:
             triples = _resolve_ratable(s, source)
-        plans = preview_xmp_writes(triples, force=force)
+        plans = preview_xmp_writes(triples, force=force, library_root=cfg.folder)
         return {
             "total": len(plans),
             "to_write": sum(1 for p in plans if p.action == "write"),
@@ -237,7 +237,7 @@ def register_export_routes(app: FastAPI, cfg: FolderConfig) -> None:
     def write_xmp(req: XmpWriteRequest):
         with session_scope(Session) as s:
             triples = _resolve_ratable(s, req.source)
-        plans = write_xmp_ratings(triples, force=req.force)
+        plans = write_xmp_ratings(triples, force=req.force, library_root=cfg.folder)
         failed = sum(1 for p in plans if p.reason and p.reason.startswith("write failed"))
         written = sum(1 for p in plans if p.action == "write")
         return {

@@ -262,6 +262,35 @@ class TestRunStoryStage:
             stories = s.query(Story).all()
             assert len(stories) == 1
 
+    def test_cancel_during_compute_keeps_existing_stories(self, session_factory, tmp_path):
+        from selects.config import get_folder_config
+        cfg = get_folder_config(tmp_path)
+        import selects.ml.stories as stories_mod
+
+        monkeypatch_init_db = lambda _path: session_factory  # noqa: E731
+        _insert_photos_for_day(session_factory, tmp_path, "2026-03-29", 15, seed_offset=0)
+        _insert_photos_for_day(session_factory, tmp_path, "2026-03-30", 15, seed_offset=1)
+
+        original_init_db = stories_mod.init_db
+        stories_mod.init_db = monkeypatch_init_db
+        try:
+            run_story_stage(cfg)
+            with session_scope(session_factory) as s:
+                before = [(st.id, st.day) for st in s.query(Story).order_by(Story.day).all()]
+            assert len(before) >= 1
+
+            def boom(_i, _t, _name):
+                raise RuntimeError("cancelled")
+
+            with pytest.raises(RuntimeError, match="cancelled"):
+                run_story_stage(cfg, on_progress=boom)
+
+            with session_scope(session_factory) as s:
+                after = [(st.id, st.day) for st in s.query(Story).order_by(Story.day).all()]
+            assert after == before
+        finally:
+            stories_mod.init_db = original_init_db
+
     def test_photo_count_capped_at_max(self, session_factory, tmp_path):
         from selects.config import get_folder_config
         cfg = get_folder_config(tmp_path)

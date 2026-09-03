@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -53,9 +54,36 @@ def _get_detector():
         _detector = app
         return app
     except Exception as exc:
-        log.warning("face detector unavailable (%s); classical faces will be empty", exc)
+        log.warning("face detector unavailable (%s); falling back to Haar", exc)
         _detector_failed = True
         return None
+
+
+def _detect_haar(img: np.ndarray) -> list[Face]:
+    """OpenCV Haar fallback when InsightFace is unavailable. Boxes only, no embeddings."""
+    import cv2
+
+    try:
+        cascade_dir = getattr(getattr(cv2, "data", None), "haarcascades", None)
+        if not cascade_dir:
+            return []
+        xml = str(Path(cascade_dir) / "haarcascade_frontalface_default.xml")
+        classifier = cv2.CascadeClassifier(xml)
+        if classifier.empty():
+            return []
+        if img.ndim == 3:
+            gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+        else:
+            gray = img
+        rects = classifier.detectMultiScale(gray)
+    except Exception as exc:
+        log.warning("Haar face detector unavailable (%s)", exc)
+        return []
+    faces: list[Face] = []
+    for rect in rects:
+        x, y, w, h = (int(v) for v in rect[:4])
+        faces.append(Face(x=x, y=y, w=w, h=h, confidence=0.5, embedding=None))
+    return faces
 
 
 def detect_faces(img: np.ndarray) -> list[Face]:
@@ -64,9 +92,9 @@ def detect_faces(img: np.ndarray) -> list[Face]:
     try:
         det = _get_detector()
     except Exception:
-        return []
+        det = None
     if det is None:
-        return []
+        return _detect_haar(img)
     bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
     faces = det.get(bgr)
     result = []

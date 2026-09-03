@@ -132,12 +132,6 @@ def run_story_stage(
         day = r.taken_at.date().isoformat()
         by_day[day].append(r)
 
-    # Wipe old stories (Visit rows cascade-delete via FK)
-    with session_scope(Session) as s:
-        s.query(StoryItem).delete()
-        s.query(Visit).delete()
-        s.query(Story).delete()
-
     eligible_days = [
         (day, photos)
         for day, photos in sorted(by_day.items())
@@ -149,6 +143,9 @@ def run_story_stage(
     # Import here to avoid circular import at module load time
     from selects.ml.locations import build_visits_for_day
 
+    # Compute every day in memory first. Wipe+insert only after this loop so a
+    # PipelineCancelled (or any exception) mid-run leaves existing stories intact.
+    pending: list[dict] = []
     for di, (day, photos) in enumerate(eligible_days):
         if on_progress:
             on_progress(di + 1, total_days, day)
@@ -161,8 +158,6 @@ def run_story_stage(
             representatives = representatives[:MAX_STORY_PHOTOS]
             representatives.sort(key=lambda x: x["taken_at"])
 
-        # Build GPS-grounded visits for this day
-        # Prepare photo dicts with GPS data (from the original DB rows)
         photo_dicts = [
             {
                 "photo_id": r.id,
@@ -173,24 +168,35 @@ def run_story_stage(
             }
             for r in photos
         ]
-        visit_data_list = build_visits_for_day(0, photo_dicts, Session, cfg)  # story_id filled in loop below
+        visit_data_list = build_visits_for_day(0, photo_dicts, Session, cfg)
 
         if len(representatives) < MIN_STORY_REPS:
             continue  # drop anemic day stories
 
-        # Build itinerary title from first/last visit
         title = _day_title_with_visits(day, len(photos), len(scenes), visit_data_list)
+        pending.append(
+            {
+                "day": day,
+                "title": title,
+                "representatives": representatives,
+                "visits": visit_data_list,
+            }
+        )
 
-        with session_scope(Session) as s:
+    with session_scope(Session) as s:
+        s.query(StoryItem).delete()
+        s.query(Visit).delete()
+        s.query(Story).delete()
+        for item in pending:
             story = Story(
-                day=day,
-                title=title,
-                photo_count=len(representatives),
+                day=item["day"],
+                title=item["title"],
+                photo_count=len(item["representatives"]),
             )
             s.add(story)
             s.flush()
             story_id = story.id
-            for rank, rep in enumerate(representatives):
+            for rank, rep in enumerate(item["representatives"]):
                 s.add(
                     StoryItem(
                         story_id=story_id,
@@ -200,8 +206,7 @@ def run_story_stage(
                         scene_rank=rep["scene_rank"],
                     )
                 )
-            # Insert Visit rows
-            for vd in visit_data_list:
+            for vd in item["visits"]:
                 s.add(Visit(
                     story_id=story_id,
                     rank=vd.rank,
@@ -215,7 +220,7 @@ def run_story_stage(
                     photo_count=vd.photo_count,
                     cover_photo_id=vd.cover_photo_id,
                 ))
-        n_stories += 1
+            n_stories += 1
 
     # ── Cross-day place disambiguation ───────────────────────────────────────
     # Same-name visits across different days may still be far apart geographically.

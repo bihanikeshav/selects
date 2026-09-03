@@ -3,7 +3,7 @@ auto-index, the /api/libraries/{id}/index endpoint, and the folder watcher.
 
 Runs the stage sequence:
 
-index → video → classical → embed → tag → ram_tag → smart_tag →
+index → video → classical → embed → tag → category → ram_tag → smart_tag →
 face_embed → persons → moment → story → thematic → date
 
 publishing progress dicts to a caller-supplied ``publish`` callable.
@@ -33,6 +33,7 @@ STAGE_FUNCS: dict[str, tuple[str, str]] = {
     "classical": ("selects.pipeline", "run_classical_stage"),
     "embed": ("selects.ml.embed", "run_embedding_stage"),
     "tag": ("selects.ml.tags", "run_tag_stage"),
+    "category": ("selects.ml.categories", "run_category_stage"),
     "ram_tag": ("selects.ml.ram_tags", "run_ram_tagging_stage"),
     "smart_tag": ("selects.ml.smart_clusters", "run_smart_cluster_stage"),
     "face_embed": ("selects.ml.faces", "run_face_embedding_stage"),
@@ -61,6 +62,7 @@ _STAGE_BLURB = {
     "classical": "Checking focus, exposure & framing",
     "embed": "Learning what's in each photo",
     "tag": "Tagging scenes, places & subjects",
+    "category": "Sorting portraits, landscapes & objects",
     "ram_tag": "Labelling objects in each photo",
     "smart_tag": "Grouping similar shots",
     "face_embed": "Finding faces",
