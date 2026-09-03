@@ -573,11 +573,14 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
         source: Optional[str] = Query("thematic"),
     ):
         with session_scope(Session) as s:
-            # Synthetic "uncategorized" cluster: photos with NO tag in this source
+            # Synthetic "uncategorized" cluster: photos with NO tag in this source.
+            # Empty/missing source matches list_clusters (legacy NULL-source tags).
             if tag.lower() == "uncategorized":
                 tagged_subq = s.query(PhotoTag.photo_id)
                 if source:
                     tagged_subq = tagged_subq.filter(PhotoTag.source == source)
+                else:
+                    tagged_subq = tagged_subq.filter(PhotoTag.source.is_(None))
                 tagged_ids = {r[0] for r in tagged_subq.all()}
                 all_ids = {r[0] for r in s.query(Photo.id).all()}
                 ids = list(all_ids - tagged_ids)
@@ -585,6 +588,8 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
                 q = s.query(PhotoTag.photo_id).filter(PhotoTag.tag == tag)
                 if source:
                     q = q.filter(PhotoTag.source == source)
+                else:
+                    q = q.filter(PhotoTag.source.is_(None))
                 ids = [r[0] for r in q.all()]
             if not ids:
                 return PhotoList(total=0, items=[])
