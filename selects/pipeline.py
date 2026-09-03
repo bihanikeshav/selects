@@ -110,6 +110,9 @@ def _score_one(cfg: FolderConfig, Session, photo_id: int, preview_path: str) -> 
     blur = laplacian_variance(img)
     exp = exposure_score(img)
     faces = detect_faces(img)
+    from selects.ml.face_attributes import photo_eyes_open_ratio
+
+    eyes_ratio = photo_eyes_open_ratio(faces)
     rej = evaluate_reject(
         RejectInput(
             blur=blur,
@@ -125,6 +128,7 @@ def _score_one(cfg: FolderConfig, Session, photo_id: int, preview_path: str) -> 
         score.blur = blur
         score.exposure = exp.score
         score.faces_count = len(faces)
+        score.eyes_open_ratio = eyes_ratio
         score.auto_reject = rej.auto_reject
         score.reject_reason = rej.reason
         # exposure.clipped_ratio folds both ends; store it as clipped_high so

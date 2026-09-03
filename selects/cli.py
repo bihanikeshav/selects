@@ -112,7 +112,7 @@ def serve(folder: Path | None, port: int, host: str, no_browser: bool, no_backgr
     if folder is not None:
         cfg = get_folder_config(folder)
         init_db(cfg.db_path)
-        app = build_app(cfg, run_background=not no_background)
+        app = build_app(cfg, run_background=not no_background, bind_host=host)
     else:
         manager = LibraryManager()
         _libs, active_id = manager.list_libraries()
@@ -121,7 +121,7 @@ def serve(folder: Path | None, port: int, host: str, no_browser: bool, no_backgr
                 manager.activate(active_id)
             except Exception:
                 pass
-        app = build_app(manager=manager, run_background=not no_background)
+        app = build_app(manager=manager, run_background=not no_background, bind_host=host)
 
     url = f"http://{'127.0.0.1' if host == '0.0.0.0' else host}:{port}"
 

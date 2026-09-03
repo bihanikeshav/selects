@@ -58,6 +58,7 @@ def index_folder(
     files = list(classify_paths(paths)) if paths is not None else list(walk_supported(cfg.folder))
     total = len(files)
     added = 0
+    failed = 0
 
     Session = init_db(cfg.db_path)
 
@@ -92,7 +93,13 @@ def index_folder(
                 added += _ingest_photo(cfg, Session, path, sha, kind, photo_id=photo_id)
                 photo_by_path[key] = (photo_id or 0, sha)
         except Exception as exc:
+            failed += 1
             log.warning("Failed to ingest %s: %s", path, exc)
+
+    if failed:
+        log.warning("%d file(s) could not be read during index", failed)
+        if on_progress:
+            on_progress(total, total, f"{failed} file(s) could not be read")
 
     return added
 

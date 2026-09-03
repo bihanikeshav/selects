@@ -68,6 +68,27 @@ def test_speed_mode_fast_skips_ram_face_smart(tmp_path, monkeypatch):
     assert called == [s for s in DEFAULT_STAGE_ORDER if s not in FAST_SKIP_STAGES]
 
 
+def test_index_unreadable_summary_is_published(tmp_path, monkeypatch):
+    cfg = get_folder_config(tmp_path)
+    init_db(cfg.db_path)
+    published: list[dict] = []
+
+    def fake_get(name: str):
+        def fn(cfg, on_progress=None, paths=None, **_kwargs):
+            if name == "index" and on_progress:
+                on_progress(2, 2, "1 file(s) could not be read")
+            return 1 if name == "index" else 0
+
+        return fn
+
+    monkeypatch.setattr("selects.server.pipeline_runner.get_stage_callable", fake_get)
+    run_pipeline_stages(cfg, published.append)
+    assert any(
+        p.get("stage") == "index" and "could not be read" in (p.get("message") or "")
+        for p in published
+    )
+
+
 def test_pipeline_cancelled_stops_later_stages(tmp_path, monkeypatch):
     cfg = get_folder_config(tmp_path)
     init_db(cfg.db_path)

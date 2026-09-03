@@ -2053,19 +2053,17 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
 
     # ── Aesthetic calibration ────────────────────────────────────────────────
     #
-    # The on-disk CLIP-IQA score (Embedding.aesthetic_iqa) doesn't track human
-    # aesthetic judgment well. This subsystem lets the user rate photos
-    # (+1/-1/skip), trains a per-folder personal logistic regression on SigLIP
-    # embeddings, and surfaces NIMA + AP-V2.5 + personal scores alongside the
-    # original IQA so the user can compare and pick which signal to drive
-    # story curation with.
+    # Live score is CLIP-IQA on Embedding.aesthetic_iqa. NIMA / AP-V2.5 may be
+    # absent; they are shown when present but never required to list photos.
+    # Ratings train a per-folder personal centroid on SigLIP embeddings.
 
     def _combined_percentile_pairs(s) -> list[tuple]:
         """Return list of (photo_id, sha256, taken_at, iqa, nima, ap25, personal,
-        combined_pct) for every photo with both NIMA and AP25 scored, sorted by
-        combined percentile ascending.
+        combined_pct) for every photo with an IQA score, sorted by IQA
+        percentile ascending.
 
-        combined_pct = mean(percentile_rank_in_nima, percentile_rank_in_ap25), 0–100.
+        combined_pct is the IQA percentile rank in this library (0–100). NIMA
+        and AP25 are included when present and may be null.
         """
         rows = (
             s.query(
@@ -2075,35 +2073,27 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
                 AestheticScore.personal_score,
             )
             .join(Embedding, Embedding.photo_id == Photo.id)
-            .join(AestheticScore, AestheticScore.photo_id == Photo.id)
-            .filter(AestheticScore.nima_score.isnot(None))
-            .filter(AestheticScore.ap25_score.isnot(None))
+            .outerjoin(AestheticScore, AestheticScore.photo_id == Photo.id)
+            .filter(Embedding.aesthetic_iqa.isnot(None))
             .all()
         )
         if not rows:
             return []
-        # Compute percentile ranks within current library
         n = len(rows)
-        # rank nima
-        nima_sorted = sorted(range(n), key=lambda i: rows[i][4])
-        nima_pct = [0.0] * n
-        for rank, idx in enumerate(nima_sorted):
-            nima_pct[idx] = (rank / max(1, n - 1)) * 100
-        ap_sorted = sorted(range(n), key=lambda i: rows[i][5])
-        ap_pct = [0.0] * n
-        for rank, idx in enumerate(ap_sorted):
-            ap_pct[idx] = (rank / max(1, n - 1)) * 100
+        iqa_sorted = sorted(range(n), key=lambda i: rows[i][3])
+        iqa_pct = [0.0] * n
+        for rank, idx in enumerate(iqa_sorted):
+            iqa_pct[idx] = (rank / max(1, n - 1)) * 100
         out = []
         for i, r in enumerate(rows):
-            combined = (nima_pct[i] + ap_pct[i]) / 2.0
-            out.append((*r, combined))
-        out.sort(key=lambda t: t[7])  # ascending by combined
+            out.append((*r, iqa_pct[i]))
+        out.sort(key=lambda t: t[7])  # ascending by IQA percentile
         return out
 
     @app.get("/api/calibrate/extremes")
     def calibrate_extremes(bucket: str = Query("worst"), n: int = Query(30, ge=1, le=200)):
         """Return N unrated photos at the worst (bottom) or best (top) of the
-        NIMA+AP combined percentile ranking.
+        CLIP-IQA percentile ranking.
 
         bucket='worst' → bottom N, presented as candidates for rescue (default
         rating -1, user flips ones they like to +1).

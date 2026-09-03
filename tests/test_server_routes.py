@@ -307,3 +307,97 @@ async def test_edit_open_rejects_non_allowlisted_editor(tmp_path, monkeypatch):
             json={"sha256s": [sha], "editor": "cmd.exe"},
         )
         assert r2.status_code == 400
+
+
+def test_is_loopback_host():
+    from selects.server.fs_routes import is_loopback_host
+
+    assert is_loopback_host("127.0.0.1")
+    assert is_loopback_host("127.0.0.2")
+    assert is_loopback_host("::1")
+    assert is_loopback_host("[::1]")
+    assert is_loopback_host("localhost")
+    assert is_loopback_host("testclient")
+    assert not is_loopback_host("0.0.0.0")
+    assert not is_loopback_host("::")
+    assert not is_loopback_host("192.168.1.5")
+    assert not is_loopback_host(None)
+
+
+async def test_fs_list_ok_on_localhost(tmp_path):
+    cfg = get_folder_config(tmp_path)
+    init_db(cfg.db_path)
+    app = build_app(cfg, run_background=False, bind_host="127.0.0.1")
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        r = await client.get("/api/fs/list")
+        assert r.status_code == 200
+        body = r.json()
+        assert "dirs" in body
+
+
+async def test_fs_list_forbidden_when_bound_to_lan(tmp_path):
+    cfg = get_folder_config(tmp_path)
+    init_db(cfg.db_path)
+    app = build_app(cfg, run_background=False, bind_host="0.0.0.0")
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        r = await client.get("/api/fs/list")
+        assert r.status_code == 403
+
+
+async def test_fs_list_forbidden_for_lan_client(tmp_path):
+    cfg = get_folder_config(tmp_path)
+    init_db(cfg.db_path)
+    app = build_app(cfg, run_background=False, bind_host="127.0.0.1")
+    transport = ASGITransport(app=app, client=("192.168.1.50", 50000))
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        r = await client.get("/api/fs/list")
+        assert r.status_code == 403
+
+
+async def test_calibrate_extremes_uses_iqa_without_nima_ap25(tmp_path):
+    from datetime import datetime
+
+    from selects.db import session_scope
+    from selects.db.models import Embedding, Photo, PhotoRating
+
+    cfg = get_folder_config(tmp_path)
+    Session = init_db(cfg.db_path)
+    with session_scope(Session) as s:
+        low = Photo(path=str(tmp_path / "low.jpg"), sha256="a" * 64, taken_at=datetime(2024, 1, 1))
+        high = Photo(path=str(tmp_path / "high.jpg"), sha256="b" * 64, taken_at=datetime(2024, 1, 2))
+        s.add_all([low, high])
+        s.flush()
+        s.add(Embedding(photo_id=low.id, siglip=b"\x00" * 2304, aesthetic_iqa=0.1))
+        s.add(Embedding(photo_id=high.id, siglip=b"\x00" * 2304, aesthetic_iqa=0.9))
+        low_id, high_id = low.id, high.id
+
+    app = build_app(cfg, run_background=False)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        r = await client.get("/api/calibrate/extremes?bucket=worst&n=10")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["total_indexed"] == 2
+        ids = [p["photo_id"] for p in body["photos"]]
+        assert ids[0] == low_id
+        assert high_id in ids
+        assert body["photos"][0]["scores"]["iqa"] == pytest.approx(0.1)
+        assert body["photos"][0]["scores"]["nima"] is None
+        assert body["photos"][0]["scores"]["ap25"] is None
+
+        dash = await client.get("/api/calibrate/dashboard")
+        assert dash.status_code == 200
+        assert len(dash.json()["photos"]) == 2
+
+        await client.post("/api/calibrate/rate", json={"photo_id": high_id, "rating": 1})
+        agr = await client.get("/api/calibrate/agreement")
+        assert agr.status_code == 200
+        agr_body = agr.json()
+        assert agr_body["n_upvotes"] == 1
+        assert agr_body["models"]["iqa"]["n_scored_upvotes"] == 1
+        assert agr_body["models"]["iqa"]["median_upvote_percentile"] is not None
+
+    with session_scope(Session) as s:
+        assert s.get(PhotoRating, high_id) is not None

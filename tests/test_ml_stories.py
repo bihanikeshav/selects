@@ -291,6 +291,38 @@ class TestRunStoryStage:
         finally:
             stories_mod.init_db = original_init_db
 
+    def test_cancel_during_place_keeps_day_stories(self, session_factory, tmp_path):
+        from selects.config import get_folder_config
+        from selects.pipeline import PipelineCancelled
+
+        cfg = get_folder_config(tmp_path)
+        import selects.ml.stories as stories_mod
+
+        monkeypatch_init_db = lambda _path: session_factory  # noqa: E731
+        _insert_photos_for_day(session_factory, tmp_path, "2026-03-29", 15, seed_offset=0)
+
+        original_init_db = stories_mod.init_db
+        stories_mod.init_db = monkeypatch_init_db
+        try:
+            run_story_stage(cfg)
+            with session_scope(session_factory) as s:
+                before = [(st.id, st.day) for st in s.query(Story).order_by(Story.day).all()]
+            assert any(day == "2026-03-29" for _, day in before)
+
+            def boom(_i, _t, name):
+                if name in ("places", "patterns", "people") or str(name).startswith("place:"):
+                    raise PipelineCancelled()
+
+            with pytest.raises(PipelineCancelled):
+                run_story_stage(cfg, on_progress=boom)
+
+            with session_scope(session_factory) as s:
+                after = [(st.id, st.day) for st in s.query(Story).order_by(Story.day).all()]
+            assert ("2026-03-29" in {day for _, day in after})
+            assert any(day == "2026-03-29" for _, day in after)
+        finally:
+            stories_mod.init_db = original_init_db
+
     def test_photo_count_capped_at_max(self, session_factory, tmp_path):
         from selects.config import get_folder_config
         cfg = get_folder_config(tmp_path)

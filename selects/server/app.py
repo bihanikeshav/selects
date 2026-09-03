@@ -83,12 +83,15 @@ def build_app(
     cfg: Optional[FolderConfig] = None,
     run_background: bool = True,
     manager: Optional[LibraryManager] = None,
+    bind_host: str = "127.0.0.1",
 ) -> FastAPI:
     """Build the FastAPI app.
 
     *cfg* bootstraps a single-folder library when *manager* is not supplied
     (the CLI path). Tests can inject a *manager* with an isolated registry.
     All /api/* endpoints follow the manager's active library via a proxy.
+    *bind_host* is the address uvicorn will bind; non-loopback disables
+    ``/api/fs/list`` so a LAN bind cannot browse the host filesystem.
     """
     if manager is None:
         manager = LibraryManager(bootstrap_cfg=cfg)
@@ -152,7 +155,7 @@ def build_app(
     register_recap_routes(app, proxy)
     register_video_routes(app, proxy, publish)
     register_watch_routes(app, manager, publish)
-    register_fs_routes(app)
+    register_fs_routes(app, bind_host=bind_host)
     register_system_routes(app)
     register_ws(app)
     _mount_frontend(app)

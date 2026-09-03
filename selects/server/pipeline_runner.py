@@ -182,7 +182,12 @@ def run_pipeline_stages(
             # Interrupt mid-stage when possible (stages that don't swallow it).
             if _cancelled():
                 raise PipelineCancelled()
-            msg = f"{blurb}… {i:,}/{total:,}" if total else f"{blurb}…"
+            # Indexer failure summary (and similar) must reach the UI as-is;
+            # the usual blurb would hide "N file(s) could not be read".
+            if isinstance(name, str) and "could not be read" in name:
+                msg = name
+            else:
+                msg = f"{blurb}… {i:,}/{total:,}" if total else f"{blurb}…"
             publish({"stage": stage, "current": i, "total": total, "message": msg})
 
         return _progress
