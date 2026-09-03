@@ -10,6 +10,7 @@ import { useLocation } from "react-router-dom";
 import { getLikedStatus } from "../api/client";
 import type { StoryEntry, VisitEntry } from "../api/types";
 import { useLikeStatus, useToggleLike } from "../hooks/useLikes";
+import SkeletonGrid from "../components/SkeletonGrid";
 
 // Google Material accent quartet — rotated by day hash
 const ACCENT_COLORS = [
@@ -935,11 +936,7 @@ export default function Stories() {
         <StatusRow details={statusDetails} />
 
         <div className="stories-wrap" style={{ gridRow: "3 / span 3" }}>
-          {loading && (
-            <div className="stories-state">
-              <span className="stories-state-sub">Loading stories…</span>
-            </div>
-          )}
+          {loading && <SkeletonGrid count={8} />}
 
           {!loading && error && (
             <div className="stories-state">

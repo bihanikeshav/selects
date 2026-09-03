@@ -4,10 +4,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from selects.config import get_folder_config
 from selects.db import init_db, session_scope
-from selects.db.models import Embedding, Photo
+from selects.db.models import AestheticScore, Embedding, Photo
 from selects.ml.curation import curate
 
 
@@ -44,6 +45,18 @@ def test_curate_no_iqa_is_nongate_not_empty(tmp_path: Path) -> None:
     assert len(out) == 3
     assert {c.photo_id for c in out} == set(ids)
     assert all(c.iqa is None and c.combined is None for c in out)
+
+
+def test_curate_prefers_ap25_over_iqa(tmp_path: Path) -> None:
+    Session, ids = _seed(tmp_path, [0.9, 0.2])
+    with session_scope(Session) as s:
+        s.add(AestheticScore(photo_id=ids[0], ap25_score=2.0))
+        s.add(AestheticScore(photo_id=ids[1], ap25_score=8.0))
+        s.flush()
+        out = curate(s, ids, pct_floor=0.0)
+    assert [c.photo_id for c in out] == [ids[1], ids[0]]
+    assert out[0].ap25 == pytest.approx(8.0)
+    assert out[0].combined == pytest.approx(0.8)
 
 
 def test_curate_percentile_75_keeps_top_quartile(tmp_path: Path) -> None:

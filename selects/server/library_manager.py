@@ -262,15 +262,20 @@ class LibraryManager:
             if not cfg.db_path.exists():
                 return None
             from selects.db import init_db, session_scope
-            from selects.db.models import AestheticScore, Photo
+            from selects.db.models import AestheticScore, Embedding, Photo
 
             Session = init_db(cfg.db_path)
             with session_scope(Session) as s:
-                # Prefer the best-scoring photo as the cover, else the first.
+                # Prefer AP-V2.5, then CLIP-IQA, else first row.
                 q = (
                     s.query(Photo.sha256)
                     .outerjoin(AestheticScore, AestheticScore.photo_id == Photo.id)
-                    .order_by(AestheticScore.nima_score.desc().nullslast(), Photo.id)
+                    .outerjoin(Embedding, Embedding.photo_id == Photo.id)
+                    .order_by(
+                        AestheticScore.ap25_score.desc().nullslast(),
+                        Embedding.aesthetic_iqa.desc().nullslast(),
+                        Photo.id,
+                    )
                 )
                 for (sha,) in q.limit(25):
                     thumb = cfg.thumbs_dir / f"{sha}.jpg"

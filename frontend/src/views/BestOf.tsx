@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import PageHeader from "../components/PageHeader";
 import Rail from "../components/Rail";
+import SkeletonGrid from "../components/SkeletonGrid";
 import StackPhoto from "../components/StackPhoto";
 import Viewer from "../components/Viewer";
 import PhotoEditor from "../editor/PhotoEditor";
@@ -180,7 +181,7 @@ export default function BestOf() {
             </div>
           )}
           {loading ? (
-            <div style={{ color: "var(--md-on-surface-var)", padding: 24 }}>Loading…</div>
+            <SkeletonGrid count={12} />
           ) : data && data.photos.length > 0 ? (
             <div
               style={{

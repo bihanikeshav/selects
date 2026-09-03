@@ -1,23 +1,26 @@
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { libraryStatus } from "./api/client";
+import { warmupSearch } from "./api/search2";
+import Rail from "./components/Rail";
 import TitleBar from "./components/TitleBar";
-import BestOf from "./views/BestOf";
 import BurstCull from "./views/BurstCull";
-import Calibrate from "./views/Calibrate";
-import CalibrateDashboard from "./views/CalibrateDashboard";
-import Clusters from "./views/Clusters";
-import ClusterDetail from "./views/ClusterDetail";
-import Curated from "./views/Curated";
-import Dedup from "./views/Dedup";
 import Libraries from "./views/Libraries";
-import MapView from "./views/Map";
 import Onboarding from "./views/Onboarding";
-import Persons from "./views/Persons";
-import PersonDetail from "./views/PersonDetail";
-import Search from "./views/Search";
-import Stories from "./views/Stories";
-import Videos from "./views/Videos";
+
+const BestOf = lazy(() => import("./views/BestOf"));
+const Calibrate = lazy(() => import("./views/Calibrate"));
+const CalibrateDashboard = lazy(() => import("./views/CalibrateDashboard"));
+const Clusters = lazy(() => import("./views/Clusters"));
+const ClusterDetail = lazy(() => import("./views/ClusterDetail"));
+const Curated = lazy(() => import("./views/Curated"));
+const Dedup = lazy(() => import("./views/Dedup"));
+const MapView = lazy(() => import("./views/Map"));
+const Persons = lazy(() => import("./views/Persons"));
+const PersonDetail = lazy(() => import("./views/PersonDetail"));
+const Search = lazy(() => import("./views/Search"));
+const Stories = lazy(() => import("./views/Stories"));
+const Videos = lazy(() => import("./views/Videos"));
 
 /**
  * Ask the backend whether any library exists. If none does, bounce the user
@@ -66,12 +69,36 @@ function LegacyPersonIdRedirect() {
   return <Navigate to={`/people/${id}`} replace />;
 }
 
+function SearchEngineWarmup() {
+  useEffect(() => {
+    warmupSearch().catch(() => {});
+  }, []);
+  return null;
+}
+
+function RouteFallback() {
+  return (
+    <div className="app">
+      <Rail />
+      <div className="workspace page-skeleton" aria-busy="true">
+        <div className="skeleton-grid">
+          {Array.from({ length: 12 }, (_, i) => (
+            <div key={i} className="skeleton-tile" />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   return (
     <BrowserRouter>
       <TitleBar />
       <OnboardingGate />
-      <Routes>
+      <SearchEngineWarmup />
+      <Suspense fallback={<RouteFallback />}>
+        <Routes>
         <Route path="/onboarding" element={<Onboarding />} />
         <Route path="/libraries" element={<Libraries />} />
         {/* Cull mode — three sub-views */}
@@ -104,7 +131,8 @@ export default function App() {
         <Route path="/stories" element={<Navigate to="/cull/stories" replace />} />
         <Route path="/persons" element={<Navigate to="/people" replace />} />
         <Route path="/persons/:id" element={<LegacyPersonIdRedirect />} />
-      </Routes>
+        </Routes>
+      </Suspense>
     </BrowserRouter>
   );
 }

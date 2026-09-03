@@ -6,6 +6,7 @@ import Topbar from "../components/Topbar";
 import StatusRow from "../components/StatusRow";
 import { listClusters } from "../api/client";
 import type { ClusterEntry } from "../api/types";
+import SkeletonGrid from "../components/SkeletonGrid";
 
 // Google Material quartet — rotated by tag hash
 const ACCENT_COLORS = [
@@ -320,11 +321,7 @@ export default function Clusters() {
             </div>
           </div>
 
-          {loading && (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 240, color: "var(--md-on-surface-var)", fontFamily: "var(--font-display)", fontSize: 15 }}>
-              Loading clusters…
-            </div>
-          )}
+          {loading && <SkeletonGrid count={12} />}
 
           {!loading && error && (
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: 240, gap: 12 }}>

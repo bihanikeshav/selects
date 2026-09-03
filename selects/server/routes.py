@@ -9,12 +9,12 @@ from typing import Optional
 log = logging.getLogger(__name__)
 
 from fastapi import Body, FastAPI, File, Form, HTTPException, Query, Response, UploadFile
-from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 
 from selects.config import FolderConfig
 from selects.db import init_db, session_scope
+from selects.server.http_cache import IMMUTABLE, jpeg_file
 from selects.db.models import (
     AestheticScore, ClassicalScore, Embedding, Moment, MomentMember, Photo, PhotoCategory,
     PhotoPerson, PhotoRating, PhotoTag, Story, StoryItem, Visit,
@@ -254,26 +254,11 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
         from sqlalchemy import func as _func
 
         with session_scope(Session) as s:
-            # Build moment membership map for collapse support
-            moment_of: dict[int, tuple[int, int, bool]] = {}
-            if collapse == "moments":
-                for mm_pid, mm_mid, mom_size, mom_primary in (
-                    s.query(
-                        MomentMember.photo_id,
-                        MomentMember.moment_id,
-                        Moment.size,
-                        Moment.primary_photo_id,
-                    )
-                    .join(Moment, Moment.id == MomentMember.moment_id)
-                    .all()
-                ):
-                    is_primary = (mm_pid == mom_primary)
-                    moment_of[mm_pid] = (mm_mid, mom_size, is_primary)
-
             base = (
-                select(Photo, ClassicalScore, Embedding)
+                select(Photo, ClassicalScore, Embedding, AestheticScore)
                 .join(ClassicalScore, Photo.id == ClassicalScore.photo_id, isouter=True)
                 .join(Embedding, Photo.id == Embedding.photo_id, isouter=True)
+                .join(AestheticScore, AestheticScore.photo_id == Photo.id, isouter=True)
             )
             if rejected is True:
                 base = base.where(ClassicalScore.auto_reject.is_(True))
@@ -344,7 +329,10 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
             ).scalar_one()
 
             if sort == "aesthetic":
-                base = base.order_by(Embedding.aesthetic_iqa.desc().nulls_last())
+                base = base.order_by(
+                    AestheticScore.ap25_score.desc().nulls_last(),
+                    Embedding.aesthetic_iqa.desc().nulls_last(),
+                )
             elif sort == "iqa":
                 base = base.order_by(Embedding.aesthetic_iqa.desc())
             elif sort == "random":
@@ -353,15 +341,24 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
                 base = base.order_by(Photo.taken_at.asc().nullslast())
 
             rows = s.execute(base.offset(offset).limit(limit)).all()
+            page_ids = [photo.id for photo, *_ in rows]
+            moment_of: dict[int, tuple[int, int, bool]] = {}
+            if page_ids:
+                for mm_pid, mm_mid, mom_size, mom_primary in (
+                    s.query(
+                        MomentMember.photo_id,
+                        MomentMember.moment_id,
+                        Moment.size,
+                        Moment.primary_photo_id,
+                    )
+                    .join(Moment, Moment.id == MomentMember.moment_id)
+                    .filter(MomentMember.photo_id.in_(page_ids))
+                    .all()
+                ):
+                    moment_of[mm_pid] = (mm_mid, mom_size, mm_pid == mom_primary)
 
             items = []
-            for photo, score, emb in rows:
-                # Collapse: skip non-primary moment members
-                if collapse == "moments" and photo.id in moment_of:
-                    _, _, is_primary = moment_of[photo.id]
-                    if not is_primary:
-                        continue
-
+            for photo, score, emb, _aest in rows:
                 moment_id: Optional[int] = None
                 moment_size: Optional[int] = None
                 if photo.id in moment_of:
@@ -520,21 +517,40 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
             if untagged_ids:
                 groups["uncategorized"] = list(untagged_ids)
 
+            all_cover_ids = [pid for pids in groups.values() for pid in pids]
+            score_by_id: dict[int, tuple[str, float, float]] = {}
+            if all_cover_ids:
+                for pid, sha, iqa, ap25 in (
+                    s.query(
+                        Photo.id,
+                        Photo.sha256,
+                        Embedding.aesthetic_iqa,
+                        AestheticScore.ap25_score,
+                    )
+                    .outerjoin(Embedding, Embedding.photo_id == Photo.id)
+                    .outerjoin(AestheticScore, AestheticScore.photo_id == Photo.id)
+                    .filter(Photo.id.in_(all_cover_ids))
+                    .all()
+                ):
+                    score_by_id[pid] = (sha, ap25 if ap25 is not None else -1.0, iqa if iqa is not None else -1.0)
+
             clusters_out: list[ClusterEntry] = []
             for tag, pids in groups.items():
                 if len(pids) < min_count:
                     continue
-
-                # Sort by aesthetic_iqa descending so cover = best photo
-                rows = (
-                    s.query(Photo.sha256, Embedding.aesthetic_iqa)
-                    .join(Embedding, Embedding.photo_id == Photo.id, isouter=True)
-                    .filter(Photo.id.in_(pids))
-                    .all()
+                ranked = sorted(
+                    pids,
+                    key=lambda pid: score_by_id.get(pid, ("", -1.0, -1.0))[1:],
+                    reverse=True,
                 )
-                rows_sorted = sorted(rows, key=lambda r: (r[1] or 0.0), reverse=True)
-                cover_sha = rows_sorted[0][0]
-                samples = [f"/api/thumb/{r[0]}" for r in rows_sorted[:4]]
+                cover_sha = score_by_id.get(ranked[0], ("",))[0] if ranked else ""
+                samples = [
+                    f"/api/thumb/{score_by_id[pid][0]}"
+                    for pid in ranked[:4]
+                    if pid in score_by_id and score_by_id[pid][0]
+                ]
+                if not cover_sha:
+                    continue
                 clusters_out.append(ClusterEntry(
                     tag=tag,
                     count=len(pids),
@@ -598,8 +614,12 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
                 select(Photo, ClassicalScore, Embedding)
                 .join(ClassicalScore, Photo.id == ClassicalScore.photo_id, isouter=True)
                 .join(Embedding, Photo.id == Embedding.photo_id, isouter=True)
+                .outerjoin(AestheticScore, AestheticScore.photo_id == Photo.id)
                 .where(Photo.id.in_(ids))
-                .order_by(Embedding.aesthetic_iqa.desc())
+                .order_by(
+                    AestheticScore.ap25_score.desc().nulls_last(),
+                    Embedding.aesthetic_iqa.desc(),
+                )
                 .limit(limit)
             ).all()
 
@@ -986,12 +1006,12 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
 
     @app.get("/api/editor/result/{sha256:path}")
     def editor_result(sha256: str):
-        """Serve the baked edited JPEG if one exists, else 404."""
+        """Serve the baked edited JPEG if one exists, else the preview."""
         _require_sha256(sha256)
         out = cfg.state_dir / "edits" / f"{sha256}.jpg"
-        if not out.exists():
-            raise HTTPException(404, detail="no edit")
-        return FileResponse(str(out), media_type="image/jpeg")
+        if out.exists():
+            return jpeg_file(out)
+        return _serve_image_for(cfg, sha256, kind="preview")
 
     @app.get("/api/enhance/{sha256:path}")
     def enhance(
@@ -1027,7 +1047,7 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
         cached = cfg.state_dir / "enhanced" / "v4" / f"{sha256}-{suffix}.jpg"
         cached.parent.mkdir(parents=True, exist_ok=True)
         if cached.exists():
-            return FileResponse(cached, media_type="image/jpeg")
+            return jpeg_file(cached)
 
         preview_path = cfg.previews_dir / f"{sha256}.jpg"
         if not preview_path.exists():
@@ -1057,7 +1077,9 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
             buf = BytesIO()
             out.convert("RGB").save(buf, "JPEG", quality=90)
             cached.write_bytes(buf.getvalue())
-            return Response(content=buf.getvalue(), media_type="image/jpeg")
+            return Response(
+                content=buf.getvalue(), media_type="image/jpeg", headers=IMMUTABLE
+            )
 
     @app.get("/api/doctor/issues")
     def doctor_issues():
@@ -1248,6 +1270,8 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
     class PersonList(BaseModel):
         total: int
         persons: list[PersonOut]
+        speed_mode: str = "full"
+        faces_ran: bool = True
 
     @app.get("/api/persons", response_model=PersonList)
     def list_persons(
@@ -1268,7 +1292,15 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
 
         from selects.db.models import FaceEmbedding, Person, PhotoPerson
 
+        speed = "full"
+        try:
+            speed = getattr(cfg, "speed_mode", "full") or "full"
+        except Exception:
+            speed = "full"
+
         with session_scope(Session) as s:
+            face_n = s.query(func.count(FaceEmbedding.id)).scalar() or 0
+            faces_ran = bool(face_n) or speed != "fast"
             persons_all = s.query(Person).order_by(Person.photo_count.desc()).all()
             persons = []
             for p in persons_all:
@@ -1301,7 +1333,12 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
                     cover_url=f"/api/face_crop/{best_face.id}",
                     hidden=bool(p.hidden),
                 ))
-        return PersonList(total=len(persons), persons=persons)
+        return PersonList(
+            total=len(persons),
+            persons=persons,
+            speed_mode=speed,
+            faces_ran=faces_ran,
+        )
 
     @app.get("/api/face_crop/{face_id}")
     def face_crop(face_id: int):
@@ -1331,7 +1368,9 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
                 crop = im.crop((x1, y1, x2, y2)).convert("RGB")
                 buf = BytesIO()
                 crop.save(buf, "JPEG", quality=88)
-                return Response(content=buf.getvalue(), media_type="image/jpeg")
+                return Response(
+                    content=buf.getvalue(), media_type="image/jpeg", headers=IMMUTABLE
+                )
         except FileNotFoundError:
             raise HTTPException(404, detail="preview missing")
 
@@ -2607,4 +2646,4 @@ def _serve_image_for(cfg: FolderConfig, sha256: str, kind: str):
     path = parent / f"{sha256}.jpg"
     if not path.exists():
         raise HTTPException(404, detail=f"{kind} not found")
-    return FileResponse(path, media_type="image/jpeg")
+    return jpeg_file(path)

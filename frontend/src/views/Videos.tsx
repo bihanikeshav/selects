@@ -9,6 +9,7 @@ import {
 import type { VideoFramesResponse, VideoItem, VideoListResponse } from "../api/videos";
 import PageHeader from "../components/PageHeader";
 import Rail from "../components/Rail";
+import SkeletonGrid from "../components/SkeletonGrid";
 import "../components/Videos.css";
 
 function fmtDuration(sec: number | null): string {
@@ -266,6 +267,8 @@ export default function Videos() {
         />
         <div className="videos-wrap">
           {error && <p className="videos-error">{error}</p>}
+
+          {!result && !error && <SkeletonGrid count={8} />}
 
           {result && videos.length === 0 && (
             <p className="videos-empty">

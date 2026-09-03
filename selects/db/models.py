@@ -29,7 +29,7 @@ class Photo(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     path: Mapped[str] = mapped_column(String(4096), nullable=False, unique=True, index=True)
-    sha256: Mapped[Optional[str]] = mapped_column(String(64))
+    sha256: Mapped[Optional[str]] = mapped_column(String(64), index=True)
     mtime: Mapped[Optional[float]] = mapped_column(Float)
     size_bytes: Mapped[Optional[int]] = mapped_column(Integer)
     format: Mapped[Optional[str]] = mapped_column(String(16))  # JPEG / HEIC / RAW
@@ -58,7 +58,7 @@ class Video(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     path: Mapped[str] = mapped_column(String(4096), nullable=False, unique=True, index=True)
-    sha256: Mapped[Optional[str]] = mapped_column(String(64))
+    sha256: Mapped[Optional[str]] = mapped_column(String(64), index=True)
     mtime: Mapped[Optional[float]] = mapped_column(Float)
     size_bytes: Mapped[Optional[int]] = mapped_column(Integer)
     format: Mapped[Optional[str]] = mapped_column(String(16))  # MP4 / MOV / MKV

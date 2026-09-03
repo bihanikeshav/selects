@@ -10,7 +10,16 @@ import numpy as np
 
 from selects.config import FolderConfig
 from selects.db import init_db, session_scope
-from selects.db.models import ClassicalScore, Embedding, Photo, Story, StoryItem, Visit
+from selects.db.models import (
+    AestheticScore,
+    ClassicalScore,
+    Embedding,
+    Photo,
+    Story,
+    StoryItem,
+    Visit,
+)
+from selects.ml.aesthetic import rank_score
 from selects.ml.trip_data import KM_PER_DEG_LAT, km_per_deg_lon, load_keywords
 
 log = logging.getLogger(__name__)
@@ -103,9 +112,11 @@ def run_story_stage(
                 ClassicalScore.auto_reject,
                 Embedding.siglip,
                 Embedding.aesthetic_iqa,
+                AestheticScore.ap25_score,
             )
             .join(Embedding, Embedding.photo_id == Photo.id)
             .outerjoin(ClassicalScore, ClassicalScore.photo_id == Photo.id)
+            .outerjoin(AestheticScore, AestheticScore.photo_id == Photo.id)
             .filter(Photo.taken_at.is_not(None))
             .order_by(Photo.taken_at)
             .all()
@@ -252,9 +263,11 @@ def run_story_stage(
                     ClassicalScore.auto_reject,
                     Embedding.siglip,
                     Embedding.aesthetic_iqa,
+                    AestheticScore.ap25_score,
                 )
                 .join(Embedding, Embedding.photo_id == Photo.id)
                 .outerjoin(ClassicalScore, ClassicalScore.photo_id == Photo.id)
+                .outerjoin(AestheticScore, AestheticScore.photo_id == Photo.id)
                 .filter(Photo.taken_at.is_not(None))
                 .order_by(Photo.taken_at)
                 .all()
@@ -475,7 +488,8 @@ def _segment_scenes(photos: list) -> list[list[dict]]:
                 "blur": r.blur or 0.0,
                 "faces_count": r.faces_count or 0,
                 "embedding": emb,
-                "iqa": r.aesthetic_iqa or 0.0,
+                "iqa": rank_score(getattr(r, "ap25_score", None), None, r.aesthetic_iqa)
+                or (r.aesthetic_iqa or 0.0),
             }
         )
 

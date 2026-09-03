@@ -29,7 +29,8 @@ class FolderConfig(BaseSettings):
     burst_window_seconds: int = 12
     burst_similarity_threshold: float = 0.96
 
-    # Aesthetic curation thresholds (combined = AP_WEIGHT*AP + NIMA_WEIGHT*NIMA).
+    # Aesthetic curation: rank_score = AP25/10 when present, else CLIP-IQA.
+    # Combined AP+NIMA (1–10) is used only when both heads exist (NIMA is not shipped).
     # Per-scope gate: photo must be in the top 25% of its scope (day/place/person).
     # Library-wide floor: photo must also be in the top 35% globally — a
     # mediocre photo isn't rescued just because its scope is thin.

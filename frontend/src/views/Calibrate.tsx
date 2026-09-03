@@ -30,10 +30,9 @@ type Agreement = {
   n_upvotes: number;
 };
 
-const AGREEMENT_KEYS = ["iqa", "nima", "ap25", "combined", "personal"] as const;
+const AGREEMENT_KEYS = ["iqa", "ap25", "combined", "personal"] as const;
 const AGREEMENT_LABELS: Record<string, string> = {
   iqa: "IQA",
-  nima: "NIMA",
   ap25: "AP V2.5",
   combined: "Ensemble",
   personal: "Personal",
@@ -315,7 +314,7 @@ export default function Calibrate() {
                           transition: "transform 90ms ease",
                           transform: isFlipped ? "scale(0.97)" : "scale(1)",
                         }}
-                        title={`IQA ${p.scores.iqa?.toFixed(3) ?? "—"} · AP25 ${p.scores.ap25?.toFixed(2) ?? "—"} · NIMA ${p.scores.nima?.toFixed(2) ?? "—"}`}
+                        title={`IQA ${p.scores.iqa?.toFixed(3) ?? "—"} · AP25 ${p.scores.ap25?.toFixed(2) ?? "—"}`}
                       >
                         <img
                           src={p.thumb_url}
@@ -554,7 +553,7 @@ export default function Calibrate() {
               {toast || (
                 <span style={{ color: "var(--md-on-surface-var)" }}>
                   Ready. Score top right of each photo = IQA.
-                  NIMA/AP cells may be empty. Double-click any thumb to enlarge.
+                  Ensemble uses AP-V2.5 when scored. Double-click any thumb to enlarge.
                 </span>
               )}
             </div>
@@ -622,12 +621,6 @@ export default function Calibrate() {
                   IQA{" "}
                   <span style={{ color: "#fff" }}>
                     {p.scores.iqa?.toFixed(3) ?? "—"}
-                  </span>
-                </span>
-                <span>
-                  nima{" "}
-                  <span style={{ color: "#fff" }}>
-                    {p.scores.nima?.toFixed(2) ?? "—"}
                   </span>
                 </span>
                 <span>

@@ -155,10 +155,10 @@
   --dur-medium: 300ms;
   --dur-long:   500ms;
 
-  /* Typography stack */
-  --font-display: "Google Sans Display", "Google Sans", "Roboto Flex", system-ui, sans-serif;
-  --font-body:    "Roboto Flex", "Roboto", system-ui, sans-serif;
-  --font-mono:    "Google Sans Code", "Roboto Mono", ui-monospace, monospace;
+  /* Typography stack — local UI fonts only (no webfont round-trip). */
+  --font-display: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --font-body:    "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --font-mono:    "Cascadia Mono", "Segoe UI Mono", ui-monospace, monospace;
 
   --rail-w: 80px;
   --topbar-h: 64px;
@@ -1925,6 +1925,71 @@ button.rail-item {
   overflow-y: auto;
   padding: 24px 32px 32px;
   background: var(--md-surface);
+}
+
+@keyframes skeleton-shimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
+.skeleton-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px;
+}
+
+.page-skeleton {
+  padding: 24px 32px 32px;
+  min-height: 60vh;
+}
+
+.skeleton-tile {
+  aspect-ratio: 1;
+  border-radius: var(--r-md);
+  background: linear-gradient(
+    90deg,
+    var(--md-surface-c) 25%,
+    color-mix(in srgb, var(--md-on-surface) 8%, var(--md-surface-c)) 37%,
+    var(--md-surface-c) 63%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.2s ease-in-out infinite;
+}
+
+.cull-stage--skeleton {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 16px;
+  padding: 24px 32px;
+}
+
+.cull-skeleton-hero {
+  flex: 1;
+  min-height: 280px;
+  border-radius: var(--r-lg);
+  background: linear-gradient(
+    90deg,
+    var(--md-surface-c) 25%,
+    color-mix(in srgb, var(--md-on-surface) 8%, var(--md-surface-c)) 37%,
+    var(--md-surface-c) 63%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.2s ease-in-out infinite;
+}
+
+.cull-skeleton-film {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 8px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-tile,
+  .cull-skeleton-hero {
+    animation: none;
+  }
 }
 
 /* ===== People merge mode =============================================== */

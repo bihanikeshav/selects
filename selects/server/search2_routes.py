@@ -18,11 +18,11 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, FastAPI, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 
 from selects.config import FolderConfig
 from selects.db import init_db, session_scope
-from selects.db.models import Embedding, Photo, PhotoPerson, PhotoTag
+from selects.db.models import AestheticScore, Embedding, Photo, PhotoPerson, PhotoTag
 
 # Fixed bonus added per matching tag so exact tag hits always outrank a
 # semantic-only match (SigLIP cosine scores live in roughly [-1, 1]).
@@ -101,13 +101,26 @@ def build_router(cfg: FolderConfig) -> APIRouter:
 
             combined_by_id: dict[int, float] = {}
             if min_aesthetic is not None:
-                iqa_rows = (
-                    s.query(Embedding.photo_id, Embedding.aesthetic_iqa)
-                    .filter(Embedding.aesthetic_iqa.isnot(None))
-                    .filter(Embedding.aesthetic_iqa >= min_aesthetic)
+                ap_floor = min_aesthetic * 10.0
+                score_rows = (
+                    s.query(Embedding.photo_id, Embedding.aesthetic_iqa, AestheticScore.ap25_score)
+                    .outerjoin(AestheticScore, AestheticScore.photo_id == Embedding.photo_id)
+                    .filter(
+                        or_(
+                            AestheticScore.ap25_score >= ap_floor,
+                            and_(
+                                AestheticScore.ap25_score.is_(None),
+                                Embedding.aesthetic_iqa.isnot(None),
+                                Embedding.aesthetic_iqa >= min_aesthetic,
+                            ),
+                        )
+                    )
                     .all()
                 )
-                combined_by_id = {pid: float(iqa) for pid, iqa in iqa_rows}
+                combined_by_id = {
+                    pid: float(ap25) / 10.0 if ap25 is not None else float(iqa)
+                    for pid, iqa, ap25 in score_rows
+                }
                 _intersect(set(combined_by_id))
 
             if has_structured_filter and not candidate_ids:
@@ -118,7 +131,12 @@ def build_router(cfg: FolderConfig) -> APIRouter:
             if q:
                 words = _query_words(q)
                 if words:
-                    tag_rows = s.query(PhotoTag.photo_id, PhotoTag.tag).all()
+                    tag_q = s.query(PhotoTag.photo_id, PhotoTag.tag).filter(
+                        or_(*[PhotoTag.tag.ilike(f"%{w}%") for w in words])
+                    )
+                    if has_structured_filter and candidate_ids is not None:
+                        tag_q = tag_q.filter(PhotoTag.photo_id.in_(candidate_ids))
+                    tag_rows = tag_q.all()
                     for pid, tag in tag_rows:
                         if has_structured_filter and pid not in candidate_ids:
                             continue

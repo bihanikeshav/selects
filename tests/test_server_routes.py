@@ -64,6 +64,63 @@ async def test_get_thumbnail_returns_image(populated_folder):
         assert len(r.content) > 0
 
 
+async def test_editor_result_falls_back_to_preview(populated_folder):
+    cfg = get_folder_config(populated_folder)
+    init_db(cfg.db_path)
+    index_folder(cfg)
+    app = build_app(cfg, run_background=False)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        listing = (await client.get("/api/photos")).json()
+        sha = listing["items"][0]["sha256"]
+        r = await client.get(f"/api/editor/result/{sha}")
+        assert r.status_code == 200
+        assert r.headers["content-type"] == "image/jpeg"
+        assert "max-age=31536000" in r.headers.get("cache-control", "")
+
+
+async def test_thumb_is_immutably_cached(populated_folder):
+    cfg = get_folder_config(populated_folder)
+    init_db(cfg.db_path)
+    index_folder(cfg)
+    app = build_app(cfg, run_background=False)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        listing = (await client.get("/api/photos")).json()
+        sha = listing["items"][0]["sha256"]
+        r = await client.get(f"/api/thumb/{sha}", headers={"Accept-Encoding": "gzip"})
+        assert r.status_code == 200
+        assert "max-age=31536000" in r.headers.get("cache-control", "")
+        assert r.headers.get("content-encoding") != "gzip"
+
+
+async def test_list_photos_sort_aesthetic_prefers_ap25(tmp_path):
+    from datetime import datetime
+
+    from selects.db import session_scope
+    from selects.db.models import AestheticScore, Embedding, Photo
+
+    cfg = get_folder_config(tmp_path)
+    Session = init_db(cfg.db_path)
+    with session_scope(Session) as s:
+        low_iqa = Photo(path=str(tmp_path / "a.jpg"), sha256="a" * 64, taken_at=datetime(2024, 1, 1))
+        high_ap = Photo(path=str(tmp_path / "b.jpg"), sha256="b" * 64, taken_at=datetime(2024, 1, 2))
+        s.add_all([low_iqa, high_ap])
+        s.flush()
+        s.add(Embedding(photo_id=low_iqa.id, siglip=b"\x00" * 2304, aesthetic_iqa=0.95))
+        s.add(Embedding(photo_id=high_ap.id, siglip=b"\x00" * 2304, aesthetic_iqa=0.2))
+        s.add(AestheticScore(photo_id=low_iqa.id, ap25_score=2.0))
+        s.add(AestheticScore(photo_id=high_ap.id, ap25_score=8.0))
+
+    app = build_app(cfg, run_background=False)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        r = await client.get("/api/photos?sort=aesthetic&collapse=none")
+        assert r.status_code == 200
+        shas = [item["sha256"] for item in r.json()["items"]]
+        assert shas[0] == "b" * 64
+
+
 async def test_list_photos_sort_aesthetic_uses_iqa(tmp_path):
     from datetime import datetime
 
@@ -344,6 +401,21 @@ async def test_fs_list_forbidden_when_bound_to_lan(tmp_path):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         r = await client.get("/api/fs/list")
         assert r.status_code == 403
+
+
+async def test_lan_token_required_for_non_loopback_client(tmp_path, monkeypatch):
+    monkeypatch.setenv("SELECTS_LAN_TOKEN", "secret-token")
+    cfg = get_folder_config(tmp_path)
+    init_db(cfg.db_path)
+    app = build_app(cfg, run_background=False, bind_host="0.0.0.0")
+    transport = ASGITransport(app=app, client=("192.168.1.50", 50000))
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        r = await client.get("/api/health")
+        assert r.status_code == 200
+        r = await client.get("/api/photos")
+        assert r.status_code == 401
+        r = await client.get("/api/photos", headers={"Authorization": "Bearer secret-token"})
+        assert r.status_code == 200
 
 
 async def test_fs_list_forbidden_for_lan_client(tmp_path):

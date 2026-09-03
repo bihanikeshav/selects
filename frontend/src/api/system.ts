@@ -4,6 +4,7 @@ export interface SystemInfo {
   provider: string | null;      // active ONNX Runtime execution provider
   device_name: string | null;
   vram_total_mb: number | null;
+  speed_mode?: "fast" | "full";
 }
 
 export async function getSystem(): Promise<SystemInfo> {

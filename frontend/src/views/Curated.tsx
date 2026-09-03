@@ -6,6 +6,7 @@ import ExportPanel from "../components/ExportPanel";
 import ModeViewBar from "../components/ModeViewBar";
 import PageHeader from "../components/PageHeader";
 import Rail from "../components/Rail";
+import SkeletonGrid from "../components/SkeletonGrid";
 import TasteCard from "../components/TasteCard";
 import Viewer from "../components/Viewer";
 import PhotoEditor from "../editor/PhotoEditor";
@@ -178,6 +179,7 @@ export default function Curated() {
               {toast}
             </div>
           )}
+          {loading && <SkeletonGrid count={18} />}
           {!loading && photos.length === 0 && (
             <div className="cluster-detail-empty">
               Nothing curated yet. Open Stories or a Best-Of view and press{" "}

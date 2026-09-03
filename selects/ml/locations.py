@@ -18,7 +18,6 @@ from datetime import datetime
 from typing import Optional
 
 import requests
-from sklearn.cluster import DBSCAN
 import numpy as np
 
 from selects.ml.trip_data import KM_PER_DEG_LAT, km_per_deg_lon, load_landmarks
@@ -91,7 +90,7 @@ def cluster_day_photos(
         return []
 
     coords = np.array([[p["gps_lat"], p["gps_lon"]] for p in gps_photos])
-    labels = DBSCAN(eps=DBSCAN_EPS, min_samples=DBSCAN_MIN_SAMPLES, metric="euclidean").fit_predict(coords)
+    labels = _gps_cluster_labels(coords)
 
     clusters: dict[int, list[dict]] = {}
     for label, photo in zip(labels, gps_photos):
@@ -109,6 +108,31 @@ def cluster_day_photos(
 
     ordered = sorted(clusters.values(), key=median_time)
     return ordered
+
+
+def _gps_cluster_labels(coords: np.ndarray) -> np.ndarray:
+    """DBSCAN when sklearn imports; grid fallback if sklearn/pyarrow crashes."""
+    try:
+        from sklearn.cluster import DBSCAN
+
+        return DBSCAN(
+            eps=DBSCAN_EPS, min_samples=DBSCAN_MIN_SAMPLES, metric="euclidean"
+        ).fit_predict(coords)
+    except Exception:
+        log.warning("sklearn GPS clustering unavailable; using grid fallback")
+        labels = np.full(len(coords), -1, dtype=int)
+        cells: dict[tuple[int, int], list[int]] = {}
+        for i, (lat, lon) in enumerate(coords):
+            key = (int(round(lat / DBSCAN_EPS)), int(round(lon / DBSCAN_EPS)))
+            cells.setdefault(key, []).append(i)
+        lab = 0
+        for idxs in cells.values():
+            if len(idxs) < DBSCAN_MIN_SAMPLES:
+                continue
+            for i in idxs:
+                labels[i] = lab
+            lab += 1
+        return labels
 
 
 def _check_known_landmark(lat: float, lon: float, landmarks: list[dict]) -> Optional[str]:
