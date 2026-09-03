@@ -17,6 +17,7 @@ def test_default_stage_order():
         "video",
         "classical",
         "embed",
+        "aesthetic",
         "tag",
         "category",
         "ram_tag",

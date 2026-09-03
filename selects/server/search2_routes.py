@@ -131,19 +131,17 @@ def build_router(cfg: FolderConfig) -> APIRouter:
             sem_scores: dict[int, float] = {}
             shas: dict[int, str] = {}
             if q:
-                from selects.ml.search import cosine_scores, embed_query, siglip_bytes_to_matrix
+                from selects.ml.search import cosine_scores, embed_query, library_embedding_matrix
 
-                emb_stmt = select(Photo.id, Photo.sha256, Embedding.siglip).join(
-                    Embedding, Embedding.photo_id == Photo.id
-                )
-                if has_structured_filter:
-                    emb_stmt = emb_stmt.where(Photo.id.in_(candidate_ids))
-                rows = s.execute(emb_stmt).all()
-                if rows:
-                    ids = [r[0] for r in rows]
-                    for pid, sha in zip(ids, (r[1] for r in rows)):
+                mat, ids, sha_list = library_embedding_matrix(cfg)
+                if has_structured_filter and candidate_ids is not None:
+                    keep = [i for i, pid in enumerate(ids) if pid in candidate_ids]
+                    ids = [ids[i] for i in keep]
+                    sha_list = [sha_list[i] for i in keep]
+                    mat = mat[keep] if len(keep) else mat[:0]
+                if len(ids):
+                    for pid, sha in zip(ids, sha_list):
                         shas[pid] = sha
-                    mat = siglip_bytes_to_matrix([r[2] for r in rows])
                     qvec = embed_query(q)
                     sims = cosine_scores(mat, qvec)
                     for pid, sim in zip(ids, sims):

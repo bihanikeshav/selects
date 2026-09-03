@@ -35,7 +35,7 @@ const AGREEMENT_LABELS: Record<string, string> = {
   iqa: "IQA",
   nima: "NIMA",
   ap25: "AP V2.5",
-  combined: "NIMA+AP",
+  combined: "Ensemble",
   personal: "Personal",
 };
 
@@ -199,7 +199,7 @@ export default function Calibrate() {
         <PageHeader
           context="aesthetic calibration"
           title="Calibrate"
-          subtitle="Rescue from the bottom of IQA — click the photos that are actually good; they'll train the personal model. Unclicked = confirmed bad."
+          subtitle="Rescue shots the aesthetic models ranked low — click the ones that are actually good. That trains the personal model. Unclicked = confirmed bad."
           actions={
             <>
               <div style={{ color: "var(--md-on-surface-var)", fontSize: 12, fontFamily: "var(--font-mono)" }}>
@@ -315,7 +315,7 @@ export default function Calibrate() {
                           transition: "transform 90ms ease",
                           transform: isFlipped ? "scale(0.97)" : "scale(1)",
                         }}
-                        title={`IQA ${p.scores.iqa?.toFixed(3) ?? "—"} · nima ${p.scores.nima?.toFixed(2) ?? "—"} · ap25 ${p.scores.ap25?.toFixed(2) ?? "—"}`}
+                        title={`IQA ${p.scores.iqa?.toFixed(3) ?? "—"} · AP25 ${p.scores.ap25?.toFixed(2) ?? "—"} · NIMA ${p.scores.nima?.toFixed(2) ?? "—"}`}
                       >
                         <img
                           src={p.thumb_url}

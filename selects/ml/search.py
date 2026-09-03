@@ -15,6 +15,9 @@ from selects.db.models import Embedding, Photo
 
 log = logging.getLogger(__name__)
 
+# (n_rows, matrix, ids, shas) keyed by db path. Invalidated when the row count changes.
+_LIB_CACHE: dict[str, tuple[int, np.ndarray, list[int], list[str]]] = {}
+
 
 def search_photos(cfg: FolderConfig, query: str, k: int = 60) -> list[tuple[int, str, float]]:
     """Return [(photo_id, sha256, score), ...] sorted by relevance desc."""
@@ -51,6 +54,29 @@ def embed_query(query: str) -> np.ndarray:
     from selects.ml.embed import encode_text_prompts
 
     return encode_text_prompts([query])[0]       # [1152] float32, already L2-normalized
+
+
+def library_embedding_matrix(cfg: FolderConfig) -> tuple[np.ndarray, list[int], list[str]]:
+    """Cached L2-normalised [N,1152] matrix plus parallel id/sha lists."""
+    Session = init_db(cfg.db_path)
+    with session_scope(Session) as s:
+        rows = (
+            s.query(Photo.id, Photo.sha256, Embedding.siglip)
+            .join(Embedding, Embedding.photo_id == Photo.id)
+            .all()
+        )
+    key = str(cfg.db_path)
+    cached = _LIB_CACHE.get(key)
+    if cached is not None and cached[0] == len(rows):
+        return cached[1], cached[2], cached[3]
+    if not rows:
+        empty = np.zeros((0, 1152), dtype=np.float32)
+        return empty, [], []
+    ids = [r[0] for r in rows]
+    shas = [r[1] for r in rows]
+    mat = siglip_bytes_to_matrix([r[2] for r in rows])
+    _LIB_CACHE[key] = (len(rows), mat, ids, shas)
+    return mat, ids, shas
 
 
 def siglip_bytes_to_matrix(blobs: list[bytes]) -> np.ndarray:
