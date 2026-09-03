@@ -71,6 +71,71 @@ def _dest_rel_path(item: ExportItem, structure: Structure) -> Path:
     return Path(name)
 
 
+def _is_zip_file(path: Path) -> bool:
+    """True if *path* is an existing regular file named as a zip archive."""
+    return path.is_file() and path.suffix.lower() == ".zip"
+
+
+def _validate_dest_dir(path: Path) -> None:
+    """Refuse files and paths whose parent is not already a directory.
+
+    Creating the dest dir if missing is only allowed as the last component
+    under an existing parent — never ``mkdir(parents=True)``.
+    """
+    if path.exists() and not path.is_dir():
+        raise ValueError(f"export target must be a directory, not a file: {path}")
+    if not path.exists() and not path.parent.is_dir():
+        raise ValueError(f"export target parent is not an existing directory: {path.parent}")
+
+
+def _ensure_dest_dir(path: Path) -> Path:
+    """Return *path* as an existing directory, creating only the last component."""
+    _validate_dest_dir(path)
+    if not path.exists():
+        path.mkdir()
+    if not path.is_dir():
+        raise ValueError(f"export target must be a directory, not a file: {path}")
+    return path
+
+
+def _zip_path_for(target: Path, zip_name: str) -> Path:
+    if target.suffix.lower() == ".zip":
+        return target
+    return target / zip_name
+
+
+def validate_export_target(
+    target: Path | str,
+    mode: Mode = "copy",
+    zip_name: str = "export.zip",
+) -> Path:
+    """Raise ``ValueError`` if *target* is not a legal export destination.
+
+    ``mode="copy"``: *target* must be an existing directory, or a name whose
+    parent already exists as a directory (last component may be created later).
+    Existing files are refused.
+
+    ``mode="zip"``: parent of the zip path must be an existing directory (for
+    an explicit ``.zip`` path) or a legal dest dir as in copy mode (zip lands
+    inside *target*). The zip path itself must not be an existing non-zip file.
+    """
+    target = Path(target)
+    if mode == "zip":
+        zip_path = _zip_path_for(target, zip_name)
+        if target.suffix.lower() == ".zip":
+            if not zip_path.parent.is_dir():
+                raise ValueError(
+                    f"zip export parent is not an existing directory: {zip_path.parent}"
+                )
+        else:
+            _validate_dest_dir(target)
+        if zip_path.exists() and not _is_zip_file(zip_path):
+            raise ValueError(f"zip export path is an existing non-zip file: {zip_path}")
+        return target
+    _validate_dest_dir(target)
+    return target
+
+
 def export_photos(
     items: Iterable[ExportItem],
     target: Path | str,
@@ -81,11 +146,14 @@ def export_photos(
 ) -> ExportResult:
     """Copy or zip *items* into *target*.
 
-    ``mode="copy"``: files land directly under *target* (creating it if
-    needed), optionally grouped into ``YYYY-MM-DD`` subfolders.
+    ``mode="copy"``: files land directly under *target*, optionally grouped
+    into ``YYYY-MM-DD`` subfolders. *target* must already be a directory, or
+    a single new name under an existing parent (no ``mkdir -p`` of arbitrary
+    trees). Existing files are refused.
     ``mode="zip"``: a single archive named *zip_name* is written directly at
     *target* (if *target* looks like a file / ends in .zip) or inside *target*
-    as a directory.
+    as a directory. The zip's parent must already exist; an existing non-zip
+    file at the zip path is refused.
 
     Missing source files are skipped (not fatal) and reported in
     ``ExportResult.skipped``. Returns counts + total bytes copied and the
@@ -95,14 +163,14 @@ def export_photos(
     target = Path(target)
     skipped: list[dict] = []
     total = len(items)
+    validate_export_target(target, mode, zip_name=zip_name)
 
     if mode == "zip":
         if target.suffix.lower() == ".zip":
             zip_path = target
         else:
-            target.mkdir(parents=True, exist_ok=True)
+            target = _ensure_dest_dir(target)
             zip_path = target / zip_name
-        zip_path.parent.mkdir(parents=True, exist_ok=True)
 
         count = 0
         total_bytes = 0
@@ -123,7 +191,7 @@ def export_photos(
         return ExportResult(count=count, bytes=total_bytes, path=str(zip_path), skipped=skipped)
 
     # mode == "copy"
-    target.mkdir(parents=True, exist_ok=True)
+    target = _ensure_dest_dir(target)
     count = 0
     total_bytes = 0
     for i, item in enumerate(items):
@@ -131,7 +199,7 @@ def export_photos(
             skipped.append({"photo_id": item.photo_id, "reason": "missing"})
             continue
         dst = target / _dest_rel_path(item, structure)
-        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.parent.mkdir(exist_ok=True)
         try:
             shutil.copy2(item.path, dst)
             total_bytes += dst.stat().st_size

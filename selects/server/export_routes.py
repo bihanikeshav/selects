@@ -24,7 +24,13 @@ from pydantic import BaseModel
 from selects.config import FolderConfig
 from selects.db import init_db, session_scope
 from selects.db.models import Photo, Story, StoryItem, Swipe
-from selects.export import ExportItem, export_photos, preview_xmp_writes, write_xmp_ratings
+from selects.export import (
+    ExportItem,
+    export_photos,
+    preview_xmp_writes,
+    validate_export_target,
+    write_xmp_ratings,
+)
 
 router = APIRouter()
 
@@ -149,6 +155,11 @@ def register_export_routes(app: FastAPI, cfg: FolderConfig) -> None:
 
     @router.post("/api/export")
     def start_export(req: ExportRequest):
+        try:
+            validate_export_target(req.target, req.mode)
+        except ValueError as exc:
+            raise HTTPException(400, detail=str(exc)) from exc
+
         with session_scope(Session) as s:
             items = _resolve_source(s, req.source)
 
