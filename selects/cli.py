@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import click
@@ -7,8 +8,19 @@ import click
 from selects.config import get_folder_config
 from selects.db import init_db
 from selects.gpu import detect_capabilities
-from selects.indexer.orchestrator import index_folder
-from selects.pipeline import run_classical_stage
+from selects.server.pipeline_runner import STAGE_FUNCS, get_stage_callable, run_pipeline_stages
+
+_PASS_CHOICES = ("all", *STAGE_FUNCS)
+
+
+def _default_web_port() -> int:
+    raw = os.environ.get("SELECTS_WEB_PORT")
+    if raw:
+        try:
+            return int(raw)
+        except ValueError:
+            pass
+    return 8000
 
 
 @click.group()
@@ -20,8 +32,7 @@ def main():
 @click.argument("folder", type=click.Path(exists=True, file_okay=False, path_type=Path))
 @click.option(
     "--pass", "pass_",
-    type=click.Choice(["all", "index", "classical", "embed", "tag", "smart_tag", "ram_tag",
-                       "thematic", "date", "story", "face_embed", "moment"]),
+    type=click.Choice(_PASS_CHOICES, case_sensitive=True),
     default="all",
 )
 def index(folder: Path, pass_: str):
@@ -29,85 +40,21 @@ def index(folder: Path, pass_: str):
     cfg = get_folder_config(folder)
     init_db(cfg.db_path)
 
-    if pass_ in ("all", "index"):
-        added = index_folder(
-            cfg,
-            on_progress=lambda i, t, name: click.echo(f"[{i}/{t}] {name}", err=True),
-        )
-        click.echo(f"indexed: {added} new files")
+    if pass_ == "all":
+        def publish(msg: dict) -> None:
+            text = msg.get("message") or msg.get("stage") or ""
+            if text:
+                click.echo(text, err=True)
 
-    if pass_ in ("all", "classical"):
-        processed = run_classical_stage(
-            cfg,
-            on_progress=lambda i, t, name: click.echo(f"[{i}/{t}] classical: {name}", err=True),
-        )
-        click.echo(f"classical: {processed} processed")
+        run_pipeline_stages(cfg, publish)
+        return
 
-    if pass_ == "embed":
-        from selects.ml.embed import run_embedding_stage
-        n = run_embedding_stage(
-            cfg,
-            on_progress=lambda i, t, name: click.echo(f"[{i}/{t}] embed: {name}", err=True),
-        )
-        click.echo(f"embed: {n} processed")
-
-    if pass_ == "tag":
-        from selects.ml.tags import run_tag_stage
-        n = run_tag_stage(
-            cfg,
-            on_progress=lambda i, t, name: click.echo(f"[{i}/{t}] tag: {name}", err=True),
-        )
-        click.echo(f"tag: {n} photos tagged")
-
-    if pass_ == "smart_tag":
-        from selects.ml.smart_clusters import run_smart_cluster_stage
-        n = run_smart_cluster_stage(
-            cfg,
-            on_progress=lambda i, t, name: click.echo(f"[{i}/{t}] smart_tag: {name}", err=True),
-        )
-        click.echo(f"smart_tag: {n} photos clustered")
-
-    if pass_ == "thematic":
-        from selects.ml.thematic_clusters import run_thematic_stage
-        n = run_thematic_stage(cfg, on_progress=None)
-        click.echo(f"thematic: {n} location clusters")
-
-    if pass_ == "date":
-        from selects.ml.thematic_clusters import run_date_stage
-        n = run_date_stage(cfg, on_progress=None)
-        click.echo(f"date: {n} day clusters")
-
-    if pass_ == "ram_tag":
-        from selects.ml.ram_tags import run_ram_tagging_stage
-        n = run_ram_tagging_stage(
-            cfg,
-            on_progress=lambda i, t, name: click.echo(f"[{i}/{t}] ram_tag: {name}", err=True),
-        )
-        click.echo(f"ram_tag: {n} photos tagged")
-
-    if pass_ in ("all", "story"):
-        from selects.ml.stories import run_story_stage
-        n = run_story_stage(
-            cfg,
-            on_progress=lambda i, t, name: click.echo(f"[{i}/{t}] story: {name}", err=True),
-        )
-        click.echo(f"story: {n} stories built")
-
-    if pass_ == "face_embed":
-        from selects.ml.faces import run_face_embedding_stage
-        n = run_face_embedding_stage(
-            cfg,
-            on_progress=lambda i, t, name: click.echo(f"[{i}/{t}] face_embed: {name}", err=True),
-        )
-        click.echo(f"face_embed: {n} photos processed")
-
-    if pass_ == "moment":
-        from selects.ml.moments import run_moment_stage
-        n = run_moment_stage(
-            cfg,
-            on_progress=lambda i, t, name: click.echo(f"[{i}/{t}] moment: {name}", err=True),
-        )
-        click.echo(f"moment: {n} moments built")
+    fn = get_stage_callable(pass_)
+    n = fn(
+        cfg,
+        on_progress=lambda i, t, name: click.echo(f"[{i}/{t}] {pass_}: {name}", err=True),
+    )
+    click.echo(f"{pass_}: {n}")
 
 
 @main.command()
@@ -116,7 +63,7 @@ def index(folder: Path, pass_: str):
     required=False,
     type=click.Path(exists=True, file_okay=False, path_type=Path),
 )
-@click.option("--port", default=8000, type=int)
+@click.option("--port", default=_default_web_port, show_default=8000, type=int)
 @click.option("--host", default="127.0.0.1", type=str)
 @click.option("--no-browser", is_flag=True)
 @click.option("--no-background", is_flag=True, help="Don't auto-run indexer on startup")
@@ -170,6 +117,8 @@ def doctor():
     caps = detect_capabilities()
     click.echo(f"GPU acceleration  : {'yes' if caps.gpu_available else 'no'}")
     click.echo(f"ONNX provider     : {caps.provider} ({caps.device_name})")
+    if caps.installed_providers:
+        click.echo(f"Installed EPs     : {', '.join(caps.installed_providers)}")
     click.echo(f"VRAM              : {caps.vram_total_mb} MB")
     click.echo(f"nvImageCodec      : {'yes' if caps.nvimgcodec_available else 'no'}")
     click.echo(f"cv2.cuda          : {'yes' if caps.cv2_cuda_available else 'no'}")

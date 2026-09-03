@@ -1,6 +1,7 @@
 """Library-registry HTTP endpoints (add / list / activate / delete / index)."""
 from __future__ import annotations
 
+import logging
 import threading
 from pathlib import Path
 from typing import Callable
@@ -15,6 +16,8 @@ from .library_manager import (
     LibraryManager,
 )
 from .pipeline_runner import run_pipeline_stages
+
+log = logging.getLogger(__name__)
 
 
 def register_libraries(
@@ -82,6 +85,12 @@ def register_libraries(
         def worker():
             try:
                 run_pipeline_stages(cfg, publish, should_cancel=manager.should_cancel)
+            except Exception as exc:
+                log.exception("library index failed")
+                try:
+                    publish({"stage": "error", "message": str(exc)})
+                except Exception:
+                    pass
             finally:
                 manager.end_indexing()
 

@@ -179,26 +179,14 @@ def run_incremental_index(
 
     Returns the number of new rows ingested.
     """
-    from selects.indexer.orchestrator import index_folder
-    from selects.pipeline import run_classical_stage
-    from selects.ml.embed import run_embedding_stage
-    from selects.ml.tags import run_tag_stage
-    from selects.ml.stories import run_story_stage
+    from selects.server.pipeline_runner import run_pipeline_stages
 
-    def cb(stage: str):
-        def _progress(i, total, name):
-            if publish:
-                publish({"stage": stage, "current": i, "total": total, "message": name})
+    def _publish(msg: dict) -> None:
+        if publish:
+            publish(msg)
 
-        return _progress
-
-    added = index_folder(cfg, cb("index"), paths=paths)
-    if added:
-        run_classical_stage(cfg, cb("classical"))
-        run_embedding_stage(cfg, cb("embed"))
-        run_tag_stage(cfg, cb("tag"))
-        run_story_stage(cfg, cb("story"))
-    return added
+    counts = run_pipeline_stages(cfg, _publish, paths=paths) or {}
+    return int(counts.get("index", 0))
 
 
 # --------------------------------------------------------------------------- #
@@ -232,6 +220,15 @@ class LibraryWatcher:
 
     def start(self) -> None:
         with self._lock:
+            t = self._thread
+            stopping = self._stop_event.is_set()
+        # stop()+start() must work: join a stopping/dead thread instead of
+        # no-op'ing while it is still in Event.wait(interval).
+        if t is not None and (stopping or not t.is_alive()):
+            t.join(timeout=2.0)
+        with self._lock:
+            if self._thread is not None and not self._thread.is_alive():
+                self._thread = None
             if self.is_running:
                 return
             self._stop_event.clear()
@@ -248,6 +245,12 @@ class LibraryWatcher:
             settings = load_watch_settings(self.cfg)
             settings.enabled = False
             save_watch_settings(self.cfg, settings)
+            t = self._thread
+        if t is not None and t.is_alive():
+            t.join(timeout=2.0)
+        with self._lock:
+            if self._thread is not None and not self._thread.is_alive():
+                self._thread = None
 
     def status(self) -> dict:
         settings = load_watch_settings(self.cfg)

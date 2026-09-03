@@ -22,7 +22,7 @@ class FolderConfig(BaseSettings):
     )
 
     folder: Path
-    web_port: int = 8765
+    web_port: int = 8000
     web_host: str = "127.0.0.1"
 
     # Burst detection

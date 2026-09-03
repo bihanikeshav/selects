@@ -17,6 +17,7 @@ from selects.db import init_db, session_scope
 from selects.db.models import Embedding, PipelineState, Photo
 from selects.ml.onnx_rt import model_session
 from selects.ml.siglip_tokenizer import get_tokenizer
+from selects.pipeline import PipelineCancelled
 
 log = logging.getLogger(__name__)
 
@@ -151,6 +152,8 @@ def run_embedding_stage(
             if on_progress:
                 on_progress(processed, total, f"batch {start // batch_size + 1}")
 
+        except PipelineCancelled:
+            raise
         except Exception as exc:
             log.exception("embed batch failed at start=%d: %s", start, exc)
 

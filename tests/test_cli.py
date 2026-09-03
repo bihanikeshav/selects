@@ -28,6 +28,14 @@ def test_doctor_runs_and_reports():
 
 def test_index_command_indexes(populated_folder):
     runner = CliRunner()
-    result = runner.invoke(main, ["index", str(populated_folder)])
+    result = runner.invoke(main, ["index", str(populated_folder), "--pass", "index"])
     assert result.exit_code == 0
-    assert "indexed" in result.output.lower()
+    assert "index:" in result.output.lower()
+
+
+def test_pass_help_includes_persons_and_video():
+    runner = CliRunner()
+    result = runner.invoke(main, ["index", "--help"])
+    assert result.exit_code == 0
+    assert "persons" in result.output
+    assert "video" in result.output

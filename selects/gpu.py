@@ -1,12 +1,13 @@
 """GPU capability detection for selects.
 
-Reports which ONNX Runtime execution provider the app will actually use (all ML
-runs on ORT now — there is no torch). GPU acceleration means a non-CPU EP is
-available: CUDA (NVIDIA), DirectML (any DX12 GPU on Windows), or CoreML (macOS).
+Reports which ONNX Runtime execution provider SigLIP (the app's primary model)
+will actually use. All ML runs on ORT — there is no torch. ``gpu_available`` is
+True only when SigLIP would run on a non-CPU EP; today the published SigLIP
+graphs are CPU-only (DirectML cannot run their Reshape pattern).
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 # Friendly names for the execution providers we prioritise in onnx_rt.
@@ -23,9 +24,10 @@ class GpuCapabilities:
     """Snapshot of the active ONNX Runtime provider + hardware codec features."""
 
     gpu_available: bool = False
-    provider: Optional[str] = None          # active ORT execution provider id
+    provider: Optional[str] = None          # EP SigLIP would actually use
     device_name: Optional[str] = None       # friendly provider label
     vram_total_mb: Optional[int] = None      # only when an NVML probe succeeds
+    installed_providers: list[str] = field(default_factory=list)  # EPs in this ORT build
 
     # Hardware JPEG/HEIC decode via nvidia-nvimgcodec
     nvimgcodec_available: bool = False
@@ -41,12 +43,24 @@ def detect_capabilities() -> GpuCapabilities:
     # Execution provider via onnxruntime (the one thing that runs models) #
     # ------------------------------------------------------------------ #
     try:
-        from selects.ml.onnx_rt import select_providers  # noqa: PLC0415
+        from selects.ml import onnx_rt  # noqa: PLC0415
 
-        providers = select_providers()
-        caps.provider = providers[0] if providers else None
-        caps.gpu_available = bool(caps.provider) and caps.provider != "CPUExecutionProvider"
-        caps.device_name = _PROVIDER_LABELS.get(caps.provider, caps.provider)
+        caps.installed_providers = list(onnx_rt.available_providers())
+        # Honest: SigLIP is in _CPU_ONLY_MODELS, so the EP the app actually uses
+        # for embeddings is CPU even when DML/CUDA is installed.
+        siglip_cpu_only = (
+            "siglip_vision" in onnx_rt._CPU_ONLY_MODELS
+            or "siglip_text" in onnx_rt._CPU_ONLY_MODELS
+        )
+        if siglip_cpu_only:
+            caps.provider = "CPUExecutionProvider"
+            caps.gpu_available = False
+            caps.device_name = _PROVIDER_LABELS["CPUExecutionProvider"]
+        else:
+            providers = onnx_rt.select_providers()
+            caps.provider = providers[0] if providers else None
+            caps.gpu_available = bool(caps.provider) and caps.provider != "CPUExecutionProvider"
+            caps.device_name = _PROVIDER_LABELS.get(caps.provider, caps.provider)
     except Exception:
         pass
 
