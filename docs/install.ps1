@@ -21,8 +21,8 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
 $binDirs = @("$env:USERPROFILE\.local\bin", "$env:USERPROFILE\.cargo\bin")
 foreach ($d in $binDirs) { if (Test-Path $d) { $env:PATH = "$d;$env:PATH" } }
 
-# 2. Install selects with the on-device AI extra (torch, onnxruntime,
-#    insightface, ...). --force makes a re-run upgrade an existing install.
+# 2. Install selects with the on-device AI extra (onnxruntime,
+#    insightface, sklearn, …). --force makes a re-run upgrade an existing install.
 Say 'Installing selects (pulls the AI stack; first launch also downloads models)...'
 uv tool install --python 3.11 --force "selects[ml]"
 

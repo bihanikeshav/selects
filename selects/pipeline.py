@@ -19,7 +19,7 @@ class PipelineCancelled(Exception):
     """Raised out of a progress callback to unwind a stage when cancelled."""
 
 
-# Re-export ML stages — lazy so torch is not imported at module load time.
+# Re-export ML stages (imported lazily).
 # Callers can do: from selects.pipeline import run_embedding_stage
 def run_embedding_stage(cfg, on_progress=None, batch_size=16):  # noqa: F811
     """Lazy proxy: imports selects.ml.embed.run_embedding_stage on first call."""

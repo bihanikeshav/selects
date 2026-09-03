@@ -30,9 +30,10 @@ dependencies = [
 
 [project.optional-dependencies]
 ml = [
-  # All models run on ONNX Runtime now — no torch, transformers, or the
-  # recognize-anything package. DirectML on Windows (any DX12 GPU incl. iGPU);
-  # plain onnxruntime elsewhere (its CoreML EP covers macOS, CPU everywhere).
+  # All models run on ONNX Runtime — no torch, transformers, or the
+  # recognize-anything package. RAM++ is the ONNX graph in selects-onnx.
+  # Windows extra is onnxruntime-directml (DirectML is listed); SigLIP/RAM++
+  # graphs are forced CPU. Plain onnxruntime elsewhere.
   "onnxruntime-directml>=1.17; sys_platform == 'win32'",
   "onnxruntime>=1.17; sys_platform != 'win32'",
   "sentencepiece>=0.2",       # SigLIP text tokenizer
