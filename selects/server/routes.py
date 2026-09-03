@@ -1,18 +1,10 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections import defaultdict
 from pathlib import Path
 from typing import Optional
-
-# Pre-load torch in the MAIN thread so subsequent imports from FastAPI worker
-# threads don't hit a Windows DLL-load race. Torch's C++ extensions need the
-# host process to have the right PATH set up — that's only reliable when the
-# initial import happens in the main thread.
-try:
-    import torch as _torch_preload  # noqa: F401
-except Exception:
-    pass
 
 log = logging.getLogger(__name__)
 
@@ -27,6 +19,18 @@ from selects.db.models import (
     AestheticScore, ClassicalScore, Embedding, Moment, MomentMember, Photo, PhotoCategory,
     PhotoPerson, PhotoRating, PhotoTag, Story, StoryItem, Visit,
 )
+
+_SHA256_RE = re.compile(r"[0-9a-f]{64}", re.I)
+
+
+def _require_sha256(sha256: str) -> None:
+    if (
+        not _SHA256_RE.fullmatch(sha256 or "")
+        or ".." in sha256
+        or "/" in sha256
+        or "\\" in sha256
+    ):
+        raise HTTPException(400, "invalid sha256")
 
 
 class PhotoOut(BaseModel):
@@ -233,11 +237,11 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
         collapse: str = Query("moments", description="'moments' collapses to primaries only; 'none' returns all"),
         sort: str = Query(
             "taken_at",
-            description="'taken_at' (default), 'aesthetic' (combined NIMA+AP descending), 'iqa', 'random'",
+            description="'taken_at' (default), 'aesthetic' (CLIP-IQA descending, nulls last), 'iqa', 'random'",
         ),
         min_aesthetic_pct: float = Query(
             0.0, ge=0.0, le=100.0,
-            description="Drop photos whose combined-aesthetic percentile is below this value",
+            description="Drop photos whose CLIP-IQA percentile is below this value",
         ),
         quality: Optional[str] = Query(
             None,
@@ -267,10 +271,9 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
                     moment_of[mm_pid] = (mm_mid, mom_size, is_primary)
 
             base = (
-                select(Photo, ClassicalScore, Embedding, AestheticScore)
+                select(Photo, ClassicalScore, Embedding)
                 .join(ClassicalScore, Photo.id == ClassicalScore.photo_id, isouter=True)
                 .join(Embedding, Photo.id == Embedding.photo_id, isouter=True)
-                .join(AestheticScore, Photo.id == AestheticScore.photo_id, isouter=True)
             )
             if rejected is True:
                 base = base.where(ClassicalScore.auto_reject.is_(True))
@@ -297,27 +300,27 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
             elif quality == "out_of_focus":
                 base = base.where(ClassicalScore.blur < 150.0)
             elif quality == "blurry_keepers":
-                _combined = (
-                    cfg.ap_weight * AestheticScore.ap25_score
-                    + cfg.nima_weight * AestheticScore.nima_score
+                from selects.ml.curation import compute_library_threshold
+                iqa_floor = compute_library_threshold(
+                    s, pct_floor=cfg.aesthetic_library_pct,
                 )
-                base = base.where(
-                    ClassicalScore.blur < 400.0, ClassicalScore.blur >= 150.0, _combined >= 5.8
-                )
+                keepers = [
+                    ClassicalScore.blur < 400.0,
+                    ClassicalScore.blur >= 150.0,
+                    Embedding.aesthetic_iqa.isnot(None),
+                ]
+                if iqa_floor is not None:
+                    keepers.append(Embedding.aesthetic_iqa >= iqa_floor)
+                base = base.where(*keepers)
 
             # Aesthetic-percentile floor needs the library distribution
-            aesthetic_floor_val: Optional[float] = None
             if min_aesthetic_pct > 0:
                 from selects.ml.curation import compute_library_threshold
                 aesthetic_floor_val = compute_library_threshold(
                     s, pct_floor=min_aesthetic_pct,
                 )
                 if aesthetic_floor_val is not None:
-                    combined_expr = (
-                        cfg.ap_weight * AestheticScore.ap25_score
-                        + cfg.nima_weight * AestheticScore.nima_score
-                    )
-                    base = base.where(combined_expr >= aesthetic_floor_val)
+                    base = base.where(Embedding.aesthetic_iqa >= aesthetic_floor_val)
 
             # Collapse: drop non-primary moment members in SQL, before offset/limit,
             # so pagination doesn't lose photos across page boundaries.
@@ -331,21 +334,18 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
                     | (Moment.primary_photo_id == Photo.id)
                 )
 
+            # Sort's null policy is a filter (iqa) or not (aesthetic = nulls last).
+            # Count AFTER every filter, then order and page.
+            if sort == "iqa":
+                base = base.where(Embedding.aesthetic_iqa.isnot(None))
+
             total = s.execute(
                 select(_func.count()).select_from(base.subquery())
             ).scalar_one()
 
-            # Sort
             if sort == "aesthetic":
-                combined_expr = (
-                    cfg.ap_weight * AestheticScore.ap25_score
-                    + cfg.nima_weight * AestheticScore.nima_score
-                )
-                base = base.where(AestheticScore.ap25_score.isnot(None))
-                base = base.where(AestheticScore.nima_score.isnot(None))
-                base = base.order_by(combined_expr.desc())
+                base = base.order_by(Embedding.aesthetic_iqa.desc().nulls_last())
             elif sort == "iqa":
-                base = base.where(Embedding.aesthetic_iqa.isnot(None))
                 base = base.order_by(Embedding.aesthetic_iqa.desc())
             elif sort == "random":
                 base = base.order_by(_func.random())
@@ -355,7 +355,7 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
             rows = s.execute(base.offset(offset).limit(limit)).all()
 
             items = []
-            for photo, score, emb, aest in rows:
+            for photo, score, emb in rows:
                 # Collapse: skip non-primary moment members
                 if collapse == "moments" and photo.id in moment_of:
                     _, _, is_primary = moment_of[photo.id]
@@ -930,11 +930,11 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
 
             return _story_to_out(st, items_rows, visits_rows, cover_sha_map, primary_tags)
 
-    @app.get("/api/thumb/{sha256}")
+    @app.get("/api/thumb/{sha256:path}")
     def thumb(sha256: str):
         return _serve_image_for(cfg, sha256, kind="thumb")
 
-    @app.get("/api/preview/{sha256}")
+    @app.get("/api/preview/{sha256:path}")
     def preview(sha256: str):
         return _serve_image_for(cfg, sha256, kind="preview")
 
@@ -953,7 +953,7 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
             pe = s.get(PhotoEdit, photo.id)
             return {"params": json.loads(pe.params) if pe else None}
 
-    @app.post("/api/editor/save/{sha256}")
+    @app.post("/api/editor/save/{sha256:path}")
     async def editor_save(
         sha256: str,
         params: str = Form(...),
@@ -964,6 +964,7 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
 
         from selects.db.models import PhotoEdit
 
+        _require_sha256(sha256)
         data = await image.read()
         with session_scope(Session) as s:
             photo = s.query(Photo).filter(Photo.sha256 == sha256).first()
@@ -978,15 +979,16 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
             s.add(pe)
         return {"ok": True}
 
-    @app.get("/api/editor/result/{sha256}")
+    @app.get("/api/editor/result/{sha256:path}")
     def editor_result(sha256: str):
         """Serve the baked edited JPEG if one exists, else 404."""
+        _require_sha256(sha256)
         out = cfg.state_dir / "edits" / f"{sha256}.jpg"
         if not out.exists():
             raise HTTPException(404, detail="no edit")
         return FileResponse(str(out), media_type="image/jpeg")
 
-    @app.get("/api/enhance/{sha256}")
+    @app.get("/api/enhance/{sha256:path}")
     def enhance(
         sha256: str,
         preset: str = Query("film"),
@@ -998,6 +1000,7 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
 
         Cached per-(sha, preset, grade, straighten).
         """
+        _require_sha256(sha256)
         from io import BytesIO
         from PIL import Image
         from selects.classical.aesthetic_grade import aesthetic_grade
@@ -1199,12 +1202,13 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
             },
         }
 
-    @app.get("/api/doctor/histogram/{sha256}")
+    @app.get("/api/doctor/histogram/{sha256:path}")
     def doctor_histogram(sha256: str):
         """Return per-channel + luminance histogram for a photo (64 bins each).
 
         Used by the ScoresCard / Doctor preview to show RGB+luma distribution.
         """
+        _require_sha256(sha256)
         from PIL import Image as _PILImage
         import numpy as _np
         preview_path = cfg.previews_dir / f"{sha256}.jpg"
@@ -2479,6 +2483,7 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
                         "thumb_url": f"/api/thumb/{c.sha256}",
                         "preview_url": f"/api/preview/{c.sha256}",
                         "combined": c.combined,
+                        "iqa": c.iqa,
                         "ap25": c.ap25,
                         "nima": c.nima,
                         "moment_id": c.moment_id,
@@ -2578,6 +2583,7 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
 
 
 def _serve_image_for(cfg: FolderConfig, sha256: str, kind: str):
+    _require_sha256(sha256)
     parent = cfg.thumbs_dir if kind == "thumb" else cfg.previews_dir
     path = parent / f"{sha256}.jpg"
     if not path.exists():
