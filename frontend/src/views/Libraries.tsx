@@ -169,7 +169,12 @@ export default function Libraries() {
                         className={"btn " + (confirmId === l.id ? "btn-filled lib-danger" : "btn-text")}
                         onClick={() => onRemove(l.id)}
                         onBlur={() => confirmId === l.id && setConfirmId(null)}
-                        disabled={busy}
+                        disabled={busy || (isActive && libs.length > 1)}
+                        title={
+                          isActive && libs.length > 1
+                            ? "Open another library before removing the active one"
+                            : undefined
+                        }
                       >
                         {confirmId === l.id ? "Really remove?" : "Remove"}
                       </button>

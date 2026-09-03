@@ -44,10 +44,11 @@ const VIEWS: { key: View; label: string; hint: string }[] = [
 export default function ModeViewBar() {
   const nav = useNavigate();
   const { pathname } = useLocation();
+  const mode = modeFromPath(pathname);
   const view = viewFromPath(pathname);
 
-  // Sort-only view switcher now — All / Clusters / Stories. The Sort↔Curated
-  // toggle was removed: Curated is a standalone page reached from the rail.
+  // View switcher stays in the current mode (Sort or Curated). Mode itself
+  // is chosen from the rail, not this bar.
   return (
     <nav className="mode-view-bar" aria-label="View">
       <div className="mvb-group" role="tablist" aria-label="View">
@@ -57,7 +58,7 @@ export default function ModeViewBar() {
             role="tab"
             aria-selected={view === v.key}
             className={`mvb-view${view === v.key ? " is-active" : ""}`}
-            onClick={() => nav(routeFor("cull", v.key))}
+            onClick={() => nav(routeFor(mode, v.key))}
             title={v.hint}
           >
             {v.label}

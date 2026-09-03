@@ -1,12 +1,12 @@
 /**
- * Bottom keyboard hint bar. Mirrors the keys handled in BurstCull.tsx and the
- * useCullKeys layer, as one consistent single-line chip row grouped by
- * decisions / edit / view / navigation. Kept to a single line so it never wraps
- * and clips against the fixed-height footer; scrolls horizontally if too narrow.
+ * Bottom keyboard hint bar. Cull variant mirrors BurstCull / useCullKeys.
+ * Browse variant is for Search/Map/detail lightboxes — no keep/reject/burst
+ * chips, just Esc and arrows. Kept to a single line so it never wraps.
  */
 type Chip = { keys: string[]; label: string; tone?: "positive" | "danger" | "primary" };
+type Variant = "cull" | "browse";
 
-const GROUPS: Chip[][] = [
+const CULL_GROUPS: Chip[][] = [
   [
     { keys: ["C"], label: "keep", tone: "positive" },
     { keys: ["X"], label: "reject", tone: "danger" },
@@ -30,10 +30,18 @@ const GROUPS: Chip[][] = [
   ],
 ];
 
-export default function KbdFooter() {
+const BROWSE_GROUPS: Chip[][] = [
+  [
+    { keys: ["Esc"], label: "close" },
+    { keys: ["←", "→"], label: "prev / next" },
+  ],
+];
+
+export default function KbdFooter({ variant = "cull" }: { variant?: Variant }) {
+  const groups = variant === "browse" ? BROWSE_GROUPS : CULL_GROUPS;
   return (
     <footer className="kbd-footer">
-      {GROUPS.map((group, gi) => (
+      {groups.map((group, gi) => (
         <div className="kbd-group" key={gi}>
           {group.map((chip) => (
             <span
@@ -48,7 +56,7 @@ export default function KbdFooter() {
               {chip.label}
             </span>
           ))}
-          {gi < GROUPS.length - 1 && (
+          {gi < groups.length - 1 && (
             <span className="kbd-divider" aria-hidden="true" />
           )}
         </div>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { libraryStatus } from "./api/client";
 import TitleBar from "./components/TitleBar";
@@ -20,22 +20,22 @@ import Stories from "./views/Stories";
 import Videos from "./views/Videos";
 
 /**
- * On first load, ask the backend whether any library exists. If none does,
- * bounce the user to onboarding (unless they're already there). Runs once.
+ * Ask the backend whether any library exists. If none does, bounce the user
+ * to onboarding (unless they're already there or on /libraries). Re-checks
+ * when the path changes so a later empty-library state still gates.
+ *
+ * When a library already exists, leave /onboarding alone — the user may be
+ * adding a second library, or sitting on an in-progress index.
  */
 function OnboardingGate() {
   const navigate = useNavigate();
   const location = useLocation();
-  const [checked, setChecked] = useState(false);
 
   useEffect(() => {
-    if (checked) return;
     let cancelled = false;
     libraryStatus()
       .then((s) => {
         if (cancelled) return;
-        // Let the user reach the libraries screen to open an existing project
-        // instead of being trapped on onboarding.
         const allowed = ["/onboarding", "/libraries"];
         if (s.needs_onboarding && !allowed.includes(location.pathname)) {
           navigate("/onboarding", { replace: true });
@@ -43,15 +43,11 @@ function OnboardingGate() {
       })
       .catch(() => {
         /* backend unreachable — leave the app as-is */
-      })
-      .finally(() => {
-        if (!cancelled) setChecked(true);
       });
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [location.pathname, navigate]);
 
   return null;
 }
@@ -85,12 +81,11 @@ export default function App() {
         <Route path="/cull/clusters/:tag" element={<ClusterDetail />} />
         <Route path="/cull/stories" element={<Stories />} />
 
-        {/* Curated mode — three sub-views */}
+        {/* Curated mode — liked grid; clusters/stories stay on these routes */}
         <Route path="/curated" element={<Curated />} />
-        {/* Curated is standalone now — its old sub-views live only under Sort. */}
-        <Route path="/curated/clusters" element={<Navigate to="/cull/clusters" replace />} />
-        <Route path="/curated/clusters/:tag" element={<Navigate to="/cull/clusters" replace />} />
-        <Route path="/curated/stories" element={<Navigate to="/cull/stories" replace />} />
+        <Route path="/curated/clusters" element={<Clusters />} />
+        <Route path="/curated/clusters/:tag" element={<ClusterDetail />} />
+        <Route path="/curated/stories" element={<Stories />} />
 
         {/* Cross-cutting (independent of mode) */}
         <Route path="/people" element={<Persons />} />

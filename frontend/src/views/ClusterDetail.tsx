@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { useParams, useSearchParams, Link } from "react-router-dom";
+import { useLocation, useParams, useSearchParams, Link } from "react-router-dom";
 
 import { listClusterPhotos } from "../api/client";
 import type { Photo } from "../api/types";
 import KbdFooter from "../components/KbdFooter";
+import { modeFromPath } from "../components/ModeViewBar";
 import Rail from "../components/Rail";
 import Viewer from "../components/Viewer";
 import PhotoEditor from "../editor/PhotoEditor";
@@ -12,9 +13,12 @@ import Topbar from "../components/Topbar";
 
 export default function ClusterDetail() {
   const { tag = "" } = useParams<{ tag: string }>();
+  const { pathname } = useLocation();
+  const mode = modeFromPath(pathname);
   const [params] = useSearchParams();
   const sourceParam = params.get("source");
   const source = sourceParam === null ? "thematic" : sourceParam;
+  const clustersHref = `${mode === "curated" ? "/curated" : "/cull"}/clusters?source=${encodeURIComponent(source)}`;
 
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -75,7 +79,7 @@ export default function ClusterDetail() {
     setSelected(next);
   }
 
-  function selectAll() { setSelected(new Set(photos.map((p) => p.sha256))); }
+  function selectAll() { setSelected(new Set(visiblePhotos.map((p) => p.sha256))); }
   function clearSelection() { setSelected(new Set()); }
 
   function openInEditor() {
@@ -97,7 +101,7 @@ export default function ClusterDetail() {
         <div className="cluster-detail-wrap">
           <div className="cluster-detail-toolbar">
             <Link
-              to={`/cull/clusters?source=${encodeURIComponent(source)}`}
+              to={clustersHref}
               className="btn btn-text"
               style={{ paddingLeft: 8 }}
             >
@@ -107,7 +111,7 @@ export default function ClusterDetail() {
 
             <div style={{ flex: 1 }} />
 
-            <button className="btn btn-text" onClick={selectAll} disabled={photos.length === 0}>Select all</button>
+            <button className="btn btn-text" onClick={selectAll} disabled={visiblePhotos.length === 0}>Select all</button>
             <button className="btn btn-text" onClick={clearSelection} disabled={selected.size === 0}>Clear</button>
 
             <button
@@ -187,7 +191,7 @@ export default function ClusterDetail() {
           </div>
         </div>
 
-        <KbdFooter />
+        <KbdFooter variant="browse" />
       </div>
 
       {lightbox !== null && visiblePhotos[lightbox] && (

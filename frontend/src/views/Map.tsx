@@ -15,12 +15,22 @@ interface MapMarker {
   place: string | null;
 }
 
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function photoIcon(url: string, count: number): L.DivIcon {
+  const src = escapeHtml(url);
   return L.divIcon({
     className: "photo-marker",
     html: `
       <div style="position:relative;width:56px;height:56px;">
-        <img src="${url}" style="width:56px;height:56px;object-fit:cover;border-radius:8px;
+        <img src="${src}" style="width:56px;height:56px;object-fit:cover;border-radius:8px;
           border:3px solid #fff;box-shadow:0 4px 14px rgba(0,0,0,.4);"/>
         <span style="position:absolute;bottom:-4px;right:-4px;background:#1A5DCC;color:#fff;
           font-family:'Google Sans Code',monospace;font-size:11px;font-weight:700;
@@ -72,13 +82,14 @@ export default function MapView() {
 
     markers.forEach((m) => {
       const marker = L.marker([m.lat, m.lon], { icon: photoIcon(m.cover_url, m.count) }).addTo(mapRef.current!);
-      const place = m.place || "Unnamed location";
+      const place = escapeHtml(m.place || "Unnamed location");
+      const cover = escapeHtml(m.cover_url);
       const clusterLink = m.place
         ? `<a href="/cull/clusters/${encodeURIComponent(m.place)}" style="color:#1A5DCC;font-size:12px;">Open cluster →</a>`
         : "";
       marker.bindPopup(`
         <div style="min-width:160px;">
-          <img src="${m.cover_url}" style="width:100%;border-radius:6px;" alt=""/>
+          <img src="${cover}" style="width:100%;border-radius:6px;" alt=""/>
           <div style="margin-top:6px;font-family:'Google Sans Display',sans-serif;font-weight:500;">${place}</div>
           <div style="font-family:'Google Sans Code',monospace;font-size:11px;color:#666;">
             ${m.count} photo${m.count !== 1 ? "s" : ""} · ${m.lat.toFixed(4)}, ${m.lon.toFixed(4)}
@@ -152,7 +163,7 @@ export default function MapView() {
           </div>
         </div>
 
-        <KbdFooter />
+        <KbdFooter variant="browse" />
       </div>
     </div>
   );
