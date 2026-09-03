@@ -24,7 +24,7 @@ type Row = {
 type SortKey = keyof Scores;
 
 const SCORE_LABELS: Record<SortKey, string> = {
-  iqa: "CLIP-IQA",
+  iqa: "IQA",
   nima: "NIMA",
   ap25: "AP V2.5",
   personal: "Personal",
@@ -102,7 +102,7 @@ function formatScore(v: number | null | undefined): string {
 export default function CalibrateDashboard() {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
-  const [sortKey, setSortKey] = useState<SortKey>("personal");
+  const [sortKey, setSortKey] = useState<SortKey>("iqa");
   const [sortDesc, setSortDesc] = useState(true);
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null);
 
@@ -352,7 +352,7 @@ export default function CalibrateDashboard() {
                       }}
                     >
                       <div style={{ display: "flex", justifyContent: "space-between" }}>
-                        <span>iqa</span>
+                        <span style={{ color: SCORE_COLORS.iqa }}>IQA</span>
                         <span style={{ color: "var(--md-on-surface)" }}>{formatScore(r.scores.iqa)}</span>
                       </div>
                       <div style={{ display: "flex", justifyContent: "space-between" }}>

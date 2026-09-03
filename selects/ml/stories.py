@@ -222,38 +222,50 @@ def run_story_stage(
                 ))
             n_stories += 1
 
-    # ── Cross-day place disambiguation ───────────────────────────────────────
-    # Same-name visits across different days may still be far apart geographically.
-    # Append numeric suffixes so /best/place/<name> doesn't lump distant clusters.
-    _disambiguate_visits_globally(Session, min_separation_km=2.0)
+    # Place/pattern/people run after day stories are committed. A late
+    # PipelineCancelled must not unwind those rows (they are already swapped).
+    from selects.pipeline import PipelineCancelled
 
-    # ── Per-place stories ────────────────────────────────────────────────────
-    n_stories += _build_place_stories(cfg, Session, rows, on_progress)
-    # ── Per-pattern stories ──────────────────────────────────────────────────
-    n_stories += _build_pattern_stories(cfg, Session, rows, on_progress)
-    # ── Per-people stories — use UN-deduped rows so couple shots survive ────
-    with session_scope(Session) as s:
-        all_rows = (
-            s.query(
-                Photo.id,
-                Photo.taken_at,
-                Photo.sha256,
-                Photo.gps_lat,
-                Photo.gps_lon,
-                ClassicalScore.blur,
-                ClassicalScore.faces_count,
-                ClassicalScore.auto_reject,
-                Embedding.siglip,
-                Embedding.aesthetic_iqa,
+    try:
+        # ── Cross-day place disambiguation ───────────────────────────────────
+        # Same-name visits across different days may still be far apart geographically.
+        # Append numeric suffixes so /best/place/<name> doesn't lump distant clusters.
+        _disambiguate_visits_globally(Session, min_separation_km=2.0)
+
+        if on_progress:
+            on_progress(total_days, max(total_days, 1), "places")
+        n_stories += _build_place_stories(cfg, Session, rows, on_progress)
+        if on_progress:
+            on_progress(total_days, max(total_days, 1), "patterns")
+        n_stories += _build_pattern_stories(cfg, Session, rows, on_progress)
+        # ── Per-people stories — use UN-deduped rows so couple shots survive ─
+        with session_scope(Session) as s:
+            all_rows = (
+                s.query(
+                    Photo.id,
+                    Photo.taken_at,
+                    Photo.sha256,
+                    Photo.gps_lat,
+                    Photo.gps_lon,
+                    ClassicalScore.blur,
+                    ClassicalScore.faces_count,
+                    ClassicalScore.auto_reject,
+                    Embedding.siglip,
+                    Embedding.aesthetic_iqa,
+                )
+                .join(Embedding, Embedding.photo_id == Photo.id)
+                .outerjoin(ClassicalScore, ClassicalScore.photo_id == Photo.id)
+                .filter(Photo.taken_at.is_not(None))
+                .order_by(Photo.taken_at)
+                .all()
             )
-            .join(Embedding, Embedding.photo_id == Photo.id)
-            .outerjoin(ClassicalScore, ClassicalScore.photo_id == Photo.id)
-            .filter(Photo.taken_at.is_not(None))
-            .order_by(Photo.taken_at)
-            .all()
-        )
-    all_rows = [r for r in all_rows if not (r.auto_reject or False)]
-    n_stories += _build_people_stories(cfg, Session, all_rows, on_progress)
+        all_rows = [r for r in all_rows if not (r.auto_reject or False)]
+        if on_progress:
+            on_progress(total_days, max(total_days, 1), "people")
+        n_stories += _build_people_stories(cfg, Session, all_rows, on_progress)
+    except PipelineCancelled:
+        log.info("story stage: cancelled after committing day stories; keeping them")
+        raise
 
     log.info("story stage: built %d stories total", n_stories)
     return n_stories

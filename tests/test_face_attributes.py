@@ -33,6 +33,7 @@ from selects.ml.face_attributes import (
     estimate_pose_from_kps,
     eyes_open_score,
     face_quality_penalty,
+    photo_eyes_open_ratio,
     rollup_face_quality,
 )
 
@@ -73,6 +74,22 @@ def test_eyes_open_score_open_vs_closed() -> None:
     assert open_score > 0.8
     assert closed_score < 0.1
     assert closed_score < EYES_CLOSED_THRESHOLD < open_score
+
+
+def test_photo_eyes_open_ratio_from_landmarks() -> None:
+    from types import SimpleNamespace
+
+    open_lmk, kps = _synthetic_landmarks(eye_ratio=0.35)
+    closed_lmk, _ = _synthetic_landmarks(eye_ratio=0.05)
+    open_face = SimpleNamespace(kps=kps, landmark_2d_106=open_lmk)
+    closed_face = SimpleNamespace(kps=kps, landmark_2d_106=closed_lmk)
+    haar_face = SimpleNamespace(kps=None, landmark_2d_106=None)
+
+    assert photo_eyes_open_ratio([]) is None
+    assert photo_eyes_open_ratio([haar_face]) is None
+    assert photo_eyes_open_ratio([open_face]) == 1.0
+    assert photo_eyes_open_ratio([closed_face]) == 0.0
+    assert photo_eyes_open_ratio([open_face, closed_face]) == 0.5
 
 
 def test_eyes_open_score_intermediate_is_monotonic() -> None:

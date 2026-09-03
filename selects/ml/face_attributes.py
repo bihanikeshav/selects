@@ -190,6 +190,28 @@ def compute_face_attributes(
 
 # ── photo-level rollups ───────────────────────────────────────────────────────
 
+def photo_eyes_open_ratio(faces: Iterable) -> Optional[float]:
+    """Fraction of scored faces whose eyes are open.
+
+    A face is scored only when it has 5-point ``kps`` and 106-pt landmarks
+    (InsightFace). Haar boxes have neither, so this returns None rather than
+    advertising 1.0 with no closed-eye signal.
+    """
+    scored: list[float] = []
+    for f in faces:
+        kps = getattr(f, "kps", None)
+        lmk = getattr(f, "landmark_2d_106", None)
+        if kps is None or lmk is None:
+            continue
+        try:
+            scored.append(eyes_open_score(lmk, kps))
+        except Exception:
+            log.debug("eyes_open_ratio: score failed", exc_info=True)
+    if not scored:
+        return None
+    return sum(1.0 for e in scored if e >= EYES_CLOSED_THRESHOLD) / len(scored)
+
+
 def rollup_face_quality(faces: Iterable[FaceAttrs]) -> dict:
     """Photo-level rollups over per-face attributes.
 

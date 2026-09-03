@@ -126,7 +126,7 @@ def run_app(host: str = "127.0.0.1", port: int = 8000) -> None:
             manager.activate(active_id)
         except Exception:  # noqa: BLE001 — stale/removed active library is non-fatal
             pass
-    app = build_app(manager=manager, run_background=True)
+    app = build_app(manager=manager, run_background=True, bind_host=host)
 
     url = f"http://{host}:{port}"
 

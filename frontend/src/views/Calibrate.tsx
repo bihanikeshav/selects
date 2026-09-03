@@ -32,7 +32,7 @@ type Agreement = {
 
 const AGREEMENT_KEYS = ["iqa", "nima", "ap25", "combined", "personal"] as const;
 const AGREEMENT_LABELS: Record<string, string> = {
-  iqa: "CLIP-IQA",
+  iqa: "IQA",
   nima: "NIMA",
   ap25: "AP V2.5",
   combined: "NIMA+AP",
@@ -199,7 +199,7 @@ export default function Calibrate() {
         <PageHeader
           context="aesthetic calibration"
           title="Calibrate"
-          subtitle="Rescue from the bottom of NIMA + AP V2.5 — click the photos that are actually good; they'll train the personal model. Unclicked = confirmed bad."
+          subtitle="Rescue from the bottom of IQA — click the photos that are actually good; they'll train the personal model. Unclicked = confirmed bad."
           actions={
             <>
               <div style={{ color: "var(--md-on-surface-var)", fontSize: 12, fontFamily: "var(--font-mono)" }}>
@@ -241,7 +241,7 @@ export default function Calibrate() {
                   fontWeight: 500,
                 }}
               >
-                Worst by combined score
+                Worst by IQA
               </h2>
               <span style={{ fontSize: 12, color: "var(--md-on-surface-var)" }}>
                 {photos.length} photos · {flipped.size} rescued
@@ -315,7 +315,7 @@ export default function Calibrate() {
                           transition: "transform 90ms ease",
                           transform: isFlipped ? "scale(0.97)" : "scale(1)",
                         }}
-                        title={`combined ${p.scores.combined?.toFixed(0) ?? "—"} · nima ${p.scores.nima?.toFixed(2) ?? "—"} · ap25 ${p.scores.ap25?.toFixed(2) ?? "—"}`}
+                        title={`IQA ${p.scores.iqa?.toFixed(3) ?? "—"} · nima ${p.scores.nima?.toFixed(2) ?? "—"} · ap25 ${p.scores.ap25?.toFixed(2) ?? "—"}`}
                       >
                         <img
                           src={p.thumb_url}
@@ -377,7 +377,7 @@ export default function Calibrate() {
                             fontFamily: "var(--font-mono)",
                           }}
                         >
-                          {p.scores.combined?.toFixed(0) ?? "—"}
+                          {p.scores.iqa != null ? p.scores.iqa.toFixed(2) : "—"}
                         </span>
                         <span
                           style={{
@@ -524,7 +524,7 @@ export default function Calibrate() {
                 }}
               >
                 <li>
-                  These are the photos NIMA+AP scored lowest. Most are genuinely bad.
+                  These are the photos IQA scored lowest. Most are genuinely bad.
                 </li>
                 <li>
                   Click any photo that's actually good — it becomes a rescue.
@@ -553,8 +553,8 @@ export default function Calibrate() {
             >
               {toast || (
                 <span style={{ color: "var(--md-on-surface-var)" }}>
-                  Ready. Score top right of each photo = combined NIMA+AP percentile.
-                  Double-click any thumb to enlarge.
+                  Ready. Score top right of each photo = IQA.
+                  NIMA/AP cells may be empty. Double-click any thumb to enlarge.
                 </span>
               )}
             </div>
@@ -619,9 +619,9 @@ export default function Calibrate() {
                 }}
               >
                 <span>
-                  combined{" "}
+                  IQA{" "}
                   <span style={{ color: "#fff" }}>
-                    {p.scores.combined?.toFixed(0) ?? "—"}
+                    {p.scores.iqa?.toFixed(3) ?? "—"}
                   </span>
                 </span>
                 <span>
@@ -634,12 +634,6 @@ export default function Calibrate() {
                   ap25{" "}
                   <span style={{ color: "#fff" }}>
                     {p.scores.ap25?.toFixed(2) ?? "—"}
-                  </span>
-                </span>
-                <span>
-                  iqa{" "}
-                  <span style={{ color: "#fff" }}>
-                    {p.scores.iqa?.toFixed(3) ?? "—"}
                   </span>
                 </span>
               </div>

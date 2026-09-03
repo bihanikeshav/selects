@@ -108,3 +108,20 @@ def test_path_upsert_on_content_change_resets_pipeline(tmp_path):
         assert ps.vl_done is False
         assert ps.ordering_done is False
         assert (cfg.thumbs_dir / f"{photo.sha256}.jpg").exists()
+
+
+def test_index_folder_reports_unreadable_files(tmp_path):
+    shutil.copy(FIXTURES_DIR / "small.jpg", tmp_path / "ok.jpg")
+    (tmp_path / "bad.jpg").write_bytes(b"not a jpeg")
+    cfg = get_folder_config(tmp_path)
+    messages: list[tuple[int, int, str]] = []
+
+    n = index_folder(cfg, on_progress=lambda i, t, name: messages.append((i, t, name)))
+
+    assert n == 1
+    Session = init_db(cfg.db_path)
+    with session_scope(Session) as s:
+        assert s.query(Photo).count() == 1
+    fail_msgs = [name for _, _, name in messages if "could not be read" in name]
+    assert fail_msgs
+    assert fail_msgs[-1].startswith("1 ")
