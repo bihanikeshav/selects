@@ -3,20 +3,45 @@
 // once a stage is actually processing we prefer its measured live rate.
 const PER_PHOTO_SEC: Record<string, { cpu: number; gpu: number }> = {
   index: { cpu: 0.03, gpu: 0.03 },
+  video: { cpu: 0.08, gpu: 0.05 },
   classical: { cpu: 0.12, gpu: 0.08 },
   embed: { cpu: 0.9, gpu: 0.12 },
   tag: { cpu: 0.5, gpu: 0.08 },
+  ram_tag: { cpu: 0.8, gpu: 0.12 },
+  smart_tag: { cpu: 0.15, gpu: 0.08 },
+  face_embed: { cpu: 0.4, gpu: 0.08 },
+  persons: { cpu: 0.02, gpu: 0.02 },
+  moment: { cpu: 0.02, gpu: 0.02 },
   story: { cpu: 0.02, gpu: 0.02 },
+  thematic: { cpu: 0.02, gpu: 0.02 },
+  date: { cpu: 0.01, gpu: 0.01 },
 };
 
-export const STAGE_SEQUENCE = ["index", "classical", "embed", "tag", "story"];
+export const STAGE_SEQUENCE = [
+  "index",
+  "video",
+  "classical",
+  "embed",
+  "tag",
+  "ram_tag",
+  "smart_tag",
+  "face_embed",
+  "persons",
+  "moment",
+  "story",
+  "thematic",
+  "date",
+];
 
 export type Backend = "cpu" | "gpu";
 
 /** Rough total processing time for `n` photos on the given backend. */
 export function estimateTotalSeconds(n: number, mode: Backend): number {
   if (!n) return 0;
-  return STAGE_SEQUENCE.reduce((s, st) => s + n * PER_PHOTO_SEC[st][mode], 0);
+  return STAGE_SEQUENCE.reduce((s, st) => {
+    const cost = PER_PHOTO_SEC[st]?.[mode] ?? 0;
+    return s + n * cost;
+  }, 0);
 }
 
 /**
@@ -40,13 +65,14 @@ export function estimateRemainingSeconds(opts: {
     const rate = current / stageElapsedSec; // items/sec, measured
     curRemaining = rate > 0 ? (total - current) / rate : 0;
   } else {
-    curRemaining = (n || total) * PER_PHOTO_SEC[stage][mode];
+    const cost = PER_PHOTO_SEC[stage]?.[mode] ?? 0.02;
+    curRemaining = (n || total) * cost;
   }
 
-  const future = STAGE_SEQUENCE.slice(idx + 1).reduce(
-    (s, st) => s + (n || total) * PER_PHOTO_SEC[st][mode],
-    0,
-  );
+  const future = STAGE_SEQUENCE.slice(idx + 1).reduce((s, st) => {
+    const cost = PER_PHOTO_SEC[st]?.[mode] ?? 0;
+    return s + (n || total) * cost;
+  }, 0);
   return Math.max(0, curRemaining + future);
 }
 

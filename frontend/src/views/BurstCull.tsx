@@ -64,6 +64,9 @@ export default function BurstCull() {
   const [quality, setQuality] = useState<
     null | "underexposed" | "overexposed" | "out_of_focus" | "blurry_keepers"
   >(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const pagingRef = useRef(false);
+  const exhaustedRef = useRef(false);
 
   // Moment state: when a photo has a moment, we may expand it
   const [expandedMoment, setExpandedMoment] = useState<Moment | null>(null);
@@ -86,7 +89,11 @@ export default function BurstCull() {
 
   useEffect(() => {
     let cancelled = false;
+    pagingRef.current = false;
+    exhaustedRef.current = false;
     setLoadState("loading");
+    setLoadError(null);
+    setCompareSel([]);
     // When filtering to a quality bucket, don't collapse moments — we want every
     // matching photo, not just burst primaries.
     listPhotos({
@@ -97,29 +104,69 @@ export default function BurstCull() {
     })
       .then((data) => {
         if (cancelled) return;
-        if (data.items.length === 0) {
-          setLoadState("empty");
-        } else {
-          setPhotos(data.items);
-          setTotal(data.total);
-          setIdx(0);
-          setLoadState("loaded");
-        }
+        setPhotos(data.items);
+        setTotal(data.total);
+        setIdx(0);
+        setLoadState(data.items.length === 0 ? "empty" : "loaded");
       })
-      .catch(() => {
-        if (!cancelled) setLoadState("error");
+      .catch((e) => {
+        if (cancelled) return;
+        setPhotos([]);
+        setTotal(0);
+        setLoadError(e instanceof Error ? e.message : String(e));
+        setLoadState("error");
       });
     return () => { cancelled = true; };
   }, [sortMode, quality]);
 
-  // Reset moment expansion, per-photo edit toggles and the compare
-  // selection when navigating to a different photo/group.
+  // Reset moment expansion when navigating to a different photo/group.
+  // compareSel is kept across idx so V / shift-click can span nearby frames.
   useEffect(() => {
     setExpandedMoment(null);
     setMomentIdx(0);
     setBurstLiked({});
-    setCompareSel([]);
   }, [idx]);
+
+  // Paginate: when within 20 of the loaded tail, append the next page.
+  useEffect(() => {
+    if (loadState !== "loaded") return;
+    if (photos.length === 0 || photos.length >= total) return;
+    if (idx < photos.length - 20) return;
+    if (pagingRef.current || exhaustedRef.current) return;
+    pagingRef.current = true;
+    let cancelled = false;
+    listPhotos({
+      limit: 200,
+      offset: photos.length,
+      collapse: quality ? "none" : "moments",
+      sort: sortMode,
+      quality: quality ?? undefined,
+    })
+      .then((data) => {
+        if (cancelled) return;
+        setTotal(data.total);
+        if (data.items.length === 0) {
+          exhaustedRef.current = true;
+          return;
+        }
+        setPhotos((prev) => {
+          const seenId = new Set(prev.map((p) => p.id));
+          const seenSha = new Set(prev.map((p) => p.sha256));
+          const extra = data.items.filter((p) => !seenId.has(p.id) && !seenSha.has(p.sha256));
+          if (extra.length === 0) exhaustedRef.current = true;
+          return extra.length ? [...prev, ...extra] : prev;
+        });
+      })
+      .catch(() => {
+        if (!cancelled) exhaustedRef.current = true;
+      })
+      .finally(() => {
+        pagingRef.current = false;
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [idx, photos.length, total, sortMode, quality, loadState]);
 
   // Liked status for every member of the expanded burst — so the badge can
   // show how many of the stack the user has liked and the pip strip can
@@ -257,9 +304,15 @@ export default function BurstCull() {
       setUndoStack((st) => [...st, { sha, prevDecision, idx }]);
       setSessionCulled((n) => n + 1);
       recordSwipe(sha, decision);
+      // keep/silver === liked; reject is not liked
+      if (decision === "keep" || decision === "silver") {
+        setBothLiked((prev) => ({ ...prev, [sha]: true }));
+      } else if (decision === "reject") {
+        setBothLiked((prev) => ({ ...prev, [sha]: false }));
+      }
       if (advance) next();
     },
-    [idx, next],
+    [idx, next, setBothLiked],
   );
 
   const undo = useCallback(() => {
@@ -272,8 +325,12 @@ export default function BurstCull() {
     else sessionDecisions.current.delete(last.sha);
     setUndoStack((st) => st.slice(0, -1));
     setSessionCulled((n) => Math.max(0, n - 1));
+    setBothLiked((prev) => ({
+      ...prev,
+      [last.sha]: last.prevDecision === "keep" || last.prevDecision === "silver",
+    }));
     setIdx(last.idx);
-  }, [undoStack]);
+  }, [undoStack, setBothLiked]);
 
   // ── Zoom-at-cursor (Z toggles 100%) ──────────────────────────────────────
   const stageImgRef = useRef<HTMLImageElement | null>(null);
@@ -309,7 +366,7 @@ export default function BurstCull() {
     () =>
       compareSel.map((sha, i) => ({
         sha256: sha,
-        previewUrl: `/api/preview/${sha}`,
+        previewUrl: `/api/editor/result/${sha}`,
         label: `${i + 1} · ${sha.slice(0, 8)}`,
       })),
     [compareSel],
@@ -326,7 +383,7 @@ export default function BurstCull() {
     });
   }, [photos, collapseMoment]);
 
-  // Global-in-view keyboard layer: arrows navigate, X/left reject, C/right/
+  // Global-in-view keyboard layer: arrows navigate, X/D/J reject, C/right/
   // space keep, U undo, Z zoom, Tab next burst, V compare-select, Enter
   // opens compare when 2+ frames are selected. Suspended while the compare
   // overlay is open (it handles its own keys).
@@ -442,7 +499,7 @@ export default function BurstCull() {
   const activePreviewUrl = activeShaForUrl
     ? (enhancedOn || straightenOn
         ? `/api/enhance/${activeShaForUrl}?preset=film&grade=${enhancedOn ? "true" : "false"}&straighten=${straightenOn ? "true" : "false"}`
-        : `/api/preview/${activeShaForUrl}`)
+        : `/api/editor/result/${activeShaForUrl}`)
     : "";
   const activeFilename = activeMember
     ? activeMember.sha256.slice(0, 8)
@@ -540,6 +597,11 @@ export default function BurstCull() {
                 ref={stageImgRef}
                 src={activePreviewUrl}
                 alt={activeFilename}
+                onError={(e) => {
+                  const img = e.currentTarget;
+                  if (!activeShaForUrl || img.src.includes("/api/preview/")) return;
+                  img.src = `/api/preview/${activeShaForUrl}`;
+                }}
                 onMouseMove={(e) => {
                   // Remember the cursor point (fraction of the un-zoomed
                   // image) so Z zooms exactly where the user is looking.
@@ -722,7 +784,7 @@ export default function BurstCull() {
                   onClick={() => {
                     if (activeShaForUrl) decide(activeShaForUrl, "reject");
                   }}
-                  title="Discard — record a reject and move on (D or X or ←)"
+                  title="Discard — record a reject and move on (X, D, or J)"
                   className="cull-action-btn"
                   style={{
                     background: "rgba(0,0,0,0.55)",
@@ -919,13 +981,10 @@ export default function BurstCull() {
           <section className="cull-stage" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
             <div style={{ textAlign: "center", color: "var(--md-on-surface-var)", fontFamily: "var(--font-display)", lineHeight: 1.6 }}>
               <div style={{ fontSize: 18, fontWeight: 500, color: "var(--md-on-surface)", marginBottom: 8 }}>
-                Indexer not running
+                Couldn't load photos
               </div>
               <div style={{ fontFamily: "var(--font-mono)", fontSize: 13, background: "var(--md-surface-c)", padding: "8px 16px", borderRadius: "var(--r-md)", display: "inline-block" }}>
-                selects serve Z:\Ladakh\Photos
-              </div>
-              <div style={{ marginTop: 8, fontSize: 13 }}>
-                Run that in another terminal, then refresh.
+                {loadError || "no active library"}
               </div>
             </div>
           </section>
@@ -935,10 +994,12 @@ export default function BurstCull() {
           <section className="cull-stage" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
             <div style={{ textAlign: "center", color: "var(--md-on-surface-var)", fontFamily: "var(--font-display)" }}>
               <div style={{ fontSize: 18, fontWeight: 500, color: "var(--md-on-surface)", marginBottom: 8 }}>
-                No photos indexed yet
+                {quality ? "No photos in that bucket" : "No photos indexed yet"}
               </div>
               <div style={{ fontSize: 13 }}>
-                Point selects at a folder to get started.
+                {quality
+                  ? "Try another quality chip, or All."
+                  : "Point selects at a folder to get started."}
               </div>
             </div>
           </section>
@@ -997,7 +1058,10 @@ export default function BurstCull() {
       {compareOpen && compareFrames.length >= 2 && (
         <CompareView
           frames={compareFrames}
-          onClose={() => setCompareOpen(false)}
+          onClose={() => {
+            setCompareOpen(false);
+            setCompareSel([]);
+          }}
           onDecision={(sha, d) => decide(sha, d, false)}
         />
       )}

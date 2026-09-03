@@ -35,14 +35,24 @@ function photoIcon(url: string, count: number): L.DivIcon {
 export default function MapView() {
   const [markers, setMarkers] = useState<MapMarker[]>([]);
   const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
   const mapDivRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
 
   useEffect(() => {
     fetch("/api/map/markers?grid_deg=0.01")
-      .then((r) => r.json())
-      .then((d) => { setMarkers(d.markers); setLoading(false); })
-      .catch(() => setLoading(false));
+      .then(async (r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const d = await r.json();
+        setMarkers(Array.isArray(d.markers) ? d.markers : []);
+        setErr(null);
+        setLoading(false);
+      })
+      .catch((e) => {
+        setMarkers([]);
+        setErr(e instanceof Error ? e.message : String(e));
+        setLoading(false);
+      });
   }, []);
 
   // Initialize Leaflet once when markers arrive
@@ -117,6 +127,8 @@ export default function MapView() {
           subtitle={
             loading
               ? "loading…"
+              : err
+              ? err
               : `${markers.length} locations · ${totalPhotos} photos with GPS · tap a pin to jump to that location's cluster`
           }
         />
@@ -134,7 +146,7 @@ export default function MapView() {
           >
             {markers.length === 0 && !loading && (
               <div style={{ display: "grid", placeItems: "center", height: "100%", color: "var(--md-on-surface-var)" }}>
-                No photos with GPS metadata yet.
+                {err ?? "No photos with GPS metadata yet."}
               </div>
             )}
           </div>

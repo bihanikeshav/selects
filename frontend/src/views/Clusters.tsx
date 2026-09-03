@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import ModeViewBar, { modeFromPath } from "../components/ModeViewBar";
 import Rail from "../components/Rail";
 import Topbar from "../components/Topbar";
@@ -209,12 +209,18 @@ function ClusterCard({
   );
 }
 
-type ClusterSource = "thematic" | "date" | "lookback" | "posting";
+type ClusterSource = "thematic" | "date" | "lookback" | "posting" | "";
+
+const SOURCE_TABS: ClusterSource[] = ["thematic", "", "date", "lookback", "posting"];
 
 const SOURCE_LABELS: Record<ClusterSource, { label: string; sub: string }> = {
   thematic: {
     label: "Locations",
     sub: "Grouped by named places visited on the trip",
+  },
+  "": {
+    label: "Scenes",
+    sub: "Legacy scene tags (photos whose tags have no source)",
   },
   date: {
     label: "By date",
@@ -230,6 +236,13 @@ const SOURCE_LABELS: Record<ClusterSource, { label: string; sub: string }> = {
   },
 };
 
+function parseClusterSource(raw: string | null): ClusterSource {
+  if (raw === "" || raw === "thematic" || raw === "date" || raw === "lookback" || raw === "posting") {
+    return raw;
+  }
+  return "thematic";
+}
+
 function SourceToggle({
   value,
   onChange,
@@ -239,9 +252,9 @@ function SourceToggle({
 }) {
   return (
     <div className="story-group-tabs">
-      {(["thematic", "date", "lookback", "posting"] as ClusterSource[]).map(src => (
+      {SOURCE_TABS.map(src => (
         <button
-          key={src}
+          key={src || "scenes"}
           className={`story-group-tab${value === src ? " is-active" : ""}`}
           onClick={() => onChange(src)}
         >
@@ -253,13 +266,21 @@ function SourceToggle({
 }
 
 export default function Clusters() {
-  const [source, setSource] = useState<ClusterSource>("thematic");
+  const [params, setParams] = useSearchParams();
+  const [source, setSource] = useState<ClusterSource>(() => parseClusterSource(params.get("source")));
   const [clusters, setClusters] = useState<ClusterEntry[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { pathname } = useLocation();
   const mode = modeFromPath(pathname);
+
+  function changeSource(v: ClusterSource) {
+    setSource(v);
+    const next = new URLSearchParams(params);
+    next.set("source", v);
+    setParams(next, { replace: true });
+  }
 
   useEffect(() => {
     setLoading(true);
@@ -289,6 +310,16 @@ export default function Clusters() {
         />
 
         <div className="clusters-wrap" style={{ gridRow: "3 / span 3" }}>
+          <div className="clusters-header">
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+              <h1 style={{ margin: 0 }}>Clusters by theme</h1>
+              <SourceToggle value={source} onChange={changeSource} />
+            </div>
+            <div className="sub" style={{ marginTop: 6 }}>
+              {sourceInfo.sub}
+            </div>
+          </div>
+
           {loading && (
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 240, color: "var(--md-on-surface-var)", fontFamily: "var(--font-display)", fontSize: 15 }}>
               Loading clusters…
@@ -319,22 +350,11 @@ export default function Clusters() {
           )}
 
           {!loading && !error && clusters.length > 0 && (
-            <>
-              <div className="clusters-header">
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
-                  <h1 style={{ margin: 0 }}>Clusters by theme</h1>
-                  <SourceToggle value={source} onChange={setSource} />
-                </div>
-                <div className="sub" style={{ marginTop: 6 }}>
-                  {sourceInfo.sub}
-                </div>
-              </div>
-              <div className="cluster-grid">
-                {clusters.map(c => (
-                  <ClusterCard key={c.tag} cluster={c} source={source} mode={mode} />
-                ))}
-              </div>
-            </>
+            <div className="cluster-grid">
+              {clusters.map(c => (
+                <ClusterCard key={c.tag} cluster={c} source={source} mode={mode} />
+              ))}
+            </div>
           )}
         </div>
       </div>

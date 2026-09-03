@@ -202,7 +202,11 @@ export default function BestOf() {
                     onFocus={() => setFocusedPhotoId(p.photo_id)}
                     onClick={(activeSha) => toggle(activeSha)}
                     onDoubleClick={() => setLightboxIdx(i)}
-                    title={`AP ${(p.ap25 ?? 0).toFixed(2)} · NIMA ${(p.nima ?? 0).toFixed(2)}${
+                    title={`IQA ${
+                      (p.iqa ?? p.combined) != null
+                        ? (p.iqa ?? p.combined)!.toFixed(2)
+                        : "—"
+                    }${
                       p.moment_size && p.moment_size > 1 ? ` · burst of ${p.moment_size}` : ""
                     }`}
                     className={isSel ? "is-selected" : undefined}
@@ -247,7 +251,9 @@ export default function BestOf() {
                         fontFamily: "var(--font-mono)",
                       }}
                     >
-                      {(p.combined ?? 0).toFixed(2)}
+                      {(p.iqa ?? p.combined) != null
+                        ? (p.iqa ?? p.combined)!.toFixed(2)
+                        : "—"}
                     </span>
                   </StackPhoto>
                 );

@@ -69,7 +69,7 @@ export default function Search() {
       tags: selectedTags.length ? selectedTags : undefined,
       person_id: personId === "" ? undefined : personId,
       date_from: dateFrom || undefined,
-      date_to: dateTo || undefined,
+      date_to: dateTo ? `${dateTo}T23:59:59` : undefined,
       min_aesthetic: minAesthetic > 0 ? minAesthetic : undefined,
       limit: 150,
     })
@@ -258,12 +258,12 @@ export default function Search() {
                   </label>
 
                   <label className="search-filter-field">
-                    <span className="search-filter-label">Min aesthetic ({minAesthetic.toFixed(1)})</span>
+                    <span className="search-filter-label">Min aesthetic ({minAesthetic.toFixed(2)})</span>
                     <input
                       type="range"
                       min={0}
-                      max={10}
-                      step={0.5}
+                      max={1}
+                      step={0.05}
                       value={minAesthetic}
                       onChange={e => setMinAesthetic(Number(e.target.value))}
                       className="search-filter-range"
