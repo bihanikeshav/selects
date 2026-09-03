@@ -238,8 +238,9 @@ def test_curate_prefers_eyes_open_among_near_equal(tmp_path: Path) -> None:
 def test_curate_does_not_override_big_aesthetic_gap(tmp_path: Path) -> None:
     from selects.ml.curation import curate
 
-    # A is much better (0.95 vs 0.20); the bounded penalty must not flip it.
-    Session, (a_id, b_id) = _seed_burst(tmp_path, combined_a=0.95, combined_b=0.20)
+    # A is better by more than PENALTY_CAP (0.10 > 0.05); the bounded
+    # penalty must not flip it. A 0–10-era cap of 0.5 *would* flip this.
+    Session, (a_id, b_id) = _seed_burst(tmp_path, combined_a=0.70, combined_b=0.60)
     with session_scope(Session) as s:
         out = curate(s, [a_id, b_id], pct_floor=0.0)
     assert len(out) == 1
