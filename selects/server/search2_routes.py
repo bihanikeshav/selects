@@ -22,7 +22,7 @@ from sqlalchemy import select
 
 from selects.config import FolderConfig
 from selects.db import init_db, session_scope
-from selects.db.models import AestheticScore, Embedding, Photo, PhotoPerson, PhotoTag
+from selects.db.models import Embedding, Photo, PhotoPerson, PhotoTag
 
 # Fixed bonus added per matching tag so exact tag hits always outrank a
 # semantic-only match (SigLIP cosine scores live in roughly [-1, 1]).
@@ -57,7 +57,7 @@ def build_router(cfg: FolderConfig) -> APIRouter:
         date_from: Optional[str] = Query(None, description="ISO date/datetime lower bound (inclusive) on taken_at"),
         date_to: Optional[str] = Query(None, description="ISO date/datetime upper bound (inclusive) on taken_at"),
         min_aesthetic: Optional[float] = Query(
-            None, description="Minimum combined aesthetic score (avg of nima_score/ap25_score, 0-10ish scale)"
+            None, description="Minimum CLIP-IQA score on Embedding.aesthetic_iqa, in [0, 1]"
         ),
         limit: int = Query(120, le=1000),
     ):
@@ -101,13 +101,14 @@ def build_router(cfg: FolderConfig) -> APIRouter:
 
             combined_by_id: dict[int, float] = {}
             if min_aesthetic is not None:
-                aes_rows = s.query(AestheticScore.photo_id, AestheticScore.nima_score, AestheticScore.ap25_score).all()
-                for pid, nima, ap25 in aes_rows:
-                    vals = [v for v in (nima, ap25) if v is not None]
-                    if vals:
-                        combined_by_id[pid] = sum(vals) / len(vals)
-                passing = {pid for pid, val in combined_by_id.items() if val >= min_aesthetic}
-                _intersect(passing)
+                iqa_rows = (
+                    s.query(Embedding.photo_id, Embedding.aesthetic_iqa)
+                    .filter(Embedding.aesthetic_iqa.isnot(None))
+                    .filter(Embedding.aesthetic_iqa >= min_aesthetic)
+                    .all()
+                )
+                combined_by_id = {pid: float(iqa) for pid, iqa in iqa_rows}
+                _intersect(set(combined_by_id))
 
             if has_structured_filter and not candidate_ids:
                 return {"query": q, "total": 0, "results": []}

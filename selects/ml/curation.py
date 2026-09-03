@@ -1,13 +1,14 @@
 """Aesthetic-driven curation pipeline.
 
-A single per-photo aesthetic = 0.6 * AP_V2.5 + 0.4 * NIMA, plus a library-wide
-top-25% gate and burst-dedup via the existing Moment groups. Reused by both
-Story rendering and Best-Of facet views — they only differ in what *scope*
-they hand to `curate()`.
+A single per-photo aesthetic = CLIP-IQA on ``Embedding.aesthetic_iqa`` in
+[0, 1], plus a library-wide percentile gate and burst-dedup via the existing
+Moment groups. Reused by both Story rendering and Best-Of facet views — they
+only differ in what *scope* they hand to `curate()`.
+
+Missing IQA is a non-gate: an unscored scope is returned (burst-dedup still
+applies). AP25/NIMA are not aliased to IQA.
 
 Configuration:
-    AP_WEIGHT             : float in [0,1], default 0.6
-    NIMA_WEIGHT           : float in [0,1], default 0.4
     AESTHETIC_PCT_FLOOR   : percentile threshold, default 75 (top 25%)
 """
 from __future__ import annotations
@@ -19,7 +20,7 @@ import numpy as np
 from sqlalchemy.orm import Session as OrmSession
 
 from selects.db.models import (
-    AestheticScore,
+    Embedding,
     Moment,
     MomentMember,
     Photo,
@@ -36,17 +37,28 @@ class CuratedPhoto:
     photo_id: int
     sha256: str
     taken_at: Optional[str]
-    combined: float
-    ap25: float
-    nima: float
+    combined: Optional[float]  # CLIP-IQA in [0, 1]; None when unscored
+    ap25: Optional[float]
+    nima: Optional[float]
     moment_id: Optional[int]
     moment_size: int = 1   # >1 means this photo is the surfaced member of a burst stack
     taste: Optional[float] = None   # personalized taste score in [0,1], if a taste model exists
     final: Optional[float] = None   # blended ranking score in [0,1]: (1-w)*aesthetic + w*taste
+    iqa: Optional[float] = None     # same 0–1 CLIP-IQA as combined; None when missing
 
 
-def _combined(ap25: float, nima: float, *, ap_w: float, nima_w: float) -> float:
-    return ap_w * ap25 + nima_w * nima
+def _make_curated(pid: int, sha: str, taken, iqa: Optional[float]) -> CuratedPhoto:
+    iqa_f = float(iqa) if iqa is not None else None
+    return CuratedPhoto(
+        photo_id=pid,
+        sha256=sha,
+        taken_at=taken.isoformat() if taken else None,
+        combined=iqa_f,
+        ap25=None,
+        nima=None,
+        moment_id=None,
+        iqa=iqa_f,
+    )
 
 
 def compute_library_threshold(
@@ -56,24 +68,22 @@ def compute_library_threshold(
     nima_w: float = NIMA_WEIGHT_DEFAULT,
     pct_floor: float = AESTHETIC_PCT_FLOOR_DEFAULT,
 ) -> Optional[float]:
-    """Return the library-wide combined-aesthetic value at ``pct_floor``.
+    """Return the library-wide CLIP-IQA value at ``pct_floor``.
 
     Used by feature surfaces (BurstCull, ClusterDetail) that want to expose
     a single 0-100 filter slider whose semantics are library-relative, not
     scope-relative. Curation itself uses per-scope thresholds — see ``curate``.
+    ``ap_w`` / ``nima_w`` are unused (kept so existing callers still bind).
     """
+    del ap_w, nima_w
     rows = (
-        s.query(AestheticScore.ap25_score, AestheticScore.nima_score)
-        .filter(AestheticScore.ap25_score.isnot(None))
-        .filter(AestheticScore.nima_score.isnot(None))
+        s.query(Embedding.aesthetic_iqa)
+        .filter(Embedding.aesthetic_iqa.isnot(None))
         .all()
     )
     if not rows:
         return None
-    arr = np.array(
-        [_combined(r[0], r[1], ap_w=ap_w, nima_w=nima_w) for r in rows],
-        dtype=np.float64,
-    )
+    arr = np.array([r[0] for r in rows], dtype=np.float64)
     return float(np.percentile(arr, pct_floor))
 
 
@@ -88,22 +98,25 @@ def curate(
     sort: str = "score",
     min_keep: int = 1,
 ) -> list[CuratedPhoto]:
-    """Apply per-scope + library-wide curation to a set of photo IDs.
+    """Apply per-scope + library-wide CLIP-IQA curation to a set of photo IDs.
 
     Pipeline:
-      1. Drop photos without both AP25 and NIMA.
-      2. Library-wide floor (if ``library_pct_floor`` provided): drop
-         anything below that library-wide percentile. A 'mediocre everywhere'
-         photo doesn't get surfaced just because its scope happens to be thin.
-      3. Per-scope gate: drop anything below the ``pct_floor`` percentile
-         of the surviving scope (e.g. 75 keeps the top 25% of the scope).
-      4. Burst-dedup: among survivors sharing a moment, keep only the
+      1. Load the scope. IQA-missing photos are not AP25/NIMA-filled.
+      2. Zero scored photos → skip the aesthetic gate, return the scope
+         (burst-dedup still applies).
+      3. Some scored → percentile on the scored subset; unscored are excluded
+         from the curated set but do not empty it.
+      4. Tiny scope ``len <= min_keep``: skip the per-scope gate; apply the
+         library floor only if scored IQA values exist.
+      5. Otherwise threshold = max(scope percentile, library percentile).
+      6. Burst-dedup: among survivors sharing a moment, keep only the
          highest combined. Photos with no moment pass through.
-      5. Sort by combined desc (default) or by taken_at asc.
+      7. Sort by combined desc (default) or by taken_at asc.
 
     ``min_keep`` guarantees at least N photos pass through if the scope has
-    any AP+NIMA-scored photos at all.
+    any IQA-scored photos at all. ``ap_w`` / ``nima_w`` are unused.
     """
+    del ap_w, nima_w
     ids = list(photo_ids)
     if not ids:
         return []
@@ -113,83 +126,67 @@ def curate(
             Photo.id,
             Photo.sha256,
             Photo.taken_at,
-            AestheticScore.ap25_score,
-            AestheticScore.nima_score,
+            Embedding.aesthetic_iqa,
         )
-        .join(AestheticScore, AestheticScore.photo_id == Photo.id)
+        .outerjoin(Embedding, Embedding.photo_id == Photo.id)
         .filter(Photo.id.in_(ids))
-        .filter(AestheticScore.ap25_score.isnot(None))
-        .filter(AestheticScore.nima_score.isnot(None))
         .all()
     )
     if not rows:
         return []
 
-    scope_combined = np.array(
-        [_combined(r[3], r[4], ap_w=ap_w, nima_w=nima_w) for r in rows],
-        dtype=np.float64,
-    )
+    scored_idx = [i for i, r in enumerate(rows) if r[3] is not None]
+    scored_rows = [rows[i] for i in scored_idx]
+
+    if not scored_rows:
+        # No IQA in scope: skip the aesthetic gate, keep burst-dedup.
+        return _dedup_and_rank(s, [_make_curated(*r) for r in rows], sort)
+
+    scope_combined = np.array([r[3] for r in scored_rows], dtype=np.float64)
 
     # Library-wide absolute floor — applied BEFORE the per-scope gate so a
     # weak photo can't be promoted just because its scope is thin.
     library_floor_val: float = -float("inf")
     if library_pct_floor is not None:
         library_floor_val_opt = compute_library_threshold(
-            s, ap_w=ap_w, nima_w=nima_w, pct_floor=library_pct_floor
+            s, pct_floor=library_pct_floor
         )
         if library_floor_val_opt is not None:
             library_floor_val = library_floor_val_opt
 
-    if len(scope_combined) <= max(1, min_keep):
-        # Tiny scope: skip the per-scope gate, keep everything that clears the
-        # library floor.
-        threshold = -float("inf")
+    tiny = len(ids) <= min_keep or len(scored_rows) <= max(1, min_keep)
+    if tiny:
+        # Tiny scope: skip the per-scope gate. Library floor applies only
+        # because scored values exist (this branch).
+        threshold = library_floor_val
     else:
         threshold = float(np.percentile(scope_combined, pct_floor))
-
-    threshold = max(threshold, library_floor_val)
+        threshold = max(threshold, library_floor_val)
 
     candidates: list[CuratedPhoto] = []
-    surviving_ids: list[int] = []
-    for (pid, sha, taken, ap25, nima), combined in zip(rows, scope_combined):
+    for row, combined in zip(scored_rows, scope_combined):
         if combined < threshold:
             continue
-        candidates.append(
-            CuratedPhoto(
-                photo_id=pid,
-                sha256=sha,
-                taken_at=taken.isoformat() if taken else None,
-                combined=float(combined),
-                ap25=ap25,
-                nima=nima,
-                moment_id=None,  # filled below
-            )
-        )
-        surviving_ids.append(pid)
+        candidates.append(_make_curated(*row))
 
     # Guarantee at least min_keep photos pass through, even if the percentile
     # was so high it rejected everything (rounding edge case).
-    if len(candidates) < min_keep and rows:
+    if len(candidates) < min_keep and scored_rows:
         idx_sorted = np.argsort(-scope_combined)
         candidates = []
-        surviving_ids = []
         for idx in idx_sorted[: max(min_keep, 1)]:
-            pid, sha, taken, ap25, nima = rows[idx]
-            candidates.append(
-                CuratedPhoto(
-                    photo_id=pid,
-                    sha256=sha,
-                    taken_at=taken.isoformat() if taken else None,
-                    combined=float(scope_combined[idx]),
-                    ap25=ap25,
-                    nima=nima,
-                    moment_id=None,
-                )
-            )
-            surviving_ids.append(pid)
+            candidates.append(_make_curated(*scored_rows[idx]))
 
+    return _dedup_and_rank(s, candidates, sort)
+
+
+def _dedup_and_rank(
+    s: OrmSession, candidates: list[CuratedPhoto], sort: str
+) -> list[CuratedPhoto]:
     if not candidates:
         return []
+
+    surviving_ids = [c.photo_id for c in candidates]
 
     # Attach moment_id + moment_size (None if not in any moment)
     moment_rows = (
@@ -229,7 +226,8 @@ def curate(
     face_penalty = stack_face_penalties(s, in_moment_ids) if in_moment_ids else {}
 
     def _stack_score(c: CuratedPhoto) -> float:
-        return c.combined - face_penalty.get(c.photo_id, 0.0)
+        base = c.combined if c.combined is not None else 0.0
+        return base - face_penalty.get(c.photo_id, 0.0)
 
     by_moment: dict[int, CuratedPhoto] = {}
     stack_out: list[CuratedPhoto] = []
@@ -262,9 +260,14 @@ def curate(
     if sort == "chronological":
         dedup_out.sort(key=lambda c: c.taken_at or "")
     else:
-        dedup_out.sort(
-            key=lambda c: -(c.final if c.final is not None else c.combined)
-        )
+        def _rank_key(c: CuratedPhoto) -> float:
+            if c.final is not None:
+                return -c.final
+            if c.combined is not None:
+                return -c.combined
+            return float("inf")
+
+        dedup_out.sort(key=_rank_key)
     return dedup_out
 
 
@@ -298,7 +301,10 @@ def _apply_taste_blend(s: OrmSession, photos: list[CuratedPhoto]) -> None:
     # Percentile-rank of combined within the surfaced set → aesthetic in [0,1].
     # Ties get their AVERAGE rank so photos with identical aesthetic scores
     # share the same aesthetic term (their order is then decided by taste).
-    combined = np.array([c.combined for c in photos], dtype=np.float64)
+    combined = np.array(
+        [c.combined if c.combined is not None else 0.0 for c in photos],
+        dtype=np.float64,
+    )
     order = np.argsort(combined, kind="mergesort")
     ranks = np.empty(len(photos), dtype=np.float64)
     i = 0

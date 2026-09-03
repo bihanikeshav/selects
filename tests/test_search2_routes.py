@@ -11,7 +11,7 @@ from httpx import ASGITransport, AsyncClient
 from selects.config import get_folder_config
 from selects.db import init_db, session_scope
 from selects.db.models import (
-    AestheticScore, Embedding, FaceEmbedding, Person, Photo, PhotoPerson, PhotoTag,
+    Embedding, FaceEmbedding, Person, Photo, PhotoPerson, PhotoTag,
 )
 from selects.server.search2_routes import register_search2_routes
 
@@ -48,15 +48,13 @@ def app_and_ids(tmp_path, monkeypatch):
         ids["a"], ids["b"], ids["c"] = photos[0].id, photos[1].id, photos[2].id
 
         s.add_all([
-            Embedding(photo_id=photos[0].id, siglip=_siglip_blob(rng[0])),
-            Embedding(photo_id=photos[1].id, siglip=_siglip_blob(rng[1])),
+            Embedding(photo_id=photos[0].id, siglip=_siglip_blob(rng[0]), aesthetic_iqa=0.9),
+            Embedding(photo_id=photos[1].id, siglip=_siglip_blob(rng[1]), aesthetic_iqa=0.1),
             Embedding(photo_id=photos[2].id, siglip=_siglip_blob(rng[2])),
         ])
         # Photo c has an exact tag hit for the query word "monastery" even though
         # its semantic similarity is weaker than photo a's.
         s.add(PhotoTag(photo_id=photos[2].id, tag="monastery", score=0.9, source="ram"))
-        s.add(AestheticScore(photo_id=photos[0].id, nima_score=8.0))
-        s.add(AestheticScore(photo_id=photos[1].id, nima_score=2.0))
 
         person = Person(label="Alice")
         s.add(person)
@@ -114,10 +112,11 @@ async def test_person_filter(app_and_ids):
 
 async def test_min_aesthetic_filter(app_and_ids):
     app, ids = app_and_ids
-    r = await _get(app, "/api/search2?min_aesthetic=5")
+    r = await _get(app, "/api/search2?min_aesthetic=0.5")
     assert r.status_code == 200
     body = r.json()
     result_ids = {item["photo_id"] for item in body["results"]}
+    # IQA 0.9 passes; IQA 0.1 and missing IQA do not.
     assert result_ids == {ids["a"]}
 
 
