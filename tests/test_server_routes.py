@@ -209,3 +209,40 @@ async def test_thumb_rejects_non_hex_sha(tmp_path):
         assert r.status_code == 400
         r = await client.get("/api/thumb/%2e%2e%2fwindows")
         assert r.status_code == 400
+
+
+async def test_cluster_photos_empty_source_filters_null_tags(tmp_path):
+    """Scenes (?source=) must match list_clusters: NULL-source tags only."""
+    from selects.db import session_scope
+    from selects.db.models import Photo, PhotoTag
+
+    cfg = get_folder_config(tmp_path)
+    Session = init_db(cfg.db_path)
+    with session_scope(Session) as s:
+        null_tagged = Photo(path=str(tmp_path / "null.jpg"), sha256="a" * 64)
+        ram_tagged = Photo(path=str(tmp_path / "ram.jpg"), sha256="b" * 64)
+        ram_other = Photo(path=str(tmp_path / "ram2.jpg"), sha256="c" * 64)
+        s.add_all([null_tagged, ram_tagged, ram_other])
+        s.flush()
+        s.add(PhotoTag(photo_id=null_tagged.id, tag="mountain", score=0.9, source=None))
+        s.add(PhotoTag(photo_id=ram_tagged.id, tag="mountain", score=0.9, source="ram"))
+        s.add(PhotoTag(photo_id=ram_other.id, tag="tree", score=0.8, source="ram"))
+        null_sha = null_tagged.sha256
+        ram_sha = ram_tagged.sha256
+        ram_other_sha = ram_other.sha256
+
+    app = build_app(cfg, run_background=False)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        r = await client.get("/api/clusters/mountain/photos?source=")
+        assert r.status_code == 200
+        mountain_shas = {item["sha256"] for item in r.json()["items"]}
+        assert null_sha in mountain_shas
+        assert ram_sha not in mountain_shas
+
+        r = await client.get("/api/clusters/uncategorized/photos?source=")
+        assert r.status_code == 200
+        uncat_shas = {item["sha256"] for item in r.json()["items"]}
+        assert ram_sha in uncat_shas
+        assert ram_other_sha in uncat_shas
+        assert null_sha not in uncat_shas

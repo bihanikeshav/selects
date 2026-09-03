@@ -130,14 +130,19 @@ export default function BurstCull() {
   // Paginate: when within 20 of the loaded tail, append the next page.
   useEffect(() => {
     if (loadState !== "loaded") return;
-    if (photos.length === 0 || photos.length >= total) return;
+    if (photos.length === 0) return;
+    if (photos.length >= total) {
+      exhaustedRef.current = true;
+      return;
+    }
     if (idx < photos.length - 20) return;
     if (pagingRef.current || exhaustedRef.current) return;
     pagingRef.current = true;
     let cancelled = false;
+    const offset = photos.length;
     listPhotos({
       limit: 200,
-      offset: photos.length,
+      offset,
       collapse: quality ? "none" : "moments",
       sort: sortMode,
       quality: quality ?? undefined,
@@ -145,20 +150,19 @@ export default function BurstCull() {
       .then((data) => {
         if (cancelled) return;
         setTotal(data.total);
-        if (data.items.length === 0) {
+        if (data.items.length === 0 || offset >= data.total) {
           exhaustedRef.current = true;
           return;
         }
         setPhotos((prev) => {
+          // Same SHA at two paths is two cullable rows; dedup extra pages by id only.
           const seenId = new Set(prev.map((p) => p.id));
-          const seenSha = new Set(prev.map((p) => p.sha256));
-          const extra = data.items.filter((p) => !seenId.has(p.id) && !seenSha.has(p.sha256));
-          if (extra.length === 0) exhaustedRef.current = true;
+          const extra = data.items.filter((p) => !seenId.has(p.id));
           return extra.length ? [...prev, ...extra] : prev;
         });
       })
       .catch(() => {
-        if (!cancelled) exhaustedRef.current = true;
+        // Leave exhaustedRef false so the next idx tick retries.
       })
       .finally(() => {
         pagingRef.current = false;
