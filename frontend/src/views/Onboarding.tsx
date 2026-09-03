@@ -16,31 +16,38 @@ import {
   estimateRemainingSeconds,
   estimateTotalSeconds,
   fmtDuration,
+  STAGE_SEQUENCE,
   type Backend,
 } from "../lib/eta";
 import FolderPicker from "../components/FolderPicker";
 
-type Stage = "models" | "index" | "classical" | "embed" | "tag" | "story" | "done";
-
 interface ProgressMsg {
-  stage: Stage;
+  stage: string;
   current: number;
   total: number;
   message?: string;
 }
 
-const STAGE_LABELS: Record<Stage, string> = {
+const STAGE_LABELS: Record<string, string> = {
   models: "Downloading AI models",
-  index: "Indexing files",
-  classical: "Scoring sharpness & exposure",
-  embed: "Understanding each photo",
-  tag: "Tagging scenes & subjects",
-  story: "Grouping into stories",
+  index: "index",
+  video: "video",
+  classical: "classical",
+  embed: "embed",
+  tag: "tag",
+  ram_tag: "ram_tag",
+  smart_tag: "smart_tag",
+  face_embed: "face_embed",
+  persons: "persons",
+  moment: "moment",
+  story: "story",
+  thematic: "thematic",
+  date: "date",
   done: "Done",
 };
 
 // Stages shown in the indexing checklist (models is handled as its own gate).
-const STAGE_ORDER: Stage[] = ["index", "classical", "embed", "tag", "story"];
+const STAGE_ORDER = STAGE_SEQUENCE;
 
 const STEPS = [
   {
@@ -90,8 +97,15 @@ export default function Onboarding() {
   const [nPhotos, setNPhotos] = useState(0);
   const [stopping, setStopping] = useState(false);
   const [, setTick] = useState(0);
+  const stageStartRef = useRef<{ stage: string; at: number }>({ stage: "", at: 0 });
+  const doneRef = useRef(false);
+  const stoppingRef = useRef(false);
+  const phaseRef = useRef<Phase>(phase);
+  phaseRef.current = phase;
+  const lastKnownStageIdxRef = useRef(0);
 
   async function stopIndexing() {
+    stoppingRef.current = true;
     setStopping(true);
     try {
       await fetch("/api/libraries/cancel", { method: "POST" });
@@ -101,10 +115,10 @@ export default function Onboarding() {
     // Partial progress is kept; the user lands back in the app and can resume.
     navigate("/");
   }
-  const stageStartRef = useRef<{ stage: string; at: number }>({ stage: "", at: 0 });
 
   useEffect(() => {
     return () => {
+      stoppingRef.current = true;
       wsRef.current?.close();
     };
   }, []);
@@ -153,16 +167,23 @@ export default function Onboarding() {
         if (stageStartRef.current.stage !== msg.stage) {
           stageStartRef.current = { stage: msg.stage, at: Date.now() };
         }
+        const knownIdx = STAGE_ORDER.indexOf(msg.stage);
+        if (knownIdx >= 0) lastKnownStageIdxRef.current = knownIdx;
         if (
           msg.total > 0 &&
           (msg.stage === "index" ||
+            msg.stage === "video" ||
             msg.stage === "classical" ||
             msg.stage === "embed" ||
-            msg.stage === "tag")
+            msg.stage === "tag" ||
+            msg.stage === "ram_tag" ||
+            msg.stage === "smart_tag" ||
+            msg.stage === "face_embed")
         ) {
           setNPhotos((prev) => Math.max(prev, msg.total));
         }
         if (msg.stage === "done") {
+          doneRef.current = true;
           setPhase("done");
           ws.close();
         }
@@ -172,10 +193,27 @@ export default function Onboarding() {
     };
     ws.onclose = () => {
       wsRef.current = null;
-      // If the stream ended after real indexing progress but never sent an
-      // explicit "done", treat that as completion so the user isn't stranded.
-      setPhase((p) => (p === "indexing" ? "done" : p));
+      if (doneRef.current || stoppingRef.current) return;
+      const p = phaseRef.current;
+      if (p === "indexing" || p === "models") {
+        setErr("Progress connection closed unexpectedly.");
+      }
     };
+  }
+
+  function retryProgress() {
+    setErr(null);
+    doneRef.current = false;
+    stoppingRef.current = false;
+    connectProgress();
+    if (phaseRef.current === "indexing") beginIndexing();
+    if (phaseRef.current === "models") {
+      setDownloading(true);
+      startModelsDownload().catch((e) => {
+        setErr(e instanceof Error ? e.message : String(e));
+        setDownloading(false);
+      });
+    }
   }
 
   async function beginIndexing() {
@@ -354,6 +392,14 @@ export default function Onboarding() {
                 <p className="onb-models-note">
                   Indexing starts automatically once the models are in place.
                 </p>
+                {err && (
+                  <p className="onb-error">
+                    {err}{" "}
+                    <button className="btn btn-text" type="button" onClick={retryProgress}>
+                      Retry
+                    </button>
+                  </p>
+                )}
               </>
             ) : (
               <>
@@ -385,7 +431,14 @@ export default function Onboarding() {
                     {installedCount === 1 ? "" : "s"} ({fmtSize(installedMb)})
                   </p>
                 )}
-                {err && <p className="onb-error">{err}</p>}
+                {err && (
+                  <p className="onb-error">
+                    {err}{" "}
+                    <button className="btn btn-text" type="button" onClick={retryProgress}>
+                      Retry
+                    </button>
+                  </p>
+                )}
                 <div className="onb-models-actions">
                   <button
                     className="btn btn-filled"
@@ -422,7 +475,7 @@ export default function Onboarding() {
             <p className="onb-progress-caption">
               {phase === "done"
                 ? "Indexed, scored and grouped."
-                : `${STAGE_LABELS[activeStage]}${
+                : `${STAGE_LABELS[activeStage] ?? activeStage}${
                     progress && progress.total > 0 ? ` — ${progress.current}/${progress.total}` : "…"
                   }`}
               {progress?.message ? ` · ${progress.message}` : ""}
@@ -455,7 +508,7 @@ export default function Onboarding() {
             )}
 
             {phase === "indexing" && (
-              <div style={{ display: "flex", justifyContent: "center", margin: "4px 0 12px" }}>
+              <div style={{ display: "flex", justifyContent: "center", margin: "4px 0 12px", gap: 8 }}>
                 <button
                   className="btn btn-text"
                   type="button"
@@ -467,30 +520,28 @@ export default function Onboarding() {
               </div>
             )}
 
+            {err && phase !== "done" && (
+              <p className="onb-error">
+                {err}{" "}
+                <button className="btn btn-text" type="button" onClick={retryProgress}>
+                  Retry
+                </button>
+              </p>
+            )}
+
             {phase !== "done" && mode === "cpu" && nPhotos > 0 && (
               <div className="onb-warn">
                 <strong>Heads up:</strong> {nPhotos.toLocaleString()} photos on CPU
-                take about {fmtDuration(estimateTotalSeconds(nPhotos, "cpu"))}. An
-                NVIDIA GPU would cut this to roughly{" "}
-                {fmtDuration(estimateTotalSeconds(nPhotos, "gpu"))}. You can leave
-                this running — it keeps going in the background.
-                <details>
-                  <summary>Have an NVIDIA GPU? Enable it</summary>
-                  <div style={{ marginTop: 6, fontSize: 12.5 }}>
-                    Install a CUDA build of PyTorch, then restart selects — it
-                    detects the GPU automatically on the next launch:
-                    <code>
-                      pip install torch --index-url
-                      https://download.pytorch.org/whl/cu124
-                    </code>
-                  </div>
-                </details>
+                take about {fmtDuration(estimateTotalSeconds(nPhotos, "cpu"))}.
+                SigLIP and RAM++ run on CPU even if DirectML is installed. You can
+                leave this running — it keeps going in the background.
               </div>
             )}
 
             <ol className="onb-stage-list">
               {STAGE_ORDER.map((st) => {
-                const activeIdx = STAGE_ORDER.indexOf(activeStage);
+                const knownIdx = STAGE_ORDER.indexOf(activeStage);
+                const activeIdx = knownIdx >= 0 ? knownIdx : lastKnownStageIdxRef.current;
                 const thisIdx = STAGE_ORDER.indexOf(st);
                 const state =
                   phase === "done" || thisIdx < activeIdx

@@ -51,9 +51,13 @@ export function useToggleLike(
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ decision: newLiked ? "keep" : "skip" }),
-      }).catch(() => {
-        setLiked((prev) => ({ ...prev, [sha]: currentlyLiked }));
-      });
+      })
+        .then((res) => {
+          if (!res.ok) setLiked((prev) => ({ ...prev, [sha]: currentlyLiked }));
+        })
+        .catch(() => {
+          setLiked((prev) => ({ ...prev, [sha]: currentlyLiked }));
+        });
     },
     [setLiked],
   );

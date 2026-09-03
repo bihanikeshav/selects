@@ -22,13 +22,19 @@ export default function PersonDetail() {
 
   useEffect(() => {
     fetch(`/api/persons/${id}/photos`)
-      .then(r => r.json())
-      .then(d => { setPhotos(d.items); setLoading(false); })
-      .catch(e => { setErr(String(e)); setLoading(false); });
+      .then(async r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const d = await r.json();
+        setPhotos(Array.isArray(d.items) ? d.items : []);
+        setLoading(false);
+      })
+      .catch(e => { setErr(String(e)); setPhotos([]); setLoading(false); });
     fetch("/api/persons")
-      .then(r => r.json())
-      .then(d => {
-        const me = d.persons.find((p: { id: number; label: string | null }) => String(p.id) === id);
+      .then(async r => {
+        if (!r.ok) return;
+        const d = await r.json();
+        const list = Array.isArray(d.persons) ? d.persons : [];
+        const me = list.find((p: { id: number; label: string | null }) => String(p.id) === id);
         if (me) setLabel(me.label);
       });
   }, [id]);
@@ -129,6 +135,11 @@ export default function PersonDetail() {
           </div>
 
           {toast && <div className="cluster-detail-toast">{toast}</div>}
+          {loading && <div className="cluster-detail-empty">loading…</div>}
+          {!loading && err && <div className="cluster-detail-empty error">{err}</div>}
+          {!loading && !err && photos.length === 0 && (
+            <div className="cluster-detail-empty">No photos for this person.</div>
+          )}
 
           <div className="cluster-detail-grid">
             {photos.map((p, i) => (

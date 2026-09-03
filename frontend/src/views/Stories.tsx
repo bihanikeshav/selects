@@ -307,6 +307,7 @@ function StoryCard({ story }: { story: StoryEntry }) {
                       setPlayerOpen(true);
                     }}
                     initialLiked={likedMap[item.sha256] ?? false}
+                    hotkeysEnabled={!playerOpen}
                     onLikeChange={(sha, liked) =>
                       setLikedMap((m) => ({ ...m, [sha]: liked }))
                     }
@@ -966,7 +967,7 @@ export default function Stories() {
                 <div>
                   <h1>Narrative sequences</h1>
                   <div className="sub">
-                    Aesthetic-curated · {stories.length} stories · top 25% by combined AP V2.5 + NIMA, burst-deduped
+                    Aesthetic-curated · {stories.length} stories · top 25% by IQA, burst-deduped
                   </div>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>

@@ -37,6 +37,8 @@ export interface StackPhotoProps {
   initialLiked?: boolean;
   /** Called whenever like state toggles, with new liked state */
   onLikeChange?: (sha: string, liked: boolean) => void;
+  /** Set false to suspend [ ] / F while another overlay owns those keys. */
+  hotkeysEnabled?: boolean;
 }
 
 export default function StackPhoto({
@@ -54,6 +56,7 @@ export default function StackPhoto({
   className,
   initialLiked = false,
   onLikeChange,
+  hotkeysEnabled = true,
 }: StackPhotoProps) {
   const hasStack = !!(momentId && momentSize && momentSize > 1);
 
@@ -133,7 +136,7 @@ export default function StackPhoto({
 
   // Hotkeys when focused
   useEffect(() => {
-    if (!isFocused) return;
+    if (!isFocused || !hotkeysEnabled) return;
     function onKey(e: KeyboardEvent) {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       if (e.key === "[") {
@@ -149,7 +152,7 @@ export default function StackPhoto({
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [isFocused, cycle, toggleLike]);
+  }, [isFocused, hotkeysEnabled, cycle, toggleLike]);
 
   return (
     <div

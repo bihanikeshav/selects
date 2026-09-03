@@ -13,7 +13,8 @@ import Topbar from "../components/Topbar";
 export default function ClusterDetail() {
   const { tag = "" } = useParams<{ tag: string }>();
   const [params] = useSearchParams();
-  const source = params.get("source") || "thematic";
+  const sourceParam = params.get("source");
+  const source = sourceParam === null ? "thematic" : sourceParam;
 
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -27,7 +28,14 @@ export default function ClusterDetail() {
   const [aestheticPct, setAestheticPct] = useState<number>(0);
   const [sortByAesthetic, setSortByAesthetic] = useState<boolean>(false);
 
-  const decoded = decodeURIComponent(tag);
+  const decoded = (() => {
+    if (!/%[0-9A-Fa-f]{2}/.test(tag)) return tag;
+    try {
+      return decodeURIComponent(tag);
+    } catch {
+      return tag;
+    }
+  })();
 
   useEffect(() => {
     setLoading(true);
@@ -88,7 +96,11 @@ export default function ClusterDetail() {
 
         <div className="cluster-detail-wrap">
           <div className="cluster-detail-toolbar">
-            <Link to="/cull/clusters" className="btn btn-text" style={{ paddingLeft: 8 }}>
+            <Link
+              to={`/cull/clusters?source=${encodeURIComponent(source)}`}
+              className="btn btn-text"
+              style={{ paddingLeft: 8 }}
+            >
               ← All clusters
             </Link>
             <h1>{decoded}</h1>

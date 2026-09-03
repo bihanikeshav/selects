@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { libraryStatus } from "./api/client";
 import TitleBar from "./components/TitleBar";
 import BestOf from "./views/BestOf";
@@ -56,6 +56,20 @@ function OnboardingGate() {
   return null;
 }
 
+/** Legacy `/clusters/:tag` bookmarks keep the tag (and `?source=`). */
+function LegacyClusterTagRedirect() {
+  const { tag = "" } = useParams();
+  const [sp] = useSearchParams();
+  const q = sp.toString();
+  return <Navigate to={`/cull/clusters/${encodeURIComponent(tag)}${q ? `?${q}` : ""}`} replace />;
+}
+
+/** Legacy `/persons/:id` bookmarks keep the person id. */
+function LegacyPersonIdRedirect() {
+  const { id = "" } = useParams();
+  return <Navigate to={`/people/${id}`} replace />;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -91,10 +105,10 @@ export default function App() {
 
         {/* Legacy redirects so old bookmarks don't 404 */}
         <Route path="/clusters" element={<Navigate to="/cull/clusters" replace />} />
-        <Route path="/clusters/:tag" element={<Navigate to="/cull/clusters" replace />} />
+        <Route path="/clusters/:tag" element={<LegacyClusterTagRedirect />} />
         <Route path="/stories" element={<Navigate to="/cull/stories" replace />} />
         <Route path="/persons" element={<Navigate to="/people" replace />} />
-        <Route path="/persons/:id" element={<Navigate to="/people" replace />} />
+        <Route path="/persons/:id" element={<LegacyPersonIdRedirect />} />
       </Routes>
     </BrowserRouter>
   );

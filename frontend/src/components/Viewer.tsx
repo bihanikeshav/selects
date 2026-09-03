@@ -65,7 +65,17 @@ export default function Viewer({
         {n > 1 && (
           <button className="viewer-nav viewer-prev" onClick={() => go(-1)} aria-label="Previous" title="←">‹</button>
         )}
-        <img className="viewer-img" src={`/api/preview/${cur.sha256}`} alt={cur.caption ?? ""} />
+        <img
+          className="viewer-img"
+          key={cur.sha256}
+          src={`/api/editor/result/${cur.sha256}`}
+          alt={cur.caption ?? ""}
+          onError={(e) => {
+            const img = e.currentTarget;
+            if (img.src.includes("/api/preview/")) return;
+            img.src = `/api/preview/${cur.sha256}`;
+          }}
+        />
         {n > 1 && (
           <button className="viewer-nav viewer-next" onClick={() => go(1)} aria-label="Next" title="→">›</button>
         )}

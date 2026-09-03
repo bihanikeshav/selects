@@ -152,6 +152,7 @@ export interface CuratedPhoto {
   thumb_url: string;
   preview_url: string;
   combined: number | null;
+  iqa?: number | null;
   ap25: number | null;
   nima: number | null;
   moment_id?: number | null;

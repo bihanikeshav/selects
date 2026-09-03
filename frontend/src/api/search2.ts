@@ -84,5 +84,5 @@ export async function listPersonsForFilter(): Promise<PersonEntry[]> {
   const res = await fetch(`${BASE}/persons`);
   if (!res.ok) throw new Error(`listPersonsForFilter ${res.status}`);
   const body = await res.json();
-  return body.persons;
+  return Array.isArray(body.persons) ? body.persons : [];
 }

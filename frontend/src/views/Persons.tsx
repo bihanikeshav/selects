@@ -45,13 +45,15 @@ export default function Persons() {
   const loadPersons = useCallback(() => {
     setLoading(true);
     fetch(`/api/persons?include_hidden=${showHidden}`)
-      .then(r => r.json())
-      .then(d => {
-        setPersons(d.persons);
+      .then(async r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const d = await r.json();
+        setPersons(Array.isArray(d.persons) ? d.persons : []);
         setErr(null);
         setLoading(false);
       })
       .catch(e => {
+        setPersons([]);
         setErr(String(e));
         setLoading(false);
       });
@@ -203,6 +205,13 @@ export default function Persons() {
         />
 
         <div className="cluster-detail-wrap cluster-detail-wrap--persons">
+          {loading && <div className="cluster-detail-empty">loading...</div>}
+          {!loading && err && <div className="cluster-detail-empty error">{err}</div>}
+          {!loading && !err && persons.length === 0 && (
+            <div className="cluster-detail-empty">
+              No people yet — indexing still clustering faces.
+            </div>
+          )}
           <div className="cluster-detail-grid cluster-detail-grid--wide">
             {persons.map(p => {
               const isEditing = editing === p.id;
