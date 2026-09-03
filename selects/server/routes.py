@@ -2062,8 +2062,9 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
         combined_pct) for every photo with an IQA score, sorted by IQA
         percentile ascending.
 
-        combined_pct is the IQA percentile rank in this library (0–100). NIMA
-        and AP25 are included when present and may be null.
+        combined_pct is the IQA percentile rank in this library (0–100), used
+        only to pick worst/best batches. Display ``combined`` uses AP-V2.5 +
+        NIMA (or AP25, or IQA×10) via :func:`ensemble_score`.
         """
         rows = (
             s.query(
@@ -2103,6 +2104,8 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
         if bucket not in ("worst", "best"):
             raise HTTPException(400, detail="bucket must be 'worst' or 'best'")
 
+        from selects.ml.aesthetic import ensemble_score
+
         with session_scope(Session) as s:
             rated_ids = {r[0] for r in s.query(PhotoRating.photo_id).all()}
             ranked = _combined_percentile_pairs(s)
@@ -2125,7 +2128,7 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
                         "nima": r[4],
                         "ap25": r[5],
                         "personal": r[6],
-                        "combined": r[7],
+                        "combined": ensemble_score(r[5], r[4], r[3]),
                     },
                     "default_rating": -1 if bucket == "worst" else 1,
                 }
@@ -2280,27 +2283,22 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
                 "n_scored_upvotes": len(upvote_pcts),
             }
 
-        # Also report the combined NIMA+AP percentile fusion as if it were a model
-        nima_vals = np.array([
-            r[model_cols["nima"]] if r[model_cols["nima"]] is not None else np.nan
-            for r in rows
-        ])
-        ap_vals = np.array([
-            r[model_cols["ap25"]] if r[model_cols["ap25"]] is not None else np.nan
-            for r in rows
-        ])
-        m_combined = ~(np.isnan(nima_vals) | np.isnan(ap_vals))
+        from selects.ml.aesthetic import ensemble_score
+
+        ens = np.array([
+            v if v is not None else np.nan
+            for v in (
+                ensemble_score(r[model_cols["ap25"]], r[model_cols["nima"]], r[model_cols["iqa"]])
+                for r in rows
+            )
+        ], dtype=float)
+        m_combined = ~np.isnan(ens)
         if m_combined.sum() >= 2:
             ids_c = photo_ids[m_combined]
-            nima_sub = nima_vals[m_combined]
-            ap_sub = ap_vals[m_combined]
-            n_o = np.argsort(nima_sub)
-            n_pct = np.empty_like(nima_sub)
-            n_pct[n_o] = np.arange(len(nima_sub)) / max(1, len(nima_sub) - 1) * 100.0
-            a_o = np.argsort(ap_sub)
-            a_pct = np.empty_like(ap_sub)
-            a_pct[a_o] = np.arange(len(ap_sub)) / max(1, len(ap_sub) - 1) * 100.0
-            c_pct = (n_pct + a_pct) / 2.0
+            v = ens[m_combined]
+            order = np.argsort(v)
+            c_pct = np.empty_like(v)
+            c_pct[order] = np.arange(len(v)) / max(1, len(v) - 1) * 100.0
             id_to_c = dict(zip(ids_c.tolist(), c_pct.tolist()))
             c_upvote_pcts = [id_to_c[uid] for uid in upvoted_ids if uid in id_to_c]
             out["combined"] = {

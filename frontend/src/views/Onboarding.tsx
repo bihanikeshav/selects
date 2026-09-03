@@ -34,7 +34,9 @@ const STAGE_LABELS: Record<string, string> = {
   video: "video",
   classical: "classical",
   embed: "embed",
+  aesthetic: "aesthetic",
   tag: "tag",
+  category: "category",
   ram_tag: "ram_tag",
   smart_tag: "smart_tag",
   face_embed: "face_embed",
@@ -175,6 +177,7 @@ export default function Onboarding() {
             msg.stage === "video" ||
             msg.stage === "classical" ||
             msg.stage === "embed" ||
+            msg.stage === "aesthetic" ||
             msg.stage === "tag" ||
             msg.stage === "ram_tag" ||
             msg.stage === "smart_tag" ||
