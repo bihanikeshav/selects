@@ -111,6 +111,21 @@ def ensemble_score(
     return None
 
 
+def rank_score(
+    ap25: float | None,
+    nima: float | None,
+    iqa: float | None,
+    *,
+    ap_w: float = 0.6,
+    nima_w: float = 0.4,
+) -> float | None:
+    """0–1 ranking score so AP-V2.5 (≈1–10) and CLIP-IQA (0–1) share a scale."""
+    ens = ensemble_score(ap25, nima, iqa, ap_w=ap_w, nima_w=nima_w)
+    if ens is None:
+        return None
+    return float(ens) / 10.0
+
+
 def score_embeddings(feats: np.ndarray) -> np.ndarray:
     """L2-normalised [N, 1152] float32 → AP-V2.5 scores [N] (typically ~1–10)."""
     layers = load_ap25_head()

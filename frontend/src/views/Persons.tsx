@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 
 import PageHeader from "../components/PageHeader";
 import Rail from "../components/Rail";
+import SkeletonGrid from "../components/SkeletonGrid";
 
 interface PersonEntry {
   id: number;
@@ -34,6 +35,7 @@ export default function Persons() {
   const [persons, setPersons] = useState<PersonEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const [facesRan, setFacesRan] = useState(true);
   const [editing, setEditing] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
   const [mergeMode, setMergeMode] = useState(false);
@@ -49,6 +51,7 @@ export default function Persons() {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const d = await r.json();
         setPersons(Array.isArray(d.persons) ? d.persons : []);
+        setFacesRan(d.faces_ran !== false);
         setErr(null);
         setLoading(false);
       })
@@ -205,11 +208,13 @@ export default function Persons() {
         />
 
         <div className="cluster-detail-wrap cluster-detail-wrap--persons">
-          {loading && <div className="cluster-detail-empty">loading...</div>}
+          {loading && <SkeletonGrid count={12} />}
           {!loading && err && <div className="cluster-detail-empty error">{err}</div>}
           {!loading && !err && persons.length === 0 && (
             <div className="cluster-detail-empty">
-              No people yet — indexing still clustering faces.
+              {facesRan
+                ? "No people yet — indexing still clustering faces, or this folder has no faces."
+                : "Face grouping is off in Fast mode. Reindex in Full mode to cluster people."}
             </div>
           )}
           <div className="cluster-detail-grid cluster-detail-grid--wide">

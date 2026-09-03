@@ -22,7 +22,6 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from fastapi import APIRouter, FastAPI, HTTPException
-from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from selects.config import FolderConfig
@@ -179,7 +178,9 @@ def register_video_routes(
         path = frames_dir_for(cfg, sha256) / f"{index:02d}.jpg"
         if not path.exists():
             raise HTTPException(404, detail="frame not found")
-        return FileResponse(path, media_type="image/jpeg")
+        from selects.server.http_cache import jpeg_file
+
+        return jpeg_file(path)
 
     @router.post("/api/videos/process")
     def process_videos():

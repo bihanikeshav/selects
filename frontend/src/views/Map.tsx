@@ -33,7 +33,7 @@ function photoIcon(url: string, count: number): L.DivIcon {
         <img src="${src}" style="width:56px;height:56px;object-fit:cover;border-radius:8px;
           border:3px solid #fff;box-shadow:0 4px 14px rgba(0,0,0,.4);"/>
         <span style="position:absolute;bottom:-4px;right:-4px;background:#1A5DCC;color:#fff;
-          font-family:'Google Sans Code',monospace;font-size:11px;font-weight:700;
+          font-family:ui-monospace,monospace;font-size:11px;font-weight:700;
           padding:2px 6px;border-radius:10px;border:2px solid #fff;">${count}</span>
       </div>
     `,
@@ -90,8 +90,8 @@ export default function MapView() {
       marker.bindPopup(`
         <div style="min-width:160px;">
           <img src="${cover}" style="width:100%;border-radius:6px;" alt=""/>
-          <div style="margin-top:6px;font-family:'Google Sans Display',sans-serif;font-weight:500;">${place}</div>
-          <div style="font-family:'Google Sans Code',monospace;font-size:11px;color:#666;">
+          <div style="margin-top:6px;font-family:system-ui,sans-serif;font-weight:500;">${place}</div>
+          <div style="font-family:ui-monospace,monospace;font-size:11px;color:#666;">
             ${m.count} photo${m.count !== 1 ? "s" : ""} · ${m.lat.toFixed(4)}, ${m.lon.toFixed(4)}
           </div>
           <div style="margin-top:4px;">${clusterLink}</div>
@@ -155,6 +155,7 @@ export default function MapView() {
               background: "var(--md-surface-c-low)",
             }}
           >
+            {loading && <div className="cull-skeleton-hero" style={{ height: "100%", minHeight: "100%" }} />}
             {markers.length === 0 && !loading && (
               <div style={{ display: "grid", placeItems: "center", height: "100%", color: "var(--md-on-surface-var)" }}>
                 {err ?? "No photos with GPS metadata yet."}

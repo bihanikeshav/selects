@@ -974,9 +974,12 @@ export default function BurstCull() {
         )}
 
         {loadState === "loading" && (
-          <section className="cull-stage" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <div style={{ color: "var(--md-on-surface-var)", fontFamily: "var(--font-display)" }}>
-              Loading photos...
+          <section className="cull-stage cull-stage--skeleton" aria-busy="true">
+            <div className="cull-skeleton-hero" />
+            <div className="cull-skeleton-film">
+              {Array.from({ length: 8 }, (_, i) => (
+                <div key={i} className="skeleton-tile" />
+              ))}
             </div>
           </section>
         )}

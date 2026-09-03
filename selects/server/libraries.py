@@ -99,7 +99,7 @@ def register_libraries(
 
     @app.get("/api/libraries/{lib_id}/cover")
     def library_cover(lib_id: str):
-        from fastapi.responses import FileResponse, Response
+        from fastapi.responses import Response
 
         thumb = manager.cover_thumb(lib_id)
         if thumb is None:
@@ -110,7 +110,9 @@ def register_libraries(
                 "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
             )
             return Response(content=px, media_type="image/png")
-        return FileResponse(str(thumb), media_type="image/jpeg")
+        from selects.server.http_cache import jpeg_file
+
+        return jpeg_file(str(thumb))
 
     @app.post("/api/libraries/cancel")
     def cancel_indexing():

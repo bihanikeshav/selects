@@ -21,11 +21,10 @@ type Row = {
   rating: number | null;
 };
 
-type SortKey = keyof Scores;
+type SortKey = "iqa" | "ap25" | "personal";
 
 const SCORE_LABELS: Record<SortKey, string> = {
   iqa: "IQA",
-  nima: "NIMA",
   ap25: "AP V2.5",
   personal: "Personal",
 };
@@ -89,7 +88,6 @@ function Histogram({ data, color }: { data: { x0: number; x1: number; n: number 
 
 const SCORE_COLORS: Record<SortKey, string> = {
   iqa: "var(--g-blue)",
-  nima: "var(--g-green)",
   ap25: "var(--g-yellow)",
   personal: "var(--g-red)",
 };
@@ -354,10 +352,6 @@ export default function CalibrateDashboard() {
                       <div style={{ display: "flex", justifyContent: "space-between" }}>
                         <span style={{ color: SCORE_COLORS.iqa }}>IQA</span>
                         <span style={{ color: "var(--md-on-surface)" }}>{formatScore(r.scores.iqa)}</span>
-                      </div>
-                      <div style={{ display: "flex", justifyContent: "space-between" }}>
-                        <span>nima</span>
-                        <span style={{ color: "var(--md-on-surface)" }}>{formatScore(r.scores.nima)}</span>
                       </div>
                       <div style={{ display: "flex", justifyContent: "space-between" }}>
                         <span>ap25</span>

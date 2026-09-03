@@ -106,6 +106,21 @@ def serve(folder: Path | None, port: int, host: str, no_browser: bool, no_backgr
     from selects.logging_setup import setup_logging
     setup_logging()
 
+    from selects.server.fs_routes import is_loopback_host
+
+    if not is_loopback_host(host):
+        token = os.environ.get("SELECTS_LAN_TOKEN", "").strip()
+        if not token:
+            import secrets
+
+            token = secrets.token_urlsafe(16)
+            os.environ["SELECTS_LAN_TOKEN"] = token
+        click.echo(
+            f"LAN bind: non-local clients must send Authorization: Bearer {token} "
+            f"or open the UI with ?token={token}",
+            err=True,
+        )
+
     from selects.server.app import build_app
     from selects.server.library_manager import LibraryManager
 
