@@ -334,7 +334,7 @@ export default function Search() {
           </div>
         </div>
 
-        <KbdFooter />
+        <KbdFooter variant="browse" />
       </div>
 
       {lightbox !== null && hits[lightbox] && (

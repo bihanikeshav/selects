@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { listCurated, recordSwipe } from "../api/client";
 import type { CuratedPhoto } from "../api/types";
 import ExportPanel from "../components/ExportPanel";
+import ModeViewBar from "../components/ModeViewBar";
 import PageHeader from "../components/PageHeader";
 import Rail from "../components/Rail";
 import TasteCard from "../components/TasteCard";
@@ -110,6 +111,7 @@ export default function Curated() {
       >
         <PageHeader
           context="curated"
+          above={<ModeViewBar />}
           title="Curated"
           subtitle={
             loading

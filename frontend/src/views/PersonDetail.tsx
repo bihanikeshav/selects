@@ -172,7 +172,7 @@ export default function PersonDetail() {
           </div>
         </div>
 
-        <KbdFooter />
+        <KbdFooter variant="browse" />
       </div>
 
       {lightbox !== null && photos[lightbox] && (
