@@ -87,6 +87,38 @@ class TestExportPhotosCopy:
         assert result.skipped[0]["photo_id"] == 1
         assert result.skipped[0]["reason"] == "missing"
 
+    def test_copy_refuses_non_directory_target(self, tmp_path: Path) -> None:
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        p1 = src_dir / "a.jpg"
+        _make_jpeg(p1)
+
+        victim = tmp_path / "not_a_dir.txt"
+        original = b"keep this intact"
+        victim.write_bytes(original)
+
+        with pytest.raises(ValueError, match="directory"):
+            export_photos(
+                [ExportItem(photo_id=1, path=p1)],
+                victim,
+                mode="copy",
+            )
+
+        assert victim.read_bytes() == original
+        assert victim.is_file()
+
+    def test_copy_refuses_missing_parent_tree(self, tmp_path: Path) -> None:
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        p1 = src_dir / "a.jpg"
+        _make_jpeg(p1)
+
+        deep = tmp_path / "nope" / "nested" / "out"
+        with pytest.raises(ValueError, match="parent"):
+            export_photos([ExportItem(photo_id=1, path=p1)], deep, mode="copy")
+
+        assert not (tmp_path / "nope").exists()
+
 
 class TestExportPhotosZip:
     def test_zip_mode_creates_archive_with_entries(self, tmp_path: Path) -> None:
@@ -116,6 +148,55 @@ class TestExportPhotosZip:
 
         assert Path(result.path) == out_dir / "mine.zip"
         assert (out_dir / "mine.zip").is_file()
+
+    def test_zip_refuses_file_as_directory_target(self, tmp_path: Path) -> None:
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        p1 = src_dir / "a.jpg"
+        _make_jpeg(p1)
+
+        victim = tmp_path / "notes.txt"
+        original = b"keep this intact"
+        victim.write_bytes(original)
+
+        with pytest.raises(ValueError, match="directory"):
+            export_photos([ExportItem(photo_id=1, path=p1)], victim, mode="zip")
+
+        assert victim.read_bytes() == original
+
+    def test_zip_refuses_existing_non_zip_file(self, tmp_path: Path) -> None:
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        p1 = src_dir / "a.jpg"
+        _make_jpeg(p1)
+
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+        victim = out_dir / "mine.bin"
+        original = b"not a zip"
+        victim.write_bytes(original)
+
+        with pytest.raises(ValueError, match="non-zip"):
+            export_photos(
+                [ExportItem(photo_id=1, path=p1)],
+                out_dir,
+                mode="zip",
+                zip_name="mine.bin",
+            )
+
+        assert victim.read_bytes() == original
+
+    def test_zip_refuses_missing_parent(self, tmp_path: Path) -> None:
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        p1 = src_dir / "a.jpg"
+        _make_jpeg(p1)
+
+        zip_target = tmp_path / "nope" / "nested" / "bundle.zip"
+        with pytest.raises(ValueError, match="parent"):
+            export_photos([ExportItem(photo_id=1, path=p1)], zip_target, mode="zip")
+
+        assert not (tmp_path / "nope").exists()
 
 
 class TestXmpPlanning:
