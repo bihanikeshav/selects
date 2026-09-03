@@ -96,6 +96,78 @@ async def test_list_photos_sort_aesthetic_uses_iqa(tmp_path):
         assert iqas[2] is None
 
 
+async def test_list_curated_sort_aesthetic_uses_iqa(tmp_path):
+    from datetime import datetime
+
+    from selects.db import session_scope
+    from selects.db.models import Embedding, Photo, Swipe
+
+    cfg = get_folder_config(tmp_path)
+    Session = init_db(cfg.db_path)
+    with session_scope(Session) as s:
+        low = Photo(path=str(tmp_path / "low.jpg"), sha256="a" * 64, taken_at=datetime(2024, 1, 1))
+        high = Photo(path=str(tmp_path / "high.jpg"), sha256="b" * 64, taken_at=datetime(2024, 1, 2))
+        missing = Photo(path=str(tmp_path / "none.jpg"), sha256="c" * 64, taken_at=datetime(2024, 1, 3))
+        rejected = Photo(
+            path=str(tmp_path / "rej.jpg"), sha256="d" * 64, taken_at=datetime(2024, 1, 4)
+        )
+        s.add_all([low, high, missing, rejected])
+        s.flush()
+        s.add(Embedding(photo_id=low.id, siglip=b"\x00" * 2304, aesthetic_iqa=0.2))
+        s.add(Embedding(photo_id=high.id, siglip=b"\x00" * 2304, aesthetic_iqa=0.9))
+        s.add(Embedding(photo_id=missing.id, siglip=b"\x00" * 2304, aesthetic_iqa=None))
+        s.add(Embedding(photo_id=rejected.id, siglip=b"\x00" * 2304, aesthetic_iqa=0.99))
+        s.add(Swipe(photo_id=low.id, decision="keep"))
+        s.add(Swipe(photo_id=high.id, decision="silver"))
+        s.add(Swipe(photo_id=missing.id, decision="keep"))
+        s.add(Swipe(photo_id=rejected.id, decision="reject"))
+
+    app = build_app(cfg, run_background=False)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        r = await client.get("/api/curated?sort=aesthetic")
+        assert r.status_code == 200
+        body = r.json()
+        # Liked photos missing IQA stay in the set (nulls last); rejects are dropped.
+        assert body["total"] == 3
+        photos = body["photos"]
+        iqas = [item["iqa"] for item in photos]
+        assert iqas[0] == pytest.approx(0.9)
+        assert iqas[1] == pytest.approx(0.2)
+        assert iqas[2] is None
+        assert [item["combined"] for item in photos] == iqas
+        assert all(item["ap25"] is None and item["nima"] is None for item in photos)
+
+
+async def test_doctor_blurry_keepers_uses_iqa_percentile(tmp_path):
+    from selects.db import session_scope
+    from selects.db.models import ClassicalScore, Embedding, Photo
+
+    cfg = get_folder_config(tmp_path)
+    Session = init_db(cfg.db_path)
+    with session_scope(Session) as s:
+        for i, iqa in enumerate([0.2, 0.4, 0.6, 0.8]):
+            p = Photo(path=str(tmp_path / f"{i}.jpg"), sha256=f"{i:064x}")
+            s.add(p)
+            s.flush()
+            s.add(ClassicalScore(photo_id=p.id, blur=200.0, luma_mean=0.5))
+            s.add(Embedding(photo_id=p.id, siglip=b"\x00" * 2304, aesthetic_iqa=iqa))
+
+    app = build_app(cfg, run_background=False)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        r = await client.get("/api/doctor/issues")
+        assert r.status_code == 200
+        body = r.json()
+        keepers = body["blurry_keepers"]
+        # Library 50th percentile of [0.2, 0.4, 0.6, 0.8] is 0.5.
+        keeper_iqas = sorted(k["combined"] for k in keepers)
+        assert len(keeper_iqas) == 2
+        assert keeper_iqas[0] == pytest.approx(0.6)
+        assert keeper_iqas[1] == pytest.approx(0.8)
+        assert body["counts"]["blurry_keepers"] == 2
+
+
 async def test_thumb_rejects_non_hex_sha(tmp_path):
     cfg = get_folder_config(tmp_path)
     init_db(cfg.db_path)

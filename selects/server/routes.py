@@ -1063,12 +1063,12 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
           - overexposed:  high clipping ratio at the top end
           - out_of_focus: ClassicalScore.blur (Laplacian variance) below a threshold —
                           genuinely soft/out-of-focus frames, best fixed with Deblur (nafnet)
-          - blurry_keeper: blur low but combined aesthetic high (rescuable)
+          - blurry_keeper: blur low but CLIP-IQA at/above the library 50th percentile
 
         Each photo can appear in multiple buckets.
         """
-        AP_W = cfg.ap_weight
-        NIMA_W = cfg.nima_weight
+        from selects.ml.curation import compute_library_threshold
+
         # ClassicalScore.blur is a Laplacian-variance sharpness metric; lower means
         # softer. 150 sits well below the typical in-focus range (400+) seen across
         # the library's distribution and reliably isolates genuinely out-of-focus
@@ -1078,9 +1078,11 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
         UNDER_MEAN = 0.32      # mean luma below this → underexposed
         OVER_MEAN = 0.78       # mean luma above this → overexposed
         HI_CLIP = 0.07         # >7% of pixels saturated at top end → overexposed
-        AESTHETIC_HIGH = 5.8   # combined aesthetic threshold for "keeper" status
 
         with session_scope(Session) as s:
+            iqa_floor = compute_library_threshold(
+                s, pct_floor=cfg.aesthetic_library_pct,
+            )
             rows = (
                 s.query(
                     Photo.id,
@@ -1091,11 +1093,10 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
                     ClassicalScore.luma_mean,
                     ClassicalScore.clipped_high,
                     ClassicalScore.clipped_low,
-                    AestheticScore.ap25_score,
-                    AestheticScore.nima_score,
+                    Embedding.aesthetic_iqa,
                 )
                 .join(ClassicalScore, ClassicalScore.photo_id == Photo.id)
-                .outerjoin(AestheticScore, AestheticScore.photo_id == Photo.id)
+                .outerjoin(Embedding, Embedding.photo_id == Photo.id)
                 .all()
             )
 
@@ -1111,14 +1112,10 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
         # the DB once at the end so future visits skip the preview decode.
         freshly_computed: dict[int, dict] = {}
 
-        for pid, sha, taken, blur, exp, luma_mean, clipped_high, clipped_low, ap25, nima in rows:
+        for pid, sha, taken, blur, exp, luma_mean, clipped_high, clipped_low, iqa in rows:
             blur_v = blur if blur is not None else 9999.0
             exp_v = exp if exp is not None else 0.5
-            combined = (
-                AP_W * ap25 + NIMA_W * nima
-                if ap25 is not None and nima is not None
-                else None
-            )
+            combined = float(iqa) if iqa is not None else None
             base = {
                 "photo_id": pid,
                 "sha256": sha,
@@ -1162,7 +1159,11 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
 
             if blur_v < BLUR_HARD:
                 out_of_focus.append(base)
-            elif blur_v < BLUR_SOFT and combined is not None and combined >= AESTHETIC_HIGH:
+            elif (
+                blur_v < BLUR_SOFT
+                and combined is not None
+                and (iqa_floor is None or combined >= iqa_floor)
+            ):
                 blurry_keepers.append(base)
 
         # Persist any newly-computed stats so the next Doctor visit is instant.
@@ -1516,44 +1517,39 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
         sort: str = Query("aesthetic", description="aesthetic | taken_at"),
     ):
         """Return all photos the user has liked (Swipe.decision in keep/silver),
-        sorted by combined NIMA+AP aesthetic descending by default.
+        sorted by CLIP-IQA descending (nulls last) by default.
 
         This is the curated set — the user's chosen keepers post-cull,
-        post-curate, ready for edit and post.
+        post-curate, ready for edit and post. Liked photos missing IQA
+        stay in the set; they sort last under sort=aesthetic.
         """
         from selects.db.models import Swipe
 
         with session_scope(Session) as s:
             base = (
-                s.query(
-                    Photo,
-                    AestheticScore.ap25_score,
-                    AestheticScore.nima_score,
-                )
+                s.query(Photo, Embedding.aesthetic_iqa)
                 .join(Swipe, Swipe.photo_id == Photo.id)
-                .outerjoin(AestheticScore, AestheticScore.photo_id == Photo.id)
+                .outerjoin(Embedding, Embedding.photo_id == Photo.id)
                 .filter(Swipe.decision.in_(["keep", "silver"]))
             )
+            if sort == "aesthetic":
+                base = base.order_by(Embedding.aesthetic_iqa.desc().nulls_last())
             rows = base.all()
-            ap_w, nima_w = cfg.ap_weight, cfg.nima_weight
             entries = []
-            for photo, ap25, nima in rows:
-                combined = None
-                if ap25 is not None and nima is not None:
-                    combined = ap_w * ap25 + nima_w * nima
+            for photo, iqa in rows:
+                iqa_f = float(iqa) if iqa is not None else None
                 entries.append({
                     "photo_id": photo.id,
                     "sha256": photo.sha256,
                     "taken_at": photo.taken_at.isoformat() if photo.taken_at else None,
                     "thumb_url": f"/api/thumb/{photo.sha256}",
                     "preview_url": f"/api/preview/{photo.sha256}",
-                    "combined": combined,
-                    "ap25": ap25,
-                    "nima": nima,
+                    "combined": iqa_f,
+                    "iqa": iqa_f,
+                    "ap25": None,
+                    "nima": None,
                 })
-            if sort == "aesthetic":
-                entries.sort(key=lambda e: -(e["combined"] or -1e9))
-            else:  # taken_at
+            if sort != "aesthetic":
                 entries.sort(key=lambda e: e["taken_at"] or "")
         return {"total": len(entries), "photos": entries}
 

@@ -51,13 +51,13 @@ LOOKING_AWAY_YAW_DEG = 45.0
 # ignored by the burst penalty (they still get attributes stored).
 MIN_PENALTY_FACE_AREA = 0.005
 
-# Burst-pick penalty, in combined-aesthetic units (AP25/NIMA blend lives on a
-# roughly 0-10 scale). The CAP bounds the total penalty so face quality can
-# only flip *near-equal* candidates — a bigger aesthetic gap always wins.
-PENALTY_CAP = 0.5
-CLOSED_EYE_PENALTY_SINGLE = 0.30   # exactly one face, eyes closed
-CLOSED_EYE_PENALTY_GROUP = 0.45    # per closed-eye face in a 3+ mostly-frontal group
-CLOSED_EYE_PENALTY_OTHER = 0.20    # per closed-eye face otherwise (2 faces, profiles…)
+# Burst-pick penalty, in CLIP-IQA units ([0, 1]). The CAP bounds the total
+# penalty so face quality can only flip *near-equal* candidates — a bigger
+# aesthetic gap always wins.
+PENALTY_CAP = 0.05
+CLOSED_EYE_PENALTY_SINGLE = 0.03    # exactly one face, eyes closed
+CLOSED_EYE_PENALTY_GROUP = 0.045   # per closed-eye face in a 3+ mostly-frontal group
+CLOSED_EYE_PENALTY_OTHER = 0.02    # per closed-eye face otherwise (2 faces, profiles…)
 
 _EYE_NEIGHBORHOOD_K = 8
 
@@ -211,7 +211,7 @@ def rollup_face_quality(faces: Iterable[FaceAttrs]) -> dict:
 # ── burst-pick penalty ────────────────────────────────────────────────────────
 
 def face_quality_penalty(faces: Iterable[FaceAttrs]) -> float:
-    """Bounded penalty (combined-aesthetic units) for burst picking.
+    """Bounded penalty (CLIP-IQA units in [0, 1]) for burst picking.
 
     Contextual rules:
       * 3+ faces, mostly frontal (>= 60% within FRONTAL_YAW_DEG): closed eyes
