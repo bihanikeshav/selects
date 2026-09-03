@@ -113,7 +113,9 @@ def build_app(
 
             def worker():
                 try:
-                    run_pipeline_stages(manager.active_cfg, publish)
+                    run_pipeline_stages(
+                        manager.active_cfg, publish, should_cancel=manager.should_cancel
+                    )
                 finally:
                     manager.end_indexing()
 
