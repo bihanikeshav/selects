@@ -101,7 +101,57 @@ def index_folder(
         if on_progress:
             on_progress(total, total, f"{failed} file(s) could not be read")
 
+    # Only a full walk knows the complete set of files on disk; a `paths=`
+    # subset says nothing about the rest of the library, so never prune then.
+    if paths is None:
+        pruned = prune_missing(cfg, Session)
+        if pruned and on_progress:
+            on_progress(total, total, f"{pruned} missing file(s) removed")
+
     return added
+
+
+def prune_missing(cfg: FolderConfig, Session) -> int:
+    """Delete Photo/Video rows whose file is gone, and their orphaned derivatives.
+
+    Thumbs/previews are content-addressed by sha256, so a thumb is only unlinked
+    when no surviving row still references that sha. Returns the row count.
+    """
+    gone: list[tuple[type, int, str | None, str | None, str | None]] = []
+    orphans: list[Path] = []
+
+    with session_scope(Session) as s:
+        for model in (Photo, Video):
+            for id_, path, sha, thumb, preview in s.execute(
+                select(model.id, model.path, model.sha256, model.thumb_path, model.preview_path)
+            ):
+                if not Path(path).exists():
+                    gone.append((model, id_, sha, thumb, preview))
+        if not gone:
+            return 0
+
+        for model, id_, *_ in gone:
+            row = s.get(model, id_)
+            if row is not None:
+                s.delete(row)
+        s.flush()
+
+        surviving = set(s.scalars(select(Photo.sha256))) | set(s.scalars(select(Video.sha256)))
+        for _, _, sha, thumb, preview in gone:
+            if sha is not None and sha in surviving:
+                continue
+            for rel in (thumb, preview):
+                if rel:
+                    orphans.append(cfg.state_dir / rel)
+
+    for f in orphans:
+        try:
+            f.unlink(missing_ok=True)
+        except OSError as exc:
+            log.warning("Could not remove %s: %s", f, exc)
+
+    log.info("Pruned %d row(s) for files no longer on disk", len(gone))
+    return len(gone)
 
 
 def _ingest_photo(
