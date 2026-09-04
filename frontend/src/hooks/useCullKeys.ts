@@ -1,24 +1,26 @@
 import { useEffect, useRef } from "react";
 
 /**
- * Global-in-view keyboard layer for culling.
+ * The single keyboard layer for the Review screen.
  *
  * Bindings (all suppressed while an input/textarea/select/contenteditable is
  * focused, and while any of Ctrl/Meta/Alt is held so browser shortcuts pass
  * through):
  *
- *   ArrowUp / ArrowLeft   -> onPrev   (navigate back)
- *   ArrowDown / ArrowRight -> onNext  (navigate forward)
- *   X                  -> onReject    (reject + advance, caller decides)
- *   C / Space          -> onKeep      (keep + advance, caller decides)
- *   U                  -> onUndo      (undo last decision)
- *   Z                  -> onZoomToggle (100% zoom at cursor point)
- *   Tab                -> onNextGroup (jump to next burst group)
- *   V                  -> onCompareToggle (toggle frame in compare selection)
- *   Enter              -> onCompareOpen (only handled when provided)
+ *   ArrowLeft / ArrowRight -> onPrev / onNext   (navigate)
+ *   K                  -> onKeep            (keep + advance, caller decides)
+ *   X                  -> onReject          (reject + advance)
+ *   U                  -> onUndo            (undo last decision)
+ *   Z                  -> onZoomToggle      (100% zoom at cursor point)
+ *   V                  -> onCompareToggle   (toggle frame in compare selection)
+ *   Enter              -> onCompareOpen     (only handled when provided)
+ *   Tab                -> onNextGroup       (jump to next burst)
+ *   [ / ]              -> onBurstPrev / onBurstNext (cycle within a burst)
+ *   E                  -> onEnhance         (auto edit)
+ *   S                  -> onStraighten
  *
- * Handlers are read through a ref, so inline closures are fine — the
- * listener itself is attached once.
+ * No other letter is bound. Handlers are read through a ref, so inline
+ * closures are fine — the listener itself is attached once.
  */
 export interface CullKeyHandlers {
   /** Set false to suspend the whole layer (e.g. while a modal is open). */
@@ -33,6 +35,10 @@ export interface CullKeyHandlers {
   onCompareToggle?: () => void;
   /** Handled only when defined — leave undefined to let Enter through. */
   onCompareOpen?: () => void;
+  onBurstPrev?: () => void;
+  onBurstNext?: () => void;
+  onEnhance?: () => void;
+  onStraighten?: () => void;
 }
 
 function isEditableTarget(t: EventTarget | null): boolean {
@@ -58,26 +64,23 @@ export function useCullKeys(handlers: CullKeyHandlers): void {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
 
       switch (e.key) {
-        case "ArrowUp":
         case "ArrowLeft":
           e.preventDefault();
           h.onPrev?.();
           break;
-        case "ArrowDown":
         case "ArrowRight":
           e.preventDefault();
           h.onNext?.();
+          break;
+        case "k":
+        case "K":
+          e.preventDefault();
+          h.onKeep?.();
           break;
         case "x":
         case "X":
           e.preventDefault();
           h.onReject?.();
-          break;
-        case " ":
-        case "c":
-        case "C":
-          e.preventDefault();
-          h.onKeep?.();
           break;
         case "u":
         case "U":
@@ -92,6 +95,24 @@ export function useCullKeys(handlers: CullKeyHandlers): void {
         case "Tab":
           e.preventDefault();
           h.onNextGroup?.();
+          break;
+        case "[":
+          e.preventDefault();
+          h.onBurstPrev?.();
+          break;
+        case "]":
+          e.preventDefault();
+          h.onBurstNext?.();
+          break;
+        case "e":
+        case "E":
+          e.preventDefault();
+          h.onEnhance?.();
+          break;
+        case "s":
+        case "S":
+          e.preventDefault();
+          h.onStraighten?.();
           break;
         case "v":
         case "V":

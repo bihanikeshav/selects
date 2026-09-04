@@ -8,6 +8,7 @@ import type {
   ModelsStatus,
   Moment,
   PhotoList,
+  SwipeSummary,
 } from "./types";
 
 const BASE = "/api";
@@ -67,13 +68,26 @@ export async function setMomentPrimary(momentId: number, photoId: number): Promi
   if (!res.ok) throw new Error(`setMomentPrimary ${res.status}`);
 }
 
-export async function recordSwipe(sha256: string, decision: "keep" | "reject" | "silver" | "skip"): Promise<void> {
+export async function recordSwipe(sha256: string, decision: "keep" | "reject"): Promise<void> {
   const res = await fetch(`${BASE}/swipes/${sha256}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ decision }),
   });
   if (!res.ok) throw new Error(`recordSwipe ${res.status}`);
+}
+
+/** Clears any recorded verdict for a photo, putting it back to undecided. */
+export async function deleteSwipe(sha256: string): Promise<{ ok: boolean; deleted: boolean }> {
+  const res = await fetch(`${BASE}/swipes/${sha256}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`deleteSwipe ${res.status}`);
+  return res.json();
+}
+
+export async function swipeSummary(collapse: "moments" | "none" = "moments"): Promise<SwipeSummary> {
+  const res = await fetch(`${BASE}/swipes/summary?collapse=${collapse}`);
+  if (!res.ok) throw new Error(`swipeSummary ${res.status}`);
+  return res.json();
 }
 
 export async function getLikedStatus(sha256s: string[]): Promise<Record<string, boolean>> {

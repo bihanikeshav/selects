@@ -158,3 +158,14 @@ export interface CuratedPhoto {
   moment_id?: number | null;
   moment_size?: number | null;
 }
+
+/**
+ * Verdict tally over the same photo set `/api/photos` returns for the given
+ * collapse mode, so `kept + rejected + undecided === total_photos`.
+ */
+export interface SwipeSummary {
+  total_photos: number;
+  kept: number;
+  rejected: number;
+  undecided: number;
+}
