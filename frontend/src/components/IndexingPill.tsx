@@ -42,7 +42,7 @@ export default function IndexingPill() {
               // Only synthesise when no frame has been seen; a real frame
               // carries the live stage and counts and must win.
               if (!msgRef.current) {
-                setMsg({ stage: "index", current: 0, total: 0, message: "Indexing…" });
+                setMsg({ stage: "index", current: 0, total: 0 });
               }
             } else if (msgRef.current?.stage !== "models") {
               setMsg(null);

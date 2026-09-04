@@ -93,6 +93,8 @@ def register_photos_routes(app: FastAPI, cfg: FolderConfig) -> None:
         ),
         seed: Optional[int] = Query(
             None,
+            ge=1,
+            le=2_147_483_646,
             description=(
                 "Only meaningful with sort=random: makes the shuffle deterministic "
                 "so OFFSET paging is stable for the length of a session. Without "
@@ -176,11 +178,23 @@ def register_photos_routes(app: FastAPI, cfg: FolderConfig) -> None:
                 base = base.order_by(Embedding.aesthetic_iqa.desc(), Photo.id.asc())
             elif sort == "random":
                 if seed is not None:
-                    # A seeded, deterministic shuffle: multiplying the id by the
-                    # seed modulo a large prime scatters ids reproducibly, so the
-                    # client can page through one stable random order.
+                    # A seeded, deterministic shuffle: derive a per-seed
+                    # multiplier that is itself large (so it wraps the id*mult
+                    # product many times over) by folding the seed into the
+                    # multiplicand, then order by (id * multiplier) mod a large
+                    # prime. Mixing the seed additively -- e.g.
+                    # `id * A + seed * B`, or a multiplier like `A + seed` --
+                    # only shifts every id's key by the same seed-derived
+                    # amount, which for small seeds barely wraps and leaves the
+                    # order close to (or identical to) plain id order; folding
+                    # the seed into the *multiplier itself* changes which ids
+                    # wrap the modulus and by how much, scattering the order
+                    # for every seed -- including small ones like 1, 2 or 7 --
+                    # so the client can page through one stable random order.
+                    multiplier = (2654435761 * (2 * seed + 1)) % 2147483647
                     base = base.order_by(
-                        ((Photo.id * seed) % 2147483647).asc(), Photo.id.asc()
+                        ((Photo.id * multiplier) % 2147483647).asc(),
+                        Photo.id.asc(),
                     )
                 else:
                     base = base.order_by(_func.random())
