@@ -7,6 +7,7 @@ import StackPhoto from "../components/StackPhoto";
 import Viewer from "../components/Viewer";
 import PhotoEditor from "../editor/PhotoEditor";
 import type { CuratedPhoto } from "../api/types";
+import { stripPlaceSuffix } from "../lib/placeName";
 
 type CurateResp = {
   facet: string;
@@ -68,7 +69,7 @@ export default function BestOf() {
     if (!facet || !value) return "Best of";
     if (facet === "person") return `Best of ${personLabel || `P${value}`}`;
     if (facet === "category") return `Best ${value}s`;
-    return `Best of ${value}`;
+    return `Best of ${stripPlaceSuffix(value)}`;
   }, [facet, value, personLabel]);
 
   const toggle = useCallback((sha: string) => {
@@ -123,14 +124,14 @@ export default function BestOf() {
         }}
       >
         <PageHeader
-          context={`best of: ${facet}=${value}`}
+          context={title}
           title={title}
           subtitle={
             <>
               {data ? `${data.total} curated photos` : loading ? "Loading…" : ""}
               {" · "}
               <span style={{ fontFamily: "var(--font-mono)" }}>
-                {FACET_LABELS[facet || ""] ?? facet}: {value}
+                {FACET_LABELS[facet || ""] ?? facet}: {stripPlaceSuffix(value ?? "")}
               </span>
             </>
           }
@@ -203,7 +204,7 @@ export default function BestOf() {
                     onFocus={() => setFocusedPhotoId(p.photo_id)}
                     onClick={(activeSha) => toggle(activeSha)}
                     onDoubleClick={() => setLightboxIdx(i)}
-                    title={`IQA ${
+                    title={`Quality ${
                       (p.iqa ?? p.combined) != null
                         ? (p.iqa ?? p.combined)!.toFixed(2)
                         : "—"

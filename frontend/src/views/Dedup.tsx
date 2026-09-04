@@ -205,7 +205,7 @@ export default function Dedup() {
         }}
       >
         <PageHeader
-          context="duplicates"
+          context="Duplicates"
           title="Duplicates"
           subtitle={
             result

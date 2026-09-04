@@ -75,7 +75,7 @@ export default function PersonDetail() {
     <div className="app">
       <Rail />
       <div className="workspace">
-        <Topbar folder="selects" context={`person · ${displayName}`} />
+        <Topbar folder="selects" context="People" />
         <StatusRow
           pos={`${photos.length} photos`}
           keepersCount={selected.size}

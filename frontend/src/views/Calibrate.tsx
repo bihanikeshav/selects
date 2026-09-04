@@ -196,7 +196,7 @@ export default function Calibrate() {
         }}
       >
         <PageHeader
-          context="aesthetic calibration"
+          context="Calibrate"
           title="Calibrate"
           subtitle="Rescue shots the aesthetic models ranked low — click the ones that are actually good. That trains the personal model. Unclicked = confirmed bad."
           actions={

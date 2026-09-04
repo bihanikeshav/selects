@@ -17,10 +17,10 @@ interface PageHeaderProps {
 
 /**
  * Canonical page header shared across every top-level tab. It renders a
- * fixed-height (170px) shell so every view's header lines up pixel-for-pixel,
+ * fixed-height (148px) shell so every view's header lines up pixel-for-pixel,
  * regardless of whether it carries a mode bar or a control strip:
  *
- *   ┌ page-shell (170px) ─────────────────────────┐
+ *   ┌ page-shell (148px) ─────────────────────────┐
  *   │ Topbar (breadcrumb)                          │
  *   │ [above]      — optional ModeViewBar          │
  *   │ page-header  — title + subtitle + actions    │

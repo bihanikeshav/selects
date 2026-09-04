@@ -176,7 +176,7 @@ export default function Persons() {
         }}
       >
         <PageHeader
-          context="persons"
+          context="People"
           title="People"
           subtitle={loading ? "loading..." : err ?? mergeSummary}
           actions={
