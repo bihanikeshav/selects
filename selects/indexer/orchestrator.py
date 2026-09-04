@@ -103,7 +103,10 @@ def index_folder(
 
     # Only a full walk knows the complete set of files on disk; a `paths=`
     # subset says nothing about the rest of the library, so never prune then.
-    if paths is None:
+    # A walk that found nothing is not evidence the library is empty either --
+    # an unmounted drive or an unreachable network share yields zero files
+    # without raising, and pruning on that would delete every row.
+    if paths is None and total > 0 and cfg.folder.exists():
         pruned = prune_missing(cfg, Session)
         if pruned and on_progress:
             on_progress(total, total, f"{pruned} missing file(s) removed")
