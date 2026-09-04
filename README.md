@@ -214,6 +214,11 @@ pip install -e ".[dev]" && pytest && ruff check .
 cd frontend && npm run lint && npm run e2e   # ESLint + Playwright smoke test
 ```
 
+`npm run e2e` needs Chromium once (`npx playwright install chromium`). It builds the SPA into
+`selects/server/static/`, indexes a throwaway six-photo library in the temp directory and drives the
+real server on port 8765. Point `SELECTS_PYTHON` at the interpreter that has `selects` installed if
+it is not the one on `PATH` (e.g. `SELECTS_PYTHON=../.venv/Scripts/python.exe`).
+
 For the native desktop window (`pywebview`), install `selects[desktop]` (or `selects[ml,desktop]`
 for AI + the desktop window).
 
