@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { libraryStatus } from "./api/client";
 import { warmupSearch } from "./api/search2";
+import { ProgressSocketProvider } from "./components/ProgressSocketProvider";
 import Rail from "./components/Rail";
 import TitleBar from "./components/TitleBar";
 import BurstCull from "./views/BurstCull";
@@ -94,6 +95,7 @@ function RouteFallback() {
 export default function App() {
   return (
     <BrowserRouter>
+      <ProgressSocketProvider>
       <TitleBar />
       <OnboardingGate />
       <SearchEngineWarmup />
@@ -133,6 +135,7 @@ export default function App() {
         <Route path="/persons/:id" element={<LegacyPersonIdRedirect />} />
         </Routes>
       </Suspense>
+      </ProgressSocketProvider>
     </BrowserRouter>
   );
 }

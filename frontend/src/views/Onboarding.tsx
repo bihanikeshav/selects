@@ -179,6 +179,10 @@ export default function Onboarding() {
       },
       onClose: () => {
         if (doneRef.current || stoppingRef.current) return;
+        // A hidden tab does not reconnect until it is shown again, so a close
+        // there is expected — do not accuse the backend of dropping out in a
+        // banner nobody can see (and which would still be up on return).
+        if (document.visibilityState === "hidden") return;
         const p = phaseRef.current;
         if (p === "indexing" || p === "models") {
           setErr("Progress connection lost — reconnecting…");

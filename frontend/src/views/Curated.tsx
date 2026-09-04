@@ -201,6 +201,20 @@ export default function Curated() {
                       onBlur={() => setFocusedIdx((cur) => (cur === i ? null : cur))}
                       onClick={() => toggleSelected(p.sha256)}
                       onDoubleClick={() => setLightboxIdx(i)}
+                      // Enter opens, Space selects. Both are handled here (and
+                      // the default button activation prevented) so the two
+                      // keys never collapse onto the same action.
+                      onKeyDown={(e) => {
+                        if (lightboxIdx !== null) return;
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          setLightboxIdx(i);
+                        } else if (e.key === " " || e.key === "Spacebar") {
+                          e.preventDefault();
+                          toggleSelected(p.sha256);
+                        }
+                      }}
+                      title="Enter opens the photo · Space selects it · X removes it from keepers"
                       className={`curated-tile${isSel ? " is-selected" : ""}${isFocused ? " is-focused" : ""}`}
                     >
                       <img src={p.thumb_url} alt="" loading="lazy" />

@@ -24,9 +24,9 @@ type Row = {
 type SortKey = "iqa" | "ap25" | "personal";
 
 const SCORE_LABELS: Record<SortKey, string> = {
-  iqa: "IQA",
-  ap25: "AP V2.5",
-  personal: "Personal",
+  iqa: "Quality score",
+  ap25: "Aesthetic model",
+  personal: "Your taste",
 };
 
 function pearson(xs: number[], ys: number[]): number {
@@ -350,15 +350,15 @@ export default function CalibrateDashboard() {
                       }}
                     >
                       <div style={{ display: "flex", justifyContent: "space-between" }}>
-                        <span style={{ color: SCORE_COLORS.iqa }}>IQA</span>
+                        <span style={{ color: SCORE_COLORS.iqa }} title="Quality score (IQA)">Quality</span>
                         <span style={{ color: "var(--md-on-surface)" }}>{formatScore(r.scores.iqa)}</span>
                       </div>
                       <div style={{ display: "flex", justifyContent: "space-between" }}>
-                        <span>ap25</span>
+                        <span title="Aesthetic model (AP-V2.5)">Aesthetic</span>
                         <span style={{ color: "var(--md-on-surface)" }}>{formatScore(r.scores.ap25)}</span>
                       </div>
                       <div style={{ display: "flex", justifyContent: "space-between" }}>
-                        <span style={{ color: SCORE_COLORS.personal }}>personal</span>
+                        <span style={{ color: SCORE_COLORS.personal }} title="Your taste model">Your taste</span>
                         <span style={{ color: "var(--md-on-surface)" }}>
                           {formatScore(r.scores.personal)}
                         </span>
