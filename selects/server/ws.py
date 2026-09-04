@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 from typing import AsyncIterator
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -31,10 +32,17 @@ def lan_auth_ok(
     if is_loopback_host(client_host):
         return True
     return (
-        authorization == f"Bearer {lan_token}"
-        or query_token == lan_token
-        or cookie == lan_token
+        _matches(authorization, f"Bearer {lan_token}")
+        or _matches(query_token, lan_token)
+        or _matches(cookie, lan_token)
     )
+
+
+def _matches(candidate: str | None, secret: str) -> bool:
+    """Constant-time comparison that tolerates a missing candidate."""
+    if candidate is None:
+        return False
+    return hmac.compare_digest(candidate.encode("utf-8"), secret.encode("utf-8"))
 
 
 class ProgressBus:
