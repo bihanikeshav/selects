@@ -20,6 +20,7 @@ from typing import Literal
 
 from fastapi import APIRouter, FastAPI, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy import select
 
 from selects.config import FolderConfig
 from selects.db import init_db, session_scope
@@ -127,13 +128,14 @@ def register_export_routes(app: FastAPI, cfg: FolderConfig) -> None:
             story = s.get(Story, story_id)
             if not story:
                 raise HTTPException(404, detail="story not found")
-            photo_ids = {
-                pid for (pid,) in s.query(StoryItem.photo_id).filter(StoryItem.story_id == story_id).all()
-            }
+            # Subquery, not a bound id list: a story can hold a whole trip's
+            # worth of photos and SQLite caps bound variables per statement.
             rows = (
                 s.query(Photo, Swipe.decision)
                 .join(Swipe, Swipe.photo_id == Photo.id)
-                .filter(Photo.id.in_(photo_ids))
+                .filter(Photo.id.in_(
+                    select(StoryItem.photo_id).where(StoryItem.story_id == story_id)
+                ))
                 .all()
             )
             return [

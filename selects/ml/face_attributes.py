@@ -280,21 +280,24 @@ def stack_face_penalties(s, photo_ids: Iterable[int]) -> dict[int, float]:
     *s* is an open SQLAlchemy session.
     """
     from selects.db.models import FaceEmbedding
+    from selects.util import chunked
 
     ids = list(photo_ids)
     if not ids:
         return {}
-    rows = (
-        s.query(
-            FaceEmbedding.photo_id,
-            FaceEmbedding.eyes_open,
-            FaceEmbedding.yaw,
-            FaceEmbedding.pitch,
-            FaceEmbedding.face_area_ratio,
+    rows = []
+    for chunk in chunked(ids):
+        rows.extend(
+            s.query(
+                FaceEmbedding.photo_id,
+                FaceEmbedding.eyes_open,
+                FaceEmbedding.yaw,
+                FaceEmbedding.pitch,
+                FaceEmbedding.face_area_ratio,
+            )
+            .filter(FaceEmbedding.photo_id.in_(chunk))
+            .all()
         )
-        .filter(FaceEmbedding.photo_id.in_(ids))
-        .all()
-    )
     by_photo: dict[int, list[FaceAttrs]] = {}
     for pid, eyes_open, yaw, pitch, area in rows:
         by_photo.setdefault(pid, []).append(

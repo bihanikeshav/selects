@@ -11,6 +11,7 @@ from selects.db import init_db, session_scope
 from selects.db.models import ClassicalScore, Embedding, Photo
 from selects.server.http_cache import IMMUTABLE
 from selects.server.schemas import PersonList, PersonOut, PhotoList, photo_out
+from selects.util import chunked
 
 log = logging.getLogger(__name__)
 
@@ -56,11 +57,11 @@ def register_persons_routes(app: FastAPI, cfg: FolderConfig) -> None:
             # Every candidate cluster's faces in one query, grouped in Python.
             # This used to be one round trip per person.
             faces_by_person: dict[int, list] = {}
-            if visible:
+            for chunk in chunked([p.id for p in visible]):
                 for person_id, face in (
                     s.query(PhotoPerson.person_id, FaceEmbedding)
                     .join(FaceEmbedding, PhotoPerson.face_embedding_id == FaceEmbedding.id)
-                    .filter(PhotoPerson.person_id.in_([p.id for p in visible]))
+                    .filter(PhotoPerson.person_id.in_(chunk))
                     .all()
                 ):
                     faces_by_person.setdefault(person_id, []).append(face)
@@ -198,7 +199,9 @@ def register_persons_routes(app: FastAPI, cfg: FolderConfig) -> None:
             if not target:
                 raise HTTPException(404, detail="target person not found")
 
-            sources = s.query(Person).filter(Person.id.in_(source_ids)).all()
+            sources = []
+            for chunk in chunked(source_ids):
+                sources.extend(s.query(Person).filter(Person.id.in_(chunk)).all())
             if len(sources) != len(source_ids):
                 raise HTTPException(404, detail="one or more source persons were not found")
 
@@ -208,11 +211,13 @@ def register_persons_routes(app: FastAPI, cfg: FolderConfig) -> None:
                     target.label = first_source_label
 
             moved = 0
-            source_rows = (
-                s.query(PhotoPerson)
-                .filter(PhotoPerson.person_id.in_(source_ids))
-                .all()
-            )
+            source_rows = []
+            for chunk in chunked(source_ids):
+                source_rows.extend(
+                    s.query(PhotoPerson)
+                    .filter(PhotoPerson.person_id.in_(chunk))
+                    .all()
+                )
             # Track which target (photo_id) rows exist so two source persons in the
             # same photo don't try to insert a duplicate (photo_id, target) PK.
             target_photos: set[int] = {
@@ -259,20 +264,17 @@ def register_persons_routes(app: FastAPI, cfg: FolderConfig) -> None:
         from selects.db.models import PhotoPerson
 
         with session_scope(Session) as s:
-            ids = [
-                r[0]
-                for r in s.query(PhotoPerson.photo_id)
-                .filter(PhotoPerson.person_id == person_id)
-                .all()
-            ]
-            if not ids:
-                return PhotoList(total=0, items=[])
-
+            # Subquery rather than a bound id list: a person can appear in the
+            # whole library, and the ORDER BY ... LIMIT below picks the top
+            # `limit` overall, so chunking the IN would pick a different set.
             rows = s.execute(
                 select(Photo, ClassicalScore, Embedding)
                 .join(ClassicalScore, Photo.id == ClassicalScore.photo_id, isouter=True)
                 .join(Embedding, Photo.id == Embedding.photo_id, isouter=True)
-                .where(Photo.id.in_(ids))
+                .where(Photo.id.in_(
+                    select(PhotoPerson.photo_id)
+                    .where(PhotoPerson.person_id == person_id)
+                ))
                 .order_by(Embedding.aesthetic_iqa.desc().nulls_last())
                 .limit(limit)
             ).all()

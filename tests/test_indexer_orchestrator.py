@@ -349,11 +349,7 @@ def test_prune_handles_more_rows_than_sqlite_allows_bound_variables(tmp_path):
     IN(...) was chunked this raised
     `OperationalError: too many SQL variables` and aborted index_folder.
     """
-    import sqlite3
-
-    from sqlalchemy import event
-
-    from selects.db import _ENGINES, _ENGINES_LOCK
+    from tests.conftest import engine_for, sqlite_999_variables
 
     shutil.copy(FIXTURES_DIR / "small.jpg", tmp_path / "keep.jpg")
     cfg = get_folder_config(tmp_path)
@@ -363,25 +359,18 @@ def test_prune_handles_more_rows_than_sqlite_allows_bound_variables(tmp_path):
 
     # Pin the ceiling at the classic 999 regardless of the local build: the
     # bundled SQLite here allows 32766, which would hide the bug on this
-    # machine while a user's system sqlite still blew up.
-    with _ENGINES_LOCK:
-        engine = _ENGINES[str(Path(cfg.db_path).resolve())][0]
+    # machine while a user's system sqlite still blew up. The context manager
+    # always removes the listener, so it can never leak into another test.
+    with sqlite_999_variables(engine_for(cfg.db_path)):
+        missing = tmp_path / "gone"
+        with session_scope(Session) as s:
+            for i in range(1200):
+                s.add(Photo(path=str(missing / f"{i:05d}.jpg"), sha256=f"{i:064x}"))
 
-    @event.listens_for(engine, "connect")
-    def _cap_variables(dbapi_conn, _rec):
-        dbapi_conn.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, 999)
+        messages: list[str] = []
+        index_folder(cfg, on_progress=lambda i, t, m: messages.append(m))
 
-    engine.dispose()
-    missing = tmp_path / "gone"
-    with session_scope(Session) as s:
-        for i in range(1200):
-            s.add(Photo(path=str(missing / f"{i:05d}.jpg"), sha256=f"{i:064x}"))
-
-    messages: list[str] = []
-    index_folder(cfg, on_progress=lambda i, t, m: messages.append(m))
-
-    with session_scope(Session) as s:
-        assert s.query(Photo).count() == 1
-        assert Path(s.query(Photo).one().path).name == "keep.jpg"
-    assert "1200 missing file(s) removed" in messages
-    event.remove(engine, "connect", _cap_variables)
+        with session_scope(Session) as s:
+            assert s.query(Photo).count() == 1
+            assert Path(s.query(Photo).one().path).name == "keep.jpg"
+        assert "1200 missing file(s) removed" in messages

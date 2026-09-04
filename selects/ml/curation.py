@@ -29,6 +29,7 @@ from selects.db.models import (
     Photo,
 )
 from selects.ml.aesthetic import rank_score
+from selects.util import chunked
 
 
 AP_WEIGHT_DEFAULT = 0.6
@@ -245,20 +246,23 @@ def curate(
     if not ids:
         return []
 
-    rows = (
-        s.query(
-            Photo.id,
-            Photo.sha256,
-            Photo.taken_at,
-            Embedding.aesthetic_iqa,
-            AestheticScore.ap25_score,
-            AestheticScore.nima_score,
+    # Chunked: a scope can be the whole library and SQLite caps bound variables.
+    rows = []
+    for chunk in chunked(ids):
+        rows.extend(
+            s.query(
+                Photo.id,
+                Photo.sha256,
+                Photo.taken_at,
+                Embedding.aesthetic_iqa,
+                AestheticScore.ap25_score,
+                AestheticScore.nima_score,
+            )
+            .outerjoin(Embedding, Embedding.photo_id == Photo.id)
+            .outerjoin(AestheticScore, AestheticScore.photo_id == Photo.id)
+            .filter(Photo.id.in_(chunk))
+            .all()
         )
-        .outerjoin(Embedding, Embedding.photo_id == Photo.id)
-        .outerjoin(AestheticScore, AestheticScore.photo_id == Photo.id)
-        .filter(Photo.id.in_(ids))
-        .all()
-    )
     if not rows:
         return []
 
@@ -314,21 +318,20 @@ def _dedup_and_rank(
     surviving_ids = [c.photo_id for c in candidates]
 
     # Attach moment_id + moment_size (None if not in any moment)
-    moment_rows = (
-        s.query(MomentMember.photo_id, MomentMember.moment_id)
-        .filter(MomentMember.photo_id.in_(surviving_ids))
-        .all()
-    )
+    moment_rows = []
+    for chunk in chunked(surviving_ids):
+        moment_rows.extend(
+            s.query(MomentMember.photo_id, MomentMember.moment_id)
+            .filter(MomentMember.photo_id.in_(chunk))
+            .all()
+        )
     pid_to_moment = {pid: mid for pid, mid in moment_rows}
 
     moment_ids = list({mid for mid in pid_to_moment.values() if mid is not None})
-    moment_meta = {
-        m.id: m
-        for m in (
-            s.query(Moment).filter(Moment.id.in_(moment_ids)).all()
-            if moment_ids else []
-        )
-    }
+    moment_meta = {}
+    for chunk in chunked(moment_ids):
+        for m in s.query(Moment).filter(Moment.id.in_(chunk)).all():
+            moment_meta[m.id] = m
     moment_sizes = {mid: m.size for mid, m in moment_meta.items()}
 
     for c in candidates:

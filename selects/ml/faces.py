@@ -17,6 +17,7 @@ from selects.config import FolderConfig
 from selects.db import init_db, session_scope
 from selects.db.models import ClassicalScore, FaceEmbedding, Photo
 from selects.ml.face_attributes import compute_face_attributes
+from selects.util import chunked
 
 log = logging.getLogger(__name__)
 
@@ -45,12 +46,14 @@ def run_face_embedding_stage(
             for r in s.query(FaceEmbedding.photo_id).distinct().all()
         }
         pending_ids = sorted(face_photo_ids - done_ids)
-        id_to_preview: dict[int, str | None] = {
-            r[0]: r[1]
-            for r in s.query(Photo.id, Photo.preview_path)
-            .filter(Photo.id.in_(pending_ids))
-            .all()
-        }
+        id_to_preview: dict[int, str | None] = {}
+        for chunk in chunked(pending_ids):
+            id_to_preview.update(
+                (r[0], r[1])
+                for r in s.query(Photo.id, Photo.preview_path)
+                .filter(Photo.id.in_(chunk))
+                .all()
+            )
 
     if not pending_ids:
         log.info("face_embed: all photos already embedded, nothing to do")
