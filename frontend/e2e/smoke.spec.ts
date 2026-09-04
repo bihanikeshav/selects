@@ -87,8 +87,13 @@ test("libraries opens exactly one progress websocket", async ({ page, consoleErr
 
   await page.goto("/libraries");
   await expect(page.locator(".lib-tile-name").first()).toBeVisible();
-  // Give every card time to mount and (wrongly) connect before counting.
-  await page.waitForTimeout(1500);
+  // Both progress-listening cards live inside a collapsed <details>. Open it
+  // and wait for each card to render: once both are on screen every subscriber
+  // has mounted and had its chance to (wrongly) open a socket of its own, so
+  // the count below is deterministic without a fixed sleep.
+  await page.locator(".lib-active-settings > summary").click();
+  await expect(page.locator(".lib-models")).toBeVisible();
+  await expect(page.locator(".watch-card")).toBeVisible();
 
   expect(sockets.filter((u) => u.includes("/ws/progress"))).toHaveLength(1);
 });

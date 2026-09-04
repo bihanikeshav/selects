@@ -27,15 +27,26 @@ export default function IndexingPill() {
     },
     {
       // The progress bus has no replay, so a reconnect (or a first connect
-      // after the run ended) can miss the terminal frame. Ask the server what
-      // is actually running and clear a stale pill.
+      // after the run started or ended) can miss both the first and the
+      // terminal frame. Spec B4: reconcile against /api/libraries/status on
+      // every open, in both directions — clear a pill whose run has finished,
+      // and *show* one for a run that started while the socket was down.
       onOpen: () => {
         const current = msgRef.current;
-        // A models download is not an indexing run — status can't speak to it.
-        if (!current || current.stage === "models") return;
+        // A models download is not an indexing run — status can't speak to it,
+        // so leave that pill alone.
+        if (current?.stage === "models") return;
         libraryStatus()
           .then((st) => {
-            if (!st.indexing) setMsg(null);
+            if (st.indexing) {
+              // Only synthesise when no frame has been seen; a real frame
+              // carries the live stage and counts and must win.
+              if (!msgRef.current) {
+                setMsg({ stage: "index", current: 0, total: 0, message: "Indexing…" });
+              }
+            } else if (msgRef.current?.stage !== "models") {
+              setMsg(null);
+            }
           })
           .catch(() => {});
       },

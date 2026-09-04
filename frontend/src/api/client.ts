@@ -5,6 +5,7 @@ import type {
   Library,
   LibraryList,
   LibraryStatus,
+  ListPhotosParams,
   ModelsStatus,
   Moment,
   PhotoList,
@@ -13,16 +14,7 @@ import type {
 
 const BASE = "/api";
 
-export async function listPhotos(opts: {
-  offset?: number;
-  limit?: number;
-  rejected?: boolean;
-  tag?: string;
-  collapse?: "moments" | "none";
-  sort?: "taken_at" | "aesthetic" | "iqa" | "random";
-  min_aesthetic_pct?: number;
-  quality?: "underexposed" | "overexposed" | "out_of_focus" | "blurry_keepers";
-} = {}): Promise<PhotoList> {
+export async function listPhotos(opts: ListPhotosParams = {}): Promise<PhotoList> {
   const params = new URLSearchParams();
   if (opts.offset !== undefined) params.set("offset", String(opts.offset));
   if (opts.limit !== undefined) params.set("limit", String(opts.limit));
@@ -30,6 +22,7 @@ export async function listPhotos(opts: {
   if (opts.tag !== undefined) params.set("tag", opts.tag);
   if (opts.collapse !== undefined) params.set("collapse", opts.collapse);
   if (opts.sort !== undefined) params.set("sort", opts.sort);
+  if (opts.seed !== undefined) params.set("seed", String(opts.seed));
   if (opts.min_aesthetic_pct !== undefined) params.set("min_aesthetic_pct", String(opts.min_aesthetic_pct));
   if (opts.quality !== undefined) params.set("quality", opts.quality);
   const res = await fetch(`${BASE}/photos?${params}`);
