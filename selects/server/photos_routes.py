@@ -14,12 +14,9 @@ from selects.db.models import (
 )
 from selects.server.images_routes import _require_sha256
 from selects.server.schemas import MomentMemberOut, MomentOut, PhotoList, PhotoOut
+from selects.util import KEEP_DECISIONS
 
 log = logging.getLogger(__name__)
-
-# Verdicts that count as "kept". "silver" is the legacy second keep tier;
-# "skip" is deliberately absent — a skipped photo is still undecided.
-KEEP_DECISIONS = ("keep", "silver")
 
 
 def collapse_to_moment_primaries(stmt):
