@@ -73,6 +73,15 @@ addopts = "-ra"
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# `ruff check .` from the repo root is the documented (and CI) command, so keep
+# it away from vendored / generated / build trees.
+extend-exclude = [
+    "frontend",
+    "vendor",
+    "dist",
+    "build",
+    ".venv",
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "W"]

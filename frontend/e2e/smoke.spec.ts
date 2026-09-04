@@ -31,6 +31,18 @@ test("review screen shows a photo and the 1 of N counter", async ({ page, consol
   await expect(page.locator(".page-sub")).toContainText(`1 of ${PHOTO_COUNT}`);
 });
 
+test("review header shell stays within its height budget", async ({ page, consoleErrors }) => {
+  expect(consoleErrors).toEqual([]);
+  await page.goto("/cull");
+  await expect(page.locator(".cull-stage .gold-frame > img")).toBeVisible();
+
+  // The header is a fixed-height shell (~148px); anything taller means it has
+  // grown a row and is eating the space the photo needs.
+  const box = await page.locator(".page-shell").boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.height).toBeLessThanOrEqual(150);
+});
+
 test("pressing x rejects the photo and the summary counts it", async ({ page, consoleErrors }) => {
   expect(consoleErrors).toEqual([]);
   await page.goto("/cull");

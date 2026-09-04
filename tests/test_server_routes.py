@@ -44,6 +44,30 @@ async def test_openapi_version_matches_package_version(tmp_path):
         assert r.json()["info"]["version"] == selects.__version__
 
 
+def test_no_hardcoded_version_literal_in_package():
+    """No source file may pin a version string — they go stale (e.g. the
+    Nominatim User-Agent in ``selects/ml/locations.py``). Use ``__version__``."""
+    import selects
+
+    import re
+
+    pkg_root = Path(selects.__file__).parent
+    stale = "0.1.13"
+    ua_literal = re.compile(r"selects/\d+\.\d+\.\d+")
+    stale_hits, ua_hits = [], []
+    for py in pkg_root.rglob("*.py"):
+        if py.name == "__init__.py" and py.parent == pkg_root:
+            continue  # the one place the version is allowed to be a literal
+        text = py.read_text(encoding="utf-8")
+        rel = str(py.relative_to(pkg_root))
+        if stale in text:
+            stale_hits.append(rel)
+        if ua_literal.search(text):
+            ua_hits.append(rel)
+    assert stale_hits == [], f"hard-coded version literal {stale!r} in: {stale_hits}"
+    assert ua_hits == [], f"hard-coded selects/<version> string in: {ua_hits}"
+
+
 async def test_list_photos_returns_indexed_files(populated_folder):
     cfg = get_folder_config(populated_folder)
     init_db(cfg.db_path)
@@ -331,6 +355,47 @@ async def test_swipe_summary_collapse_none_counts_every_photo(tmp_path):
             "undecided": 1,
         }
         assert body["kept"] + body["rejected"] + body["undecided"] == body["total_photos"]
+
+
+async def test_swipe_summary_quality_filter_matches_photos_total(tmp_path):
+    """The tally must add up to the list total under the SAME query params."""
+    from selects.db import session_scope
+    from selects.db.models import ClassicalScore, Photo, Swipe
+
+    cfg = get_folder_config(tmp_path)
+    Session = init_db(cfg.db_path)
+    with session_scope(Session) as s:
+        # blur < 150 is the "out_of_focus" bucket: 2 of these 4 qualify.
+        for i, blur in enumerate([50.0, 120.0, 300.0, 900.0]):
+            p = Photo(path=str(tmp_path / f"{i}.jpg"), sha256=f"{i:064x}")
+            s.add(p)
+            s.flush()
+            s.add(ClassicalScore(photo_id=p.id, blur=blur, luma_mean=0.5))
+            if i == 0:
+                s.add(Swipe(photo_id=p.id, decision="keep"))
+            if i == 2:
+                s.add(Swipe(photo_id=p.id, decision="reject"))
+
+    app = build_app(cfg, run_background=False)
+    transport = ASGITransport(app=app)
+    params = "collapse=none&quality=out_of_focus"
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        body = (await client.get(f"/api/swipes/summary?{params}")).json()
+        listing = (await client.get(f"/api/photos?{params}")).json()
+        assert body["total_photos"] == listing["total"] == 2
+        # Only the in-bucket keep counts; the out-of-bucket reject does not.
+        assert body == {"total_photos": 2, "kept": 1, "rejected": 0, "undecided": 1}
+        assert body["kept"] + body["rejected"] + body["undecided"] == listing["total"]
+
+
+@pytest.mark.parametrize("path", ["/api/photos", "/api/swipes/summary"])
+async def test_collapse_rejects_unknown_value(tmp_path, path):
+    cfg = get_folder_config(tmp_path)
+    init_db(cfg.db_path)
+    app = build_app(cfg, run_background=False)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        assert (await client.get(f"{path}?collapse=bogus")).status_code == 422
 
 
 async def test_swipe_summary_counts_silver_as_kept_and_skip_as_undecided(tmp_path):

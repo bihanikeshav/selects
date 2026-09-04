@@ -84,8 +84,17 @@ export async function deleteSwipe(sha256: string): Promise<{ ok: boolean; delete
   return res.json();
 }
 
-export async function swipeSummary(collapse: "moments" | "none" = "moments"): Promise<SwipeSummary> {
-  const res = await fetch(`${BASE}/swipes/summary?collapse=${collapse}`);
+/**
+ * Verdict tally over the same photo set `/api/photos` returns — pass the same
+ * `collapse`/`quality` the list is using or the numbers will not add up.
+ */
+export async function swipeSummary(
+  collapse: "moments" | "none" = "moments",
+  quality?: string | null,
+): Promise<SwipeSummary> {
+  const q = new URLSearchParams({ collapse });
+  if (quality) q.set("quality", quality);
+  const res = await fetch(`${BASE}/swipes/summary?${q.toString()}`);
   if (!res.ok) throw new Error(`swipeSummary ${res.status}`);
   return res.json();
 }

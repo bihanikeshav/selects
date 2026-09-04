@@ -950,8 +950,6 @@ button.rail-item {
   pointer-events: auto;
 }
 
-.gold-overlay .stamp svg { width: 14px; height: 14px; color: var(--g-yellow); }
-
 /* burst strip */
 .burst-strip {
   display: flex;

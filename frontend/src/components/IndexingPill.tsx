@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
+import { libraryStatus } from "../api/client";
 import { useProgressSocket, type ProgressMsg } from "../hooks/useProgressSocket";
 import { STAGE_LABELS } from "../lib/eta";
 
@@ -14,11 +15,30 @@ const END_STAGES = new Set(["done", "cancelled"]);
  */
 export default function IndexingPill() {
   const [msg, setMsg] = useState<ProgressMsg | null>(null);
+  const msgRef = useRef<ProgressMsg | null>(null);
+  msgRef.current = msg;
 
-  useProgressSocket((m) => {
-    if (m.type === "watch" || m.stage === "watch" || !m.stage) return;
-    setMsg(END_STAGES.has(m.stage) ? null : m);
-  });
+  useProgressSocket(
+    (m) => {
+      if (m.type === "watch" || m.stage === "watch" || !m.stage) return;
+      setMsg(END_STAGES.has(m.stage) ? null : m);
+    },
+    {
+      // The progress bus has no replay, so a reconnect (or a first connect
+      // after the run ended) can miss the terminal frame. Ask the server what
+      // is actually running and clear a stale pill.
+      onOpen: () => {
+        const current = msgRef.current;
+        // A models download is not an indexing run — status can't speak to it.
+        if (!current || current.stage === "models") return;
+        libraryStatus()
+          .then((st) => {
+            if (!st.indexing) setMsg(null);
+          })
+          .catch(() => {});
+      },
+    },
+  );
 
   if (!msg) return null;
 

@@ -20,6 +20,7 @@ from typing import Optional
 import requests
 import numpy as np
 
+from selects import __version__
 from selects.ml.trip_data import KM_PER_DEG_LAT, km_per_deg_lon, load_landmarks
 
 log = logging.getLogger(__name__)
@@ -30,7 +31,7 @@ _NOMINATIM_INTERVAL = 1.1  # seconds between calls
 
 _SESSION = requests.Session()
 _SESSION.headers.update({
-    "User-Agent": "selects/0.1.13 (https://github.com/bihanikeshav/selects)",
+    "User-Agent": f"selects/{__version__} (https://github.com/bihanikeshav/selects)",
     "Accept-Language": "en",
 })
 
