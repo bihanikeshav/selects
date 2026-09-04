@@ -14,6 +14,7 @@ from selects.db.models import AestheticScore, ClassicalScore, Embedding, Photo, 
 from selects.server.schemas import (
     ClusterEntry, ClusterList, PhotoList, TagEntry, TagList, photo_out,
 )
+from selects.util import chunked
 
 log = logging.getLogger(__name__)
 
@@ -70,7 +71,7 @@ def register_clusters_routes(app: FastAPI, cfg: FolderConfig) -> None:
 
             all_cover_ids = [pid for pids in groups.values() for pid in pids]
             score_by_id: dict[int, tuple[str, float, float]] = {}
-            if all_cover_ids:
+            for chunk in chunked(all_cover_ids):
                 for pid, sha, iqa, ap25 in (
                     s.query(
                         Photo.id,
@@ -80,7 +81,7 @@ def register_clusters_routes(app: FastAPI, cfg: FolderConfig) -> None:
                     )
                     .outerjoin(Embedding, Embedding.photo_id == Photo.id)
                     .outerjoin(AestheticScore, AestheticScore.photo_id == Photo.id)
-                    .filter(Photo.id.in_(all_cover_ids))
+                    .filter(Photo.id.in_(chunk))
                     .all()
                 ):
                     score_by_id[pid] = (sha, ap25 if ap25 is not None else -1.0, iqa if iqa is not None else -1.0)
@@ -123,31 +124,27 @@ def register_clusters_routes(app: FastAPI, cfg: FolderConfig) -> None:
         with session_scope(Session) as s:
             # Synthetic "uncategorized" cluster: photos with NO tag in this source.
             # Empty/missing source matches list_clusters (legacy NULL-source tags).
+            # Expressed as a correlated subquery rather than a materialised id
+            # list: the ids come from the same session, and an ORDER BY ... LIMIT
+            # below cannot be chunked without changing which photos win.
+            source_clause = (
+                PhotoTag.source == source if source else PhotoTag.source.is_(None)
+            )
             if tag.lower() == "uncategorized":
-                tagged_subq = s.query(PhotoTag.photo_id)
-                if source:
-                    tagged_subq = tagged_subq.filter(PhotoTag.source == source)
-                else:
-                    tagged_subq = tagged_subq.filter(PhotoTag.source.is_(None))
-                tagged_ids = {r[0] for r in tagged_subq.all()}
-                all_ids = {r[0] for r in s.query(Photo.id).all()}
-                ids = list(all_ids - tagged_ids)
+                id_filter = Photo.id.not_in(
+                    select(PhotoTag.photo_id).where(source_clause)
+                )
             else:
-                q = s.query(PhotoTag.photo_id).filter(PhotoTag.tag == tag)
-                if source:
-                    q = q.filter(PhotoTag.source == source)
-                else:
-                    q = q.filter(PhotoTag.source.is_(None))
-                ids = [r[0] for r in q.all()]
-            if not ids:
-                return PhotoList(total=0, items=[])
+                id_filter = Photo.id.in_(
+                    select(PhotoTag.photo_id).where(PhotoTag.tag == tag, source_clause)
+                )
 
             rows = s.execute(
                 select(Photo, ClassicalScore, Embedding)
                 .join(ClassicalScore, Photo.id == ClassicalScore.photo_id, isouter=True)
                 .join(Embedding, Photo.id == Embedding.photo_id, isouter=True)
                 .outerjoin(AestheticScore, AestheticScore.photo_id == Photo.id)
-                .where(Photo.id.in_(ids))
+                .where(id_filter)
                 .order_by(
                     AestheticScore.ap25_score.desc().nulls_last(),
                     Embedding.aesthetic_iqa.desc(),

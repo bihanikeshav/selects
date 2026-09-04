@@ -1,12 +1,62 @@
 """Shared pytest fixtures for selects tests."""
 from __future__ import annotations
 
+import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
+from sqlalchemy import event
 
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+
+def engine_for(db_path) -> "object":
+    """Return the cached SQLAlchemy engine ``init_db`` built for *db_path*."""
+    from selects.db import _ENGINES, _ENGINES_LOCK
+
+    with _ENGINES_LOCK:
+        return _ENGINES[str(Path(db_path).resolve())][0]
+
+
+@contextmanager
+def sqlite_999_variables(engine, limit: int = 999):
+    """Pin SQLite's bound-variable ceiling on *engine* for the block.
+
+    The bundled SQLite here allows 32766 variables per statement, which hides
+    "too many SQL variables" bugs that a user's system SQLite (999 on many
+    builds) would hit. Pinning the classic 999 makes the regression tests fail
+    on an unchunked ``IN (...)`` on every machine.
+
+    The listener is always removed on the way out, and the pool is disposed on
+    entry and exit so connections are rebuilt with (and then without) the cap.
+    """
+    @event.listens_for(engine, "connect")
+    def _cap_variables(dbapi_conn, _rec):  # pragma: no cover - trivial
+        dbapi_conn.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, limit)
+
+    engine.dispose()
+    try:
+        yield engine
+    finally:
+        event.remove(engine, "connect", _cap_variables)
+        engine.dispose()
+
+
+@pytest.fixture()
+def pin_sqlite_variables():
+    """Fixture form of :func:`sqlite_999_variables` — call it with an engine or
+    a db path and use the result as a context manager."""
+    @contextmanager
+    def _pin(engine_or_path, limit: int = 999):
+        engine = engine_or_path
+        if isinstance(engine_or_path, (str, Path)):
+            engine = engine_for(engine_or_path)
+        with sqlite_999_variables(engine, limit) as eng:
+            yield eng
+
+    return _pin
 
 
 @pytest.fixture(autouse=True)

@@ -6,11 +6,12 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query
+from sqlalchemy import func
 
 from selects.config import FolderConfig
 from selects.db import init_db, session_scope
 from selects.db.models import Embedding, Photo, PhotoTag, Story, StoryItem, Visit
-from selects.util import KEEP_DECISIONS
+from selects.util import KEEP_DECISIONS, chunked
 from selects.server.schemas import (
     StoryItemOut, StoryList, StoryOut, VisitOut,
 )
@@ -99,16 +100,18 @@ def _get_primary_tags_for_photos(s, photo_ids: list[int]) -> dict[int, str]:
     """Return {photo_id: primary_tag} for the given photo_ids."""
     if not photo_ids:
         return {}
-    rows = (
-        s.query(PhotoTag.photo_id, PhotoTag.tag, PhotoTag.score)
-        .filter(PhotoTag.photo_id.in_(photo_ids))
-        .order_by(PhotoTag.photo_id, PhotoTag.score.desc())
-        .all()
-    )
+    # Chunked. Safe with the ORDER BY because each photo_id lands in exactly
+    # one chunk, and "first row per photo_id wins" is decided within a chunk.
     result: dict[int, str] = {}
-    for pid, tag, score in rows:
-        if pid not in result:
-            result[pid] = tag
+    for chunk in chunked(photo_ids):
+        for pid, tag, score in (
+            s.query(PhotoTag.photo_id, PhotoTag.tag, PhotoTag.score)
+            .filter(PhotoTag.photo_id.in_(chunk))
+            .order_by(PhotoTag.photo_id, PhotoTag.score.desc())
+            .all()
+        ):
+            if pid not in result:
+                result[pid] = tag
     return result
 
 
@@ -116,8 +119,11 @@ def _get_cover_sha_map(s, cover_photo_ids: list[int]) -> dict[int, str]:
     """Return {photo_id: sha256} for visit cover photos."""
     if not cover_photo_ids:
         return {}
-    rows = s.query(Photo.id, Photo.sha256).filter(Photo.id.in_(cover_photo_ids)).all()
-    return {row[0]: row[1] for row in rows}
+    out: dict[int, str] = {}
+    for chunk in chunked(cover_photo_ids):
+        for pid, sha in s.query(Photo.id, Photo.sha256).filter(Photo.id.in_(chunk)).all():
+            out[pid] = sha
+    return out
 
 
 def register_stories_routes(app: FastAPI, cfg: FolderConfig) -> None:
@@ -202,23 +208,15 @@ def register_stories_routes(app: FastAPI, cfg: FolderConfig) -> None:
                 # the top 25% from.
                 items_rows = []
                 if st.day and len(st.day) == 10 and st.day[4] == "-" and st.day[7] == "-":
-                    from sqlalchemy import text as _text
-                    rows = s.execute(
-                        _text(
-                            "SELECT id FROM photos "
-                            "WHERE strftime('%Y-%m-%d', taken_at) = :d"
-                        ),
-                        {"d": st.day},
-                    ).fetchall()
-                    pids = [r[0] for r in rows]
-                    if pids:
-                        photos = (
-                            s.query(Photo)
-                            .filter(Photo.id.in_(pids))
-                            .order_by(Photo.taken_at)
-                            .all()
-                        )
-                        items_rows = [(None, p) for p in photos]
+                    # One query, no id round trip: a day can hold thousands of
+                    # photos and an IN over them blows SQLite's variable cap.
+                    photos = (
+                        s.query(Photo)
+                        .filter(func.strftime("%Y-%m-%d", Photo.taken_at) == st.day)
+                        .order_by(Photo.taken_at)
+                        .all()
+                    )
+                    items_rows = [(None, p) for p in photos]
 
                 if not items_rows:
                     # Fall back to StoryItem (people stories etc still use this).
@@ -254,13 +252,15 @@ def register_stories_routes(app: FastAPI, cfg: FolderConfig) -> None:
                 if liked_only and items_rows:
                     from selects.db.models import Swipe as _Swipe
                     pids = [_pid(r) for r in items_rows]
-                    liked_pids = {
-                        r[0]
-                        for r in s.query(_Swipe.photo_id)
-                        .filter(_Swipe.photo_id.in_(pids))
-                        .filter(_Swipe.decision.in_(KEEP_DECISIONS))
-                        .all()
-                    }
+                    liked_pids: set[int] = set()
+                    for chunk in chunked(pids):
+                        liked_pids.update(
+                            r[0]
+                            for r in s.query(_Swipe.photo_id)
+                            .filter(_Swipe.photo_id.in_(chunk))
+                            .filter(_Swipe.decision.in_(KEEP_DECISIONS))
+                            .all()
+                        )
                     items_rows = [r for r in items_rows if _pid(r) in liked_pids]
 
                 # Aesthetic curation: gate + burst-dedup, chronological order.
@@ -299,11 +299,13 @@ def register_stories_routes(app: FastAPI, cfg: FolderConfig) -> None:
                 if q_vec is not None and items_rows:
                     import numpy as _np
                     pids = [_pid(r) for r in items_rows]
-                    emb_rows = (
-                        s.query(Embedding.photo_id, Embedding.siglip)
-                        .filter(Embedding.photo_id.in_(pids))
-                        .all()
-                    )
+                    emb_rows = []
+                    for chunk in chunked(pids):
+                        emb_rows.extend(
+                            s.query(Embedding.photo_id, Embedding.siglip)
+                            .filter(Embedding.photo_id.in_(chunk))
+                            .all()
+                        )
                     if emb_rows:
                         embs = _np.stack([
                             _np.frombuffer(r[1], dtype=_np.float16).astype(_np.float32)

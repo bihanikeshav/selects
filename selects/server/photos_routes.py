@@ -398,8 +398,13 @@ def register_photos_routes(app: FastAPI, cfg: FolderConfig) -> None:
                 Swipe, Swipe.photo_id == Photo.id
             )
             if sha_list:
-                q = q.filter(Photo.sha256.in_(sha_list))
-            for sha, decision in q.all():
+                # Chunked: the client sends one sha per visible photo.
+                rows = []
+                for chunk in chunked(sha_list):
+                    rows.extend(q.filter(Photo.sha256.in_(chunk)).all())
+            else:
+                rows = q.all()
+            for sha, decision in rows:
                 out[sha] = decision in KEEP_DECISIONS
         return out
 

@@ -23,6 +23,7 @@ from sqlalchemy import and_, or_, select
 from selects.config import FolderConfig
 from selects.db import init_db, session_scope
 from selects.db.models import AestheticScore, Embedding, Photo, PhotoPerson, PhotoTag
+from selects.util import chunked
 
 # Fixed bonus added per matching tag so exact tag hits always outrank a
 # semantic-only match (SigLIP cosine scores live in roughly [-1, 1]).
@@ -135,8 +136,14 @@ def build_router(cfg: FolderConfig) -> APIRouter:
                         or_(*[PhotoTag.tag.ilike(f"%{w}%") for w in words])
                     )
                     if has_structured_filter and candidate_ids is not None:
-                        tag_q = tag_q.filter(PhotoTag.photo_id.in_(candidate_ids))
-                    tag_rows = tag_q.all()
+                        # Chunked: candidate_ids can be the whole library.
+                        tag_rows = []
+                        for chunk in chunked(list(candidate_ids)):
+                            tag_rows.extend(
+                                tag_q.filter(PhotoTag.photo_id.in_(chunk)).all()
+                            )
+                    else:
+                        tag_rows = tag_q.all()
                     for pid, tag in tag_rows:
                         if has_structured_filter and pid not in candidate_ids:
                             continue
@@ -167,9 +174,13 @@ def build_router(cfg: FolderConfig) -> APIRouter:
             else:
                 # no free-text query: pure filter/tag browsing — fetch sha256s for
                 # whatever candidate set structured filters produced.
-                rows = s.query(Photo.id, Photo.sha256).filter(Photo.id.in_(candidate_ids)).all()
-                for pid, sha in rows:
-                    shas[pid] = sha
+                for chunk in chunked(list(candidate_ids or [])):
+                    for pid, sha in (
+                        s.query(Photo.id, Photo.sha256)
+                        .filter(Photo.id.in_(chunk))
+                        .all()
+                    ):
+                        shas[pid] = sha
 
             # ── merge into one ranked list ───────────────────────────────────
             all_ids = set(sem_scores) | set(shas)
@@ -186,9 +197,13 @@ def build_router(cfg: FolderConfig) -> APIRouter:
                 if combined_by_id:
                     results.sort(key=lambda r: combined_by_id.get(r[0], 0.0), reverse=True)
                 else:
-                    taken_at_by_id = {
-                        pid: t for pid, t in s.query(Photo.id, Photo.taken_at).filter(Photo.id.in_(all_ids)).all()
-                    }
+                    taken_at_by_id: dict[int, Optional[datetime]] = {}
+                    for chunk in chunked(list(all_ids)):
+                        taken_at_by_id.update(
+                            s.query(Photo.id, Photo.taken_at)
+                            .filter(Photo.id.in_(chunk))
+                            .all()
+                        )
                     results.sort(key=lambda r: taken_at_by_id.get(r[0]) or datetime.min, reverse=True)
             else:
                 results.sort(key=lambda r: r[2], reverse=True)

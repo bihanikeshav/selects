@@ -10,6 +10,7 @@ from fastapi import Body, FastAPI, HTTPException, Query
 from selects.config import FolderConfig
 from selects.db import init_db, session_scope
 from selects.db.models import Photo
+from selects.util import chunked
 
 log = logging.getLogger(__name__)
 
@@ -162,10 +163,15 @@ def register_editor_routes(app: FastAPI, cfg: FolderConfig) -> None:
         sha_list = [s for s in shas.split(",") if s.strip()] if shas else None
         out: dict[str, dict] = {}
         with session_scope(Session) as s:
-            q = s.query(Photo.sha256, Photo.path)
+            base_q = s.query(Photo.sha256, Photo.path)
             if sha_list:
-                q = q.filter(Photo.sha256.in_(sha_list))
-            for sha, path_str in q.all():
+                # Chunked: the client sends one sha per visible photo.
+                rows = []
+                for chunk in chunked(sha_list):
+                    rows.extend(base_q.filter(Photo.sha256.in_(chunk)).all())
+            else:
+                rows = base_q.all()
+            for sha, path_str in rows:
                 p = Path(path_str)
                 xmp = p.with_suffix(p.suffix + ".xmp")
                 alt = p.with_suffix(".xmp")
@@ -210,10 +216,12 @@ def register_editor_routes(app: FastAPI, cfg: FolderConfig) -> None:
             )
 
         with session_scope(Session) as s:
-            paths = [
-                r[0]
-                for r in s.query(Photo.path).filter(Photo.sha256.in_(sha256s)).all()
-            ]
+            paths = []
+            for chunk in chunked(sha256s):
+                paths.extend(
+                    r[0]
+                    for r in s.query(Photo.path).filter(Photo.sha256.in_(chunk)).all()
+                )
         if not paths:
             raise HTTPException(404, detail="no matching photos")
 
@@ -256,9 +264,13 @@ def register_editor_routes(app: FastAPI, cfg: FolderConfig) -> None:
             )
 
         with session_scope(Session) as s:
-            rows = s.query(Photo.sha256, Photo.path).filter(
-                Photo.sha256.in_(sha256s)
-            ).all()
+            rows = []
+            for chunk in chunked(sha256s):
+                rows.extend(
+                    s.query(Photo.sha256, Photo.path)
+                    .filter(Photo.sha256.in_(chunk))
+                    .all()
+                )
         if not rows:
             raise HTTPException(404, detail="no matching photos")
 
@@ -327,8 +339,12 @@ def register_editor_routes(app: FastAPI, cfg: FolderConfig) -> None:
             )
 
         with session_scope(Session) as s:
-            rows = s.query(Photo.path).filter(Photo.sha256.in_(sha256s)).all()
-            paths = [r[0] for r in rows]
+            paths = []
+            for chunk in chunked(sha256s):
+                paths.extend(
+                    r[0]
+                    for r in s.query(Photo.path).filter(Photo.sha256.in_(chunk)).all()
+                )
         if not paths:
             raise HTTPException(404, detail="no matching photos")
 

@@ -19,6 +19,7 @@ from selects.config import FolderConfig
 from selects.db import init_db, session_scope
 from selects.db.models import Photo, PhotoTag
 from selects.ml.onnx_rt import model_session, repo_file
+from selects.util import chunked
 
 log = logging.getLogger(__name__)
 
@@ -134,11 +135,13 @@ def run_ram_tagging_stage(
         todo_ids = sorted(indexed_ids - already_done)
 
         # Load photo path + preview_path for todo photos
-        photo_rows = (
-            s.query(Photo.id, Photo.path, Photo.preview_path)
-            .filter(Photo.id.in_(todo_ids))
-            .all()
-        )
+        photo_rows = []
+        for chunk in chunked(todo_ids):
+            photo_rows.extend(
+                s.query(Photo.id, Photo.path, Photo.preview_path)
+                .filter(Photo.id.in_(chunk))
+                .all()
+            )
 
     if not photo_rows:
         log.info("all photos already have RAM tags; nothing to do")
