@@ -84,9 +84,15 @@ plan `docs/superpowers/plans/2026-09-04-audit-repair-v2.md`.
 - When `SELECTS_LAN_TOKEN` is set and the bind host is non-loopback:
   - the middleware also accepts a cookie `selects_token`;
   - a request carrying a valid `?token=` sets that cookie
-    (`HttpOnly`, `SameSite=Lax`, path `/`) on the response;
+    (`HttpOnly`, `SameSite=Strict`, path `/`) on the response — the
+    `/api/health?token=` exchange is same-site, because the page making it
+    was served by this same origin;
   - `/ws/progress` rejects non-loopback clients that present neither a
-    valid `token` query param nor the cookie (close code 4401).
+    valid `token` query param nor the cookie: it **accepts** the connection
+    and then closes it with code 4401, reason `LAN token required`. Closing
+    before the handshake completes surfaces in the browser as an opaque
+    1006 with no code, so the UI could not distinguish a bad token from a
+    dropped server.
 - `main.tsx` no longer monkeypatches `fetch`; it only strips `?token=`
   from the URL after load (the cookie carries auth).
 - On app shutdown the lifespan calls `manager.request_cancel()` before
@@ -172,7 +178,8 @@ plan `docs/superpowers/plans/2026-09-04-audit-repair-v2.md`.
   `DEFAULT_STAGE_ORDER`). Source of truth: a `STAGE_LABELS` map exported
   from `frontend/src/lib/eta.ts` next to `STAGE_SEQUENCE`.
 - Stories: page title "Stories"; subtitle
-  `{n} days · best shots of each day, one per burst`; the two percentile
+  `{n} days · best shots of each day, one per burst`, with the singular
+  `1 day` when `n == 1`; the two percentile
   sliders become one "Strictness" segmented control with Relaxed /
   Balanced / Strict mapping to `(scope_pct, library_pct)` =
   (60, 40) / (75, 50) / (90, 65); Balanced is default.
@@ -203,8 +210,16 @@ plan `docs/superpowers/plans/2026-09-04-audit-repair-v2.md`.
   is 0), links to `/libraries`, and hides on `done`/`cancelled`/no run.
   It reconnects with backoff (1s, 2s, 4s, max 10s) while the page is
   visible.
+  On every socket open (first connect and every reconnect) the pill
+  reconciles against `/api/libraries/status`, so a run that started or
+  finished while the socket was down is reflected without waiting for the
+  next progress frame.
 - Onboarding "Retry" checks `/api/libraries/status`; if `indexing` is
   true it only reconnects the socket and does not POST index again.
+- `POST /api/videos/process` takes the same single run slot as indexing
+  (409 `{"detail": "an indexing run is already in progress"}` when it is
+  held), so `/api/libraries/status.indexing` is true while video analysis
+  runs and the pill shows it.
 - Map fits bounds to the marker set on load (padding 40px), not a fixed
   zoom.
 

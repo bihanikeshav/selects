@@ -4,8 +4,6 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from selects.util import utcnow
-
 from sqlalchemy import (
     Boolean,
     DateTime,
@@ -18,6 +16,8 @@ from sqlalchemy import (
     Text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+from selects.util import utcnow
 
 
 class Base(DeclarativeBase):

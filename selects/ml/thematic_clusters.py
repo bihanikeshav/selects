@@ -21,7 +21,6 @@ Algorithm:
        - "Night"           : taken_at in 20:00-23:59
        - "Indoor"          : visual tag includes "interior" or "indoor"
        - "People moments"  : faces_count >= 2 AND any labeled person
-       - "Just us"         : both dominant persons present (couple trips)
        - "On the road"     : visual tag mentions "road" or "transit"
   3. Photos that don't match any cross-cut and aren't in a top-N location
      get bucketed into "Other moments" so nothing disappears.
