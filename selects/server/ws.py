@@ -77,15 +77,19 @@ def register_ws(app: FastAPI, lan_token: str | None = None) -> None:
     @app.websocket("/ws/progress")
     async def ws_progress(websocket: WebSocket) -> None:
         client = websocket.client.host if websocket.client else ""
-        if not lan_auth_ok(
+        authed = lan_auth_ok(
             lan_token,
             client,
             query_token=websocket.query_params.get("token"),
             cookie=websocket.cookies.get(LAN_COOKIE),
-        ):
-            await websocket.close(code=4401)
-            return
+        )
+        # Accept first, *then* close with 4401. Closing before the handshake
+        # completes makes the browser report a generic 1006 with no code, so
+        # the UI could not tell "wrong token" from "server went away".
         await websocket.accept()
+        if not authed:
+            await websocket.close(code=4401, reason="LAN token required")
+            return
         bus = progress_bus()
         try:
             async for msg in bus.subscribe():

@@ -165,18 +165,30 @@ def compute_rank_threshold(
         )
 
     key = (stamp, ap_w, nima_w, pct_floor)
+    # Double-checked locking: the lock guards the dict, never the scan. The
+    # scan walks every scored photo, and holding the lock across it serialised
+    # every concurrent /api/stories request behind one DB pass.
     with _THRESHOLD_LOCK:
         if key in _THRESHOLD_CACHE:
             return _THRESHOLD_CACHE[key]
-
-        value = _compute_rank_threshold_uncached(
-            s, ap_w=ap_w, nima_w=nima_w, pct_floor=pct_floor
-        )
         # Only the current database state is worth keeping; an older stamp can
         # never be asked for again.
         for stale in list(_THRESHOLD_CACHE):
             if stale[0] != stamp:
                 _THRESHOLD_CACHE.pop(stale, None)
+
+    value = _compute_rank_threshold_uncached(
+        s, ap_w=ap_w, nima_w=nima_w, pct_floor=pct_floor
+    )
+
+    with _THRESHOLD_LOCK:
+        # A racing thread may have finished first, or the library may have
+        # moved on while we scanned. Either way the freshest answer wins and
+        # ours is discarded rather than resurrecting a superseded generation.
+        if key in _THRESHOLD_CACHE:
+            return _THRESHOLD_CACHE[key]
+        if any(existing[0] != stamp for existing in _THRESHOLD_CACHE):
+            return value
         _THRESHOLD_CACHE[key] = value
         return value
 

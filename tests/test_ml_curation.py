@@ -163,7 +163,7 @@ def test_compute_rank_threshold_is_thread_safe_across_a_stamp_change(
 
     # Entries left behind by an earlier state of the library: every one of them
     # is evicted on the first miss below.
-    for i in range(300_000):
+    for i in range(20_000):
         curation._THRESHOLD_CACHE[(("stale-stamp",), float(i), 0.4, 50.0)] = 0.0
 
     real_compute = curation._compute_rank_threshold_uncached
@@ -210,9 +210,15 @@ def test_compute_rank_threshold_is_thread_safe_across_a_stamp_change(
     curation.clear_threshold_cache()
 
 
-def test_compute_rank_threshold_holds_the_lock_while_it_mutates_the_cache(
+def test_compute_rank_threshold_does_not_hold_the_lock_across_the_scan(
     tmp_path: Path, monkeypatch
 ) -> None:
+    """The lock guards the cache dict only, never the library-wide DB scan.
+
+    Holding it across the scan serialised every concurrent request behind one
+    full pass over every scored photo; double-checked locking keeps the dict
+    safe without making the scan a global critical section.
+    """
     from selects.ml import curation
 
     Session, ids = _seed(tmp_path, [0.1, 0.5, 0.9])
@@ -228,7 +234,14 @@ def test_compute_rank_threshold_holds_the_lock_while_it_mutates_the_cache(
     monkeypatch.setattr(curation, "_compute_rank_threshold_uncached", checking_compute)
 
     with session_scope(Session) as s:
-        curation.compute_rank_threshold(s, pct_floor=50.0)
+        value = curation.compute_rank_threshold(s, pct_floor=50.0)
 
-    assert held == [True]
+    assert held == [False]
+    assert value == pytest.approx(0.5)
     assert not curation._THRESHOLD_LOCK.locked()
+
+    # The answer was still stored, so a second call is a cache hit.
+    with session_scope(Session) as s:
+        assert curation.compute_rank_threshold(s, pct_floor=50.0) == pytest.approx(0.5)
+    assert held == [False]
+    curation.clear_threshold_cache()

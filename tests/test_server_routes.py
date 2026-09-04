@@ -738,3 +738,109 @@ async def test_story_title_and_breadcrumb_drop_geocoder_suffix(tmp_path):
         assert body["itinerary_breadcrumb"] == "Leh (3,500m)"
         # The DB value survives so /best/place/<name> keeps resolving.
         assert body["visits"][0]["name"] == "Leh (2)"
+
+
+# --------------------------------------------------------------------------- #
+# quality is a closed enum, totals are DISTINCT, persons carry aesthetic_iqa
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "bucket", ["underexposed", "overexposed", "out_of_focus", "blurry_keepers"]
+)
+@pytest.mark.parametrize("path", ["/api/photos", "/api/swipes/summary"])
+async def test_quality_accepts_only_the_four_buckets(tmp_path, path, bucket):
+    cfg = get_folder_config(tmp_path)
+    init_db(cfg.db_path)
+    app = build_app(cfg, run_background=False)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        assert (await client.get(f"{path}?quality={bucket}")).status_code == 200
+        # Anything else is a 422 rather than a silently-ignored filter.
+        assert (await client.get(f"{path}?quality=nonsense")).status_code == 422
+        assert (await client.get(f"{path}?quality=")).status_code == 422
+        # Omitted entirely still means "no filter".
+        assert (await client.get(path)).status_code == 200
+
+
+async def test_photos_total_counts_a_photo_in_two_moments_once(tmp_path):
+    """A photo that is the primary of two moments must not be counted twice.
+
+    The collapse predicate outer-joins moment_members, so such a photo yields
+    two rows; a plain COUNT(*) made /api/photos disagree with the summary tally
+    the Review page shows next to it.
+    """
+    from datetime import datetime
+
+    from selects.db import session_scope
+    from selects.db.models import Moment, MomentMember, Photo
+
+    cfg = get_folder_config(tmp_path)
+    Session = init_db(cfg.db_path)
+    with session_scope(Session) as s:
+        shared = Photo(path=str(tmp_path / "a.jpg"), sha256="a" * 64,
+                       taken_at=datetime(2024, 1, 1, 10))
+        other = Photo(path=str(tmp_path / "b.jpg"), sha256="b" * 64,
+                      taken_at=datetime(2024, 1, 1, 11))
+        s.add_all([shared, other])
+        s.flush()
+        for i in range(2):
+            mom = Moment(
+                started_at=datetime(2024, 1, 1, 10),
+                ended_at=datetime(2024, 1, 1, 10, 0, 1),
+                size=1,
+                primary_photo_id=shared.id,
+            )
+            s.add(mom)
+            s.flush()
+            s.add(MomentMember(moment_id=mom.id, photo_id=shared.id, rank=0))
+
+    app = build_app(cfg, run_background=False)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        listing = (await client.get("/api/photos?collapse=moments")).json()
+        summary = (await client.get("/api/swipes/summary?collapse=moments")).json()
+        assert listing["total"] == 2
+        assert summary["total_photos"] == listing["total"]
+        assert [item["sha256"] for item in listing["items"]] == ["a" * 64, "b" * 64]
+
+
+async def test_person_photos_carry_aesthetic_iqa(tmp_path):
+    import numpy as np
+
+    from selects.db import session_scope
+    from selects.db.models import (
+        Embedding, FaceEmbedding, Person, Photo, PhotoPerson,
+    )
+
+    cfg = get_folder_config(tmp_path)
+    Session = init_db(cfg.db_path)
+    with session_scope(Session) as s:
+        photo = Photo(path=str(tmp_path / "a.jpg"), sha256="a" * 64)
+        person = Person(label="Ada", photo_count=1)
+        s.add_all([photo, person])
+        s.flush()
+        s.add(Embedding(
+            photo_id=photo.id,
+            siglip=np.zeros(768, dtype=np.float16).tobytes(),
+            aesthetic_iqa=0.75,
+        ))
+        fe = FaceEmbedding(
+            photo_id=photo.id, face_index=0,
+            embedding=np.zeros(512, dtype=np.float16).tobytes(),
+            bbox_x=0, bbox_y=0, bbox_w=80, bbox_h=80, confidence=0.95,
+        )
+        s.add(fe)
+        s.flush()
+        s.add(PhotoPerson(
+            photo_id=photo.id, person_id=person.id,
+            face_embedding_id=fe.id, confidence=0.95,
+        ))
+        person_id = person.id
+
+    app = build_app(cfg, run_background=False)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        body = (await client.get(f"/api/persons/{person_id}/photos")).json()
+        assert body["total"] == 1
+        assert body["items"][0]["aesthetic_iqa"] == pytest.approx(0.75)

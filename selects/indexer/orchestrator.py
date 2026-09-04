@@ -4,11 +4,11 @@ import logging
 from pathlib import Path
 from typing import Callable, Iterable, Optional
 
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 
 from selects.config import FolderConfig
 from selects.db import init_db, session_scope
-from selects.db.models import PipelineState, Photo, Video
+from selects.db.models import Person, PhotoPerson, PipelineState, Photo, Video
 from selects.decode import decode
 from selects.decode.video import decode_first_frame, probe
 from selects.indexer.exif import read_exif
@@ -133,10 +133,44 @@ def prune_missing(cfg: FolderConfig, Session) -> int:
         if not gone:
             return 0
 
-        for model, id_, *_ in gone:
-            row = s.get(model, id_)
-            if row is not None:
-                s.delete(row)
+        # Persons that will lose at least one photo. Read the association BEFORE
+        # the delete, because the ON DELETE CASCADE takes those rows with it.
+        photo_ids = [id_ for model, id_, *_ in gone if model is Photo]
+        touched_persons: set[int] = set()
+        if photo_ids:
+            touched_persons = set(
+                s.scalars(
+                    select(PhotoPerson.person_id).where(PhotoPerson.photo_id.in_(photo_ids))
+                )
+            )
+
+        # One DELETE per model instead of one round trip per row; the DB-level
+        # ON DELETE CASCADE clears scores, tags, swipes, moment members, etc.
+        for model in (Photo, Video):
+            ids = [id_ for m, id_, *_ in gone if m is model]
+            if ids:
+                s.execute(delete(model).where(model.id.in_(ids)))
+        s.flush()
+
+        # Person.photo_count is denormalised, so pruning has to maintain it —
+        # a stale count keeps ghost faces on the People page (or hides real ones
+        # behind the min_photo_count filter).
+        for person_id in touched_persons:
+            person = s.get(Person, person_id)
+            if person is None:
+                continue
+            remaining = (
+                s.scalar(
+                    select(func.count(func.distinct(PhotoPerson.photo_id))).where(
+                        PhotoPerson.person_id == person_id
+                    )
+                )
+                or 0
+            )
+            if remaining == 0:
+                s.delete(person)
+            else:
+                person.photo_count = remaining
         s.flush()
 
         surviving = set(s.scalars(select(Photo.sha256))) | set(s.scalars(select(Video.sha256)))

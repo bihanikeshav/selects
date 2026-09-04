@@ -40,7 +40,7 @@ def test_query_token_sets_cookie_and_cookie_then_authenticates(lan_app):
         set_cookie = r.headers["set-cookie"]
         assert f"selects_token={TOKEN}" in set_cookie
         assert "HttpOnly" in set_cookie
-        assert "SameSite=Lax" in set_cookie
+        assert "SameSite=Strict" in set_cookie
         assert "Path=/" in set_cookie
 
         # The client kept the cookie; a plain request now passes.
@@ -75,10 +75,14 @@ def test_ws_rejects_lan_client_without_token(lan_app):
     from starlette.websockets import WebSocketDisconnect
 
     with TestClient(lan_app, client=LAN_CLIENT) as c:
+        # The handshake succeeds — the server accepts and *then* closes, so the
+        # browser observes the 4401. A close before accept is an opaque 1006
+        # with no code, indistinguishable from the server going away.
         with pytest.raises(WebSocketDisconnect) as exc:
-            with c.websocket_connect("/ws/progress"):
-                pass
+            with c.websocket_connect("/ws/progress") as ws:
+                ws.receive_json()
         assert exc.value.code == 4401
+        assert exc.value.reason == "LAN token required"
 
 
 def test_ws_accepts_with_query_token(lan_app):
