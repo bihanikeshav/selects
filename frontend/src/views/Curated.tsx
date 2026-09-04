@@ -111,7 +111,7 @@ export default function Curated() {
         }}
       >
         <PageHeader
-          context="curated"
+          context="Curated"
           above={<ModeViewBar />}
           title="Curated"
           subtitle={

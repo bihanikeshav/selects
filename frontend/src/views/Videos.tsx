@@ -262,7 +262,7 @@ export default function Videos() {
             result
               ? `${result.total} video${result.total === 1 ? "" : "s"} · ${result.processed} analysed` +
                 (result.dead_footage_count > 0
-                  ? ` · ${result.dead_footage_count} mostly static`
+                  ? ` · ${result.dead_footage_count} flagged`
                   : "")
               : "Loading…"
           }

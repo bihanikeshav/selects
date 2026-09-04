@@ -33,7 +33,6 @@ export default function WatchCard() {
 
   useEffect(() => {
     load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useProgressSocket((msg: ProgressMsg) => {

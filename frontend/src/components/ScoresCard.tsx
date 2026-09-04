@@ -140,7 +140,7 @@ export default function ScoresCard({ photo }: ScoresCardProps) {
           marginTop: 6,
         }}
       >
-        <span>iqa</span>
+        <span>quality</span>
         <span style={{ color: "var(--md-on-surface)", textAlign: "right" }}>
           {photo?.aesthetic_iqa != null ? photo.aesthetic_iqa.toFixed(3) : "—"}
         </span>

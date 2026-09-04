@@ -167,6 +167,9 @@ export default function BurstCull() {
     setExpandedMoment(null);
     setMomentIdx(0);
     setBurstKept({});
+    // setBurstKept is a stable setState declared further down this component,
+    // so it cannot be listed here (temporal dead zone) and never changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [idx]);
 
   // Paginate: when within 20 of the loaded tail, append the next page.
