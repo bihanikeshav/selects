@@ -228,17 +228,23 @@ export default function BurstCull() {
         // Always walk forward by what the server actually returned, so a page
         // of pure duplicates doesn't pin the loader to the same offset.
         nextOffsetRef.current = offset + data.items.length;
-        // Same SHA at two paths is two reviewable rows; dedup extra pages by id only.
-        const seenId = new Set(photos.map((p) => p.id));
-        const extra = data.items.filter((p) => !seenId.has(p.id));
-        if (extra.length) {
-          setPhotos((prev) => [...prev, ...extra]);
-        } else {
-          // Zero new ids means `photos` did not move, so nothing in this
-          // effect's dependency list changed: bump a counter to re-fire it at
-          // the next offset instead of stalling short of the tail.
-          setPageAttempt((a) => a + 1);
-        }
+        // Same SHA at two paths is two reviewable rows; dedup extra pages by
+        // id only. Build the seen-id set from `prev` inside the updater, not
+        // from the closed-over `photos`, so a stale closure (this effect ran
+        // before a newer `photos` render committed) can never let a page
+        // re-append an id that's already present.
+        setPhotos((prev) => {
+          const seenId = new Set(prev.map((p) => p.id));
+          const extra = data.items.filter((p) => !seenId.has(p.id));
+          if (extra.length === 0) {
+            // Zero new ids means `prev` will not move, so nothing in this
+            // effect's dependency list changed: bump a counter to re-fire it
+            // at the next offset instead of stalling short of the tail.
+            setPageAttempt((a) => a + 1);
+            return prev;
+          }
+          return [...prev, ...extra];
+        });
       })
       .catch(() => {
         // Leave exhaustedRef false so the next idx tick retries.
@@ -249,7 +255,12 @@ export default function BurstCull() {
     return () => {
       cancelled = true;
     };
-  }, [idx, photos, total, sortMode, quality, loadState, pageAttempt]);
+    // `photos.length` (not `photos`) is enough: the dedup set above is built
+    // from `prev` inside the setPhotos updater, so a `photos` identity change
+    // that doesn't change its length can't cause a stale seenId set, and
+    // omitting the full array here stops unrelated array replacements from
+    // cancelling in-flight page fetches.
+  }, [idx, photos.length, total, sortMode, quality, loadState, pageAttempt]);
 
   // Keep status for every member of the expanded burst — so the badge can show
   // how many of the stack are kept and the pip strip can highlight them.

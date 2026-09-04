@@ -216,8 +216,26 @@ async def test_list_photos_sort_random_seed_is_stable_and_pages_are_disjoint(tmp
         assert len(order_a) == 30
         assert order_a == order_b
 
-        # A different seed is a different order (the modular scatter only wraps
-        # once the seed is large, which is the range the UI draws from).
+        # Plain id order, for comparison below.
+        id_order = [f"{i:064x}" for i in range(30)]
+
+        # Small seeds (1, 2, 7) must each scatter the order, not just leave it
+        # (or nearly leave it) in id order the way a plain
+        # `(id * seed) % prime` does for small seeds.
+        orders_by_seed: dict[int, list[str]] = {7: order_a}
+        for seed in (1, 2):
+            resp = await client.get(
+                f"/api/photos?sort=random&seed={seed}&collapse=none&limit=30"
+            )
+            assert resp.status_code == 200
+            orders_by_seed[seed] = [i["sha256"] for i in resp.json()["items"]]
+
+        assert any(order != id_order for order in orders_by_seed.values())
+        assert not (
+            orders_by_seed[1] == orders_by_seed[2] == orders_by_seed[7]
+        )
+
+        # A different (large) seed is also a different order.
         other = await client.get(
             "/api/photos?sort=random&seed=1103515245&collapse=none&limit=30"
         )
@@ -239,6 +257,10 @@ async def test_list_photos_sort_random_seed_is_stable_and_pages_are_disjoint(tmp
         unseeded = await client.get("/api/photos?sort=random&collapse=none&limit=30")
         assert unseeded.status_code == 200
         assert len(unseeded.json()["items"]) == 30
+
+        # seed=0 is out of range (seed must be >= 1) -> 422.
+        zero_seed = await client.get("/api/photos?sort=random&seed=0&collapse=none")
+        assert zero_seed.status_code == 422
 
 
 async def test_list_photos_sort_ties_are_broken_by_id(tmp_path):
