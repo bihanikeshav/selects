@@ -263,6 +263,42 @@ async def test_list_photos_sort_random_seed_is_stable_and_pages_are_disjoint(tmp
         assert zero_seed.status_code == 422
 
 
+async def test_list_photos_sort_random_degenerate_seed_still_scatters(tmp_path):
+    """``seed=1073741823`` makes ``2*seed+1`` equal the multiplier's modulus,
+    so the raw multiplier folds to 0 and would (without a guard) collapse the
+    order to plain id order. The guard remaps that one case to a fixed
+    non-zero constant, so the order must still differ from id order, and the
+    seed must still be stable across calls."""
+    from selects.db import session_scope
+    from selects.db.models import Photo
+
+    cfg = get_folder_config(tmp_path)
+    Session = init_db(cfg.db_path)
+    with session_scope(Session) as s:
+        s.add_all([
+            Photo(path=str(tmp_path / f"{i}.jpg"), sha256=f"{i:064x}")
+            for i in range(30)
+        ])
+
+    app = build_app(cfg, run_background=False)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        first = await client.get(
+            "/api/photos?sort=random&seed=1073741823&collapse=none&limit=30"
+        )
+        second = await client.get(
+            "/api/photos?sort=random&seed=1073741823&collapse=none&limit=30"
+        )
+        assert first.status_code == 200
+        order_a = [i["sha256"] for i in first.json()["items"]]
+        order_b = [i["sha256"] for i in second.json()["items"]]
+        assert len(order_a) == 30
+        assert order_a == order_b
+
+        id_order = [f"{i:064x}" for i in range(30)]
+        assert order_a != id_order
+
+
 async def test_list_photos_sort_ties_are_broken_by_id(tmp_path):
     """Equal scores must not leave the order up to SQLite: ``Photo.id`` is the
     final tiebreaker, so a page boundary can never repeat or drop a photo."""

@@ -192,6 +192,14 @@ def register_photos_routes(app: FastAPI, cfg: FolderConfig) -> None:
                     # for every seed -- including small ones like 1, 2 or 7 --
                     # so the client can page through one stable random order.
                     multiplier = (2654435761 * (2 * seed + 1)) % 2147483647
+                    # seed == 1073741823 makes 2*seed+1 equal the modulus,
+                    # so the product is 0 mod 2147483647 and the multiplier
+                    # collapses to 0 -- which sorts by (id*0) % mod, i.e. a
+                    # constant key, and ties break on Photo.id.asc(), so the
+                    # order degenerates to plain id order. Remap that one
+                    # degenerate case to a fixed non-zero, non-one constant
+                    # (1 would also just be id order) so every seed scatters.
+                    multiplier = multiplier or 1103515245
                     base = base.order_by(
                         ((Photo.id * multiplier) % 2147483647).asc(),
                         Photo.id.asc(),
