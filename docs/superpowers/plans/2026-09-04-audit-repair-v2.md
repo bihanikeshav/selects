@@ -162,3 +162,42 @@
 - [ ] **Step 3: Static build for e2e** — the server serves `selects/server/static`; the e2e script (`npm run e2e`) runs `npm run build` and copies `dist` to `../selects/server/static` first (cross-platform via a small Node script `e2e/copy-static.mjs`).
 - [ ] **Step 4: CI** — `frontend` job adds `npm run lint`; new `e2e` job matrix ubuntu-latest + windows-latest: setup python 3.11 + node 20, `pip install -e ".[dev]"`, `npm ci`, `npx playwright install chromium` (`--with-deps` on Linux), `npm run e2e` with `SELECTS_PYTHON=python`. Upload `frontend/test-results` on failure.
 - [ ] **Step 5: Verify locally on Windows** — `npm run lint`, `npm run e2e` green with `SELECTS_PYTHON=../.venv/Scripts/python.exe`. Commit `test: eslint config, playwright smoke e2e, CI e2e on linux and windows`.
+
+---
+
+### Task 8: Clear every deferred backend item and both spec defects
+
+**Files:** `selects/server/schemas.py` (add `photo_out(photo, score, emb, **extra) -> PhotoOut` helper and move `_require_sha256` here as `require_sha256`), `selects/server/photos_routes.py`, `selects/server/clusters_routes.py`, `selects/server/persons_routes.py`, `selects/server/images_routes.py`, `selects/server/ws.py`, `selects/server/video_routes.py`, `selects/server/app.py`, `selects/ml/curation.py`, `selects/ml/thematic_clusters.py` (stale "Just us" docstring), `selects/indexer/orchestrator.py`, `selects/db/models.py` (import order only), `selects/server/routes.py` (import order only), `pyproject.toml`, `docs/superpowers/specs/2026-09-04-audit-repair-v2-spec.md`, tests.
+
+**Requirements (all binding):**
+1. One `photo_out(...)` helper in `schemas.py` used by photos, clusters and persons routes; persons now includes `aesthetic_iqa`. Tests assert the persons payload carries `aesthetic_iqa`.
+2. `quality` on `/api/photos` and `/api/swipes/summary` is `Optional[Literal["underexposed","overexposed","out_of_focus","blurry_keepers"]]` (422 otherwise); add a parametrised test.
+3. `compute_rank_threshold`: the lock must not be held across the DB scan. Use double-checked locking: under the lock check/evict; compute outside; under the lock store unless a fresher stamp exists. Keep the two thread-safety tests green; shrink the hammer test's seeded entries from 300 000 to 20 000.
+4. `/api/photos` total uses `count(distinct Photo.id)` over the filtered statement; add a test with a photo that is a member of two moments where the summary and the list total still agree.
+5. `prune_missing`: bulk `delete(Model).where(Model.id.in_(ids))` per model (DB-level cascades handle children), then recompute `Person.photo_count` for every person that lost a `photo_persons` row (count distinct photo_id), deleting persons whose count drops to 0. Tests: a person linked to a pruned photo has its count decremented; a person with no remaining photos is removed.
+6. Websocket auth: accept the connection, then `close(code=4401, reason="LAN token required")` so browsers observe 4401 (spec A3 updated accordingly). Test asserts the received close code is 4401 via the Starlette test client (`WebSocketDisconnect.code`).
+7. `/api/videos/process` acquires the library manager's indexing slot (`begin_indexing`/`end_indexing`, 409 when a run is active) so `/api/libraries/status.indexing` is truthful during video analysis. `register_video_routes` therefore receives the manager (adjust `app.py`). Test: status reports `indexing: true` while the fake video job runs.
+8. LAN cookie `SameSite=Strict` (the `/api/health?token=` exchange is same-site because the page is served by the same origin); update test and spec A3.
+9. `pyproject.toml` ruff `extend-exclude` entries anchored to the repo root (`"./frontend"`, `"./vendor"`, `"./dist"`, `"./build"`, `"./.venv"`); `ruff check .` still clean.
+10. Import order in `selects/db/models.py` and `selects/server/routes.py` follows stdlib / third-party / first-party grouping; fix the stale "Just us" sentence in `selects/ml/thematic_clusters.py`'s module docstring.
+11. Spec edits: A3 (accept-then-close 4401, SameSite=Strict), B4 (pill and Onboarding reconcile with `/api/libraries/status` on every socket open; video analysis counts as a run), B3 Stories subtitle may use the singular "1 day".
+
+**Verify:** `.venv/Scripts/python.exe -m pytest -q`, `.venv/Scripts/python.exe -m ruff check .`. Commit: `fix: clear deferred backend findings (photo_out helper, typed quality, lock scope, distinct count, prune counts, ws 4401, video run slot, strict cookie)`.
+
+---
+
+### Task 9: Clear every deferred frontend item
+
+**Files:** `frontend/src/hooks/useProgressSocket.ts`, new `frontend/src/components/ProgressSocketProvider.tsx` (one socket per page via context; `useProgressSocket` becomes a thin consumer that registers a handler with the provider), `frontend/src/App.tsx` (mount the provider), `frontend/src/components/IndexingPill.tsx`, `frontend/src/components/ModelsCard.tsx`, `frontend/src/components/WatchCard.tsx`, `frontend/src/views/Onboarding.tsx`, `frontend/src/views/Curated.tsx`, `frontend/src/hooks/useCullKeys.ts`, `frontend/src/components/StackPhoto.tsx`, `frontend/src/views/Calibrate.tsx`, `frontend/src/views/CalibrateDashboard.tsx`, `frontend/e2e/fixture.ts`, `frontend/e2e/smoke.spec.ts`.
+
+**Requirements (all binding):**
+1. Exactly one `/ws/progress` socket per page: a `ProgressSocketProvider` owns the socket, reconnect/backoff, visibility handling, and fan-out to subscribers; `useProgressSocket(onMessage, options)` keeps its signature but subscribes through context. `/libraries` (pill + ModelsCard + WatchCard) opens one socket.
+2. On a close with code 4401 the provider stops reconnecting and exposes `authRejected: true`; the pill renders "Sign in with the LAN link" (title attribute explains `?token=`) instead of retrying.
+3. IndexingPill's on-open reconcile treats `video` like `models`? No: with Task 8 video analysis takes the indexing slot, so remove the `models` special case only if `/api/models/download` also reports through status; it does not, so keep the `models` guard and add nothing for `video`. Onboarding: suppress the "connection lost" banner while `document.visibilityState === "hidden"`.
+4. Curated: `Enter` on a focused tile opens the lightbox; `Space` toggles selection; the tile `title` says so; keep `X` remove.
+5. Keyboard layers: `useCullKeys` ignores events whose target (or ancestor) has `data-kbd-scope="stack"`; `StackPhoto` marks its focusable root with that attribute so `[`/`]`/`K` are handled once.
+6. Calibrate and CalibrateDashboard user-facing labels: `IQA` -> `Quality score`, `AP V2.5`/`AP25` -> `Aesthetic model`, `Ensemble` -> `Combined`, `Personal` -> `Your taste`, `Worst by IQA` -> `Lowest quality scores`, `MEDIAN ↑PCTILE` -> `Median rank`; tooltips may keep the model names in parentheses.
+7. e2e fixture on POSIX: spawn the server `detached: true` and kill the process group (`process.kill(-pid, "SIGTERM")`, then `SIGKILL` after 5 s) so no orphan survives; Windows path unchanged.
+8. e2e: add a check that `/libraries` opens exactly one websocket (count `page.on("websocket")` events after load, expect 1).
+
+**Verify:** `cd frontend && npm run lint && npm run build && npm run e2e` (with `SELECTS_PYTHON=Z:/travel_post/.venv/Scripts/python.exe`). Commit: `fix(ui): single progress socket provider, 4401 handling, keyboard scopes, Calibrate labels, e2e teardown`.
