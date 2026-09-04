@@ -245,3 +245,53 @@ def test_compute_rank_threshold_does_not_hold_the_lock_across_the_scan(
         assert curation.compute_rank_threshold(s, pct_floor=50.0) == pytest.approx(0.5)
     assert held == [False]
     curation.clear_threshold_cache()
+
+
+def test_curate_tie_in_a_burst_surfaces_the_lower_id_whatever_the_input_order(
+    tmp_path: Path,
+) -> None:
+    """Two photos in one moment with identical scores must always collapse to
+    the same one. Callers pass ids in their own order (stories pass taken_at
+    order) and the fetch is chunked, so the tie-break has to be canonical:
+    curate() sorts the ids, and the lower id is the one that surfaces.
+
+    The moment's primary is a third photo, so no explicit user pick short-cuts
+    the comparison being tested.
+    """
+    from datetime import datetime
+
+    from selects.db.models import Moment, MomentMember
+
+    Session, ids = _seed(tmp_path, [0.6, 0.6, 0.1])
+    lo, hi, other = ids[0], ids[1], ids[2]
+    with session_scope(Session) as s:
+        m = Moment(
+            primary_photo_id=other,
+            started_at=datetime(2024, 1, 1),
+            ended_at=datetime(2024, 1, 1, 0, 1),
+            size=2,
+        )
+        s.add(m)
+        s.flush()
+        s.add(MomentMember(moment_id=m.id, photo_id=lo, rank=0))
+        s.add(MomentMember(moment_id=m.id, photo_id=hi, rank=1))
+
+    for order in ([lo, hi], [hi, lo]):
+        with session_scope(Session) as s:
+            out = curate(s, order, pct_floor=0.0)
+        assert [c.photo_id for c in out] == [lo], f"input order {order}"
+
+
+def test_curate_min_keep_fallback_is_stable_across_input_orders(tmp_path: Path) -> None:
+    """The min_keep fallback ranks by score; a block of equal scores must fall
+    back to photo-id order, not to whatever permutation an unstable sort left."""
+    Session, ids = _seed(tmp_path, [0.9, 0.5, 0.5, 0.5])
+    picked = []
+    for order in (list(ids), list(reversed(ids))):
+        with session_scope(Session) as s:
+            # pct_floor=100 gates everything but the 0.9, so the fallback runs.
+            out = curate(s, order, sort="best", pct_floor=100.0, min_keep=3)
+        picked.append(sorted(c.photo_id for c in out))
+    assert picked[0] == picked[1]
+    # The 0.9 plus the two lowest ids of the tied 0.5 block.
+    assert picked[0] == [ids[0], ids[1], ids[2]]

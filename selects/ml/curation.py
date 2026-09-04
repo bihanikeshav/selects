@@ -242,7 +242,11 @@ def curate(
     *library_pct_floor* asks for; pass it when curating many scopes in one
     request so the library-wide scan happens once.
     """
-    ids = list(photo_ids)
+    # Sorted, so the chunked fetch below yields `rows` in a canonical photo-id
+    # order whatever order the caller passed (stories pass taken_at order).
+    # Every downstream tie-break — the by_moment stack insertion and the
+    # min_keep fallback — reads that order, so it must not depend on the input.
+    ids = sorted(photo_ids)
     if not ids:
         return []
 
@@ -261,6 +265,7 @@ def curate(
             .outerjoin(Embedding, Embedding.photo_id == Photo.id)
             .outerjoin(AestheticScore, AestheticScore.photo_id == Photo.id)
             .filter(Photo.id.in_(chunk))
+            .order_by(Photo.id)
             .all()
         )
     if not rows:
@@ -303,7 +308,9 @@ def curate(
         candidates.append(curated)
 
     if len(candidates) < min_keep and scored:
-        idx_sorted = np.argsort(-scope_combined)
+        # Stable: equal scores keep photo-id order rather than numpy's
+        # introsort-dependent permutation.
+        idx_sorted = np.argsort(-scope_combined, kind="stable")
         candidates = [scored[int(idx)][1] for idx in idx_sorted[: max(min_keep, 1)]]
 
     return _dedup_and_rank(s, candidates, sort)

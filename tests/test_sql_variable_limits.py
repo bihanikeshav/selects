@@ -246,6 +246,16 @@ async def test_clusters_routes_handle_more_photos_than_variables(tmp_path):
             PhotoTag(photo_id=pid, tag="temple", score=1.0, source="thematic")
             for pid in ids
         ])
+        # One untagged photo, so the NOT-IN subquery is checked against a
+        # non-empty answer and not just "returns nothing".
+        loner = Photo(
+            path=str(tmp_path / "untagged.jpg"),
+            sha256=f"{N:064x}",
+            taken_at=_BASE,
+        )
+        s.add(loner)
+        s.flush()
+        loner_sha = loner.sha256
 
     with sqlite_999_variables(engine_for(cfg.db_path)):
         r = await _get(cfg, "/api/clusters?min_count=1")
@@ -258,7 +268,8 @@ async def test_clusters_routes_handle_more_photos_than_variables(tmp_path):
 
         r = await _get(cfg, "/api/clusters/uncategorized/photos?limit=50")
         assert r.status_code == 200, r.text
-        assert r.json()["items"] == []
+        items = r.json()["items"]
+        assert [it["sha256"] for it in items] == [loner_sha]
 
 
 # ── selects/server/editor_routes.py ───────────────────────────────────────────

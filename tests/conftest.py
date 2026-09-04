@@ -32,15 +32,20 @@ def sqlite_999_variables(engine, limit: int = 999):
     The listener is always removed on the way out, and the pool is disposed on
     entry and exit so connections are rebuilt with (and then without) the cap.
     """
-    @event.listens_for(engine, "connect")
     def _cap_variables(dbapi_conn, _rec):  # pragma: no cover - trivial
         dbapi_conn.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, limit)
 
-    engine.dispose()
+    registered = False
     try:
+        # Registration and the entry dispose live inside the try, so a failure
+        # on the way in still runs the removal below.
+        event.listen(engine, "connect", _cap_variables)
+        registered = True
+        engine.dispose()
         yield engine
     finally:
-        event.remove(engine, "connect", _cap_variables)
+        if registered:
+            event.remove(engine, "connect", _cap_variables)
         engine.dispose()
 
 
