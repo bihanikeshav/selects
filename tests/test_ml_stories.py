@@ -14,14 +14,11 @@ from selects.db.models import (
     Photo,
     PipelineState,
     Story,
-    StoryItem,
 )
 from selects.ml.stories import (
     _day_title,
     _pick_representatives,
-    _segment_scenes,
     run_story_stage,
-    MIN_DAY_PHOTOS,
     MAX_STORY_PHOTOS,
 )
 
@@ -262,6 +259,67 @@ class TestRunStoryStage:
             stories = s.query(Story).all()
             assert len(stories) == 1
 
+    def test_cancel_during_compute_keeps_existing_stories(self, session_factory, tmp_path):
+        from selects.config import get_folder_config
+        cfg = get_folder_config(tmp_path)
+        import selects.ml.stories as stories_mod
+
+        monkeypatch_init_db = lambda _path: session_factory  # noqa: E731
+        _insert_photos_for_day(session_factory, tmp_path, "2026-03-29", 15, seed_offset=0)
+        _insert_photos_for_day(session_factory, tmp_path, "2026-03-30", 15, seed_offset=1)
+
+        original_init_db = stories_mod.init_db
+        stories_mod.init_db = monkeypatch_init_db
+        try:
+            run_story_stage(cfg)
+            with session_scope(session_factory) as s:
+                before = [(st.id, st.day) for st in s.query(Story).order_by(Story.day).all()]
+            assert len(before) >= 1
+
+            def boom(_i, _t, _name):
+                raise RuntimeError("cancelled")
+
+            with pytest.raises(RuntimeError, match="cancelled"):
+                run_story_stage(cfg, on_progress=boom)
+
+            with session_scope(session_factory) as s:
+                after = [(st.id, st.day) for st in s.query(Story).order_by(Story.day).all()]
+            assert after == before
+        finally:
+            stories_mod.init_db = original_init_db
+
+    def test_cancel_during_place_keeps_day_stories(self, session_factory, tmp_path):
+        from selects.config import get_folder_config
+        from selects.pipeline import PipelineCancelled
+
+        cfg = get_folder_config(tmp_path)
+        import selects.ml.stories as stories_mod
+
+        monkeypatch_init_db = lambda _path: session_factory  # noqa: E731
+        _insert_photos_for_day(session_factory, tmp_path, "2026-03-29", 15, seed_offset=0)
+
+        original_init_db = stories_mod.init_db
+        stories_mod.init_db = monkeypatch_init_db
+        try:
+            run_story_stage(cfg)
+            with session_scope(session_factory) as s:
+                before = [(st.id, st.day) for st in s.query(Story).order_by(Story.day).all()]
+            assert any(day == "2026-03-29" for _, day in before)
+
+            def boom(_i, _t, name):
+                if name in ("places", "patterns", "people") or str(name).startswith("place:"):
+                    raise PipelineCancelled()
+
+            with pytest.raises(PipelineCancelled):
+                run_story_stage(cfg, on_progress=boom)
+
+            with session_scope(session_factory) as s:
+                after = [(st.id, st.day) for st in s.query(Story).order_by(Story.day).all()]
+            assert ("2026-03-29" in {day for _, day in after})
+            assert any(day == "2026-03-29" for _, day in after)
+        finally:
+            stories_mod.init_db = original_init_db
+
     def test_photo_count_capped_at_max(self, session_factory, tmp_path):
         from selects.config import get_folder_config
         cfg = get_folder_config(tmp_path)
@@ -311,3 +369,25 @@ class TestRunStoryStage:
 
         # Should build 0 stories because <3 non-rejected photos on that day
         assert n == 0
+
+
+class TestVisitSuffixStrippedFromTitles:
+    """Geocoder disambiguation suffixes (`Leh (2)`) are display-only noise."""
+
+    def test_strip_place_suffix_only_removes_a_trailing_number(self):
+        from selects.ml.stories import strip_place_suffix
+
+        assert strip_place_suffix("Leh (2)") == "Leh"
+        assert strip_place_suffix("Leh") == "Leh"
+        assert strip_place_suffix("Khardung La (5,359m)") == "Khardung La (5,359m)"
+        assert strip_place_suffix("Nubra (2) Valley") == "Nubra (2) Valley"
+
+    def test_day_title_drops_the_suffix(self):
+        from types import SimpleNamespace
+
+        from selects.ml.stories import _day_title_with_visits
+
+        visits = [SimpleNamespace(name="Leh (2)")]
+        assert _day_title_with_visits("2024-05-01", 10, 2, visits) == (
+            "2024-05-01 · Exploring Leh · 10 photos"
+        )

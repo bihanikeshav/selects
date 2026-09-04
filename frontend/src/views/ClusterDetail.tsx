@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
-import { useParams, useSearchParams, Link } from "react-router-dom";
+import { useLocation, useParams, useSearchParams, Link } from "react-router-dom";
 
 import { listClusterPhotos } from "../api/client";
+import { stripPlaceSuffix } from "../lib/placeName";
 import type { Photo } from "../api/types";
 import KbdFooter from "../components/KbdFooter";
+import { modeFromPath } from "../components/ModeViewBar";
 import Rail from "../components/Rail";
 import Viewer from "../components/Viewer";
 import PhotoEditor from "../editor/PhotoEditor";
@@ -12,8 +14,12 @@ import Topbar from "../components/Topbar";
 
 export default function ClusterDetail() {
   const { tag = "" } = useParams<{ tag: string }>();
+  const { pathname } = useLocation();
+  const mode = modeFromPath(pathname);
   const [params] = useSearchParams();
-  const source = params.get("source") || "thematic";
+  const sourceParam = params.get("source");
+  const source = sourceParam === null ? "thematic" : sourceParam;
+  const clustersHref = `${mode === "curated" ? "/curated" : "/cull"}/clusters?source=${encodeURIComponent(source)}`;
 
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -22,12 +28,19 @@ export default function ClusterDetail() {
   const [lightbox, setLightbox] = useState<number | null>(null);
   const [editShas, setEditShas] = useState<string[] | null>(null);
 
-  // Aesthetic filter: drop photos below this library-wide percentile.
-  // 0 = show all; 50 = top half; 75 = top 25%.
+  // Quality filter: drop photos below this percentile within the collection.
+  // 0 = show all; 50 = the top half; 75 = the best quarter.
   const [aestheticPct, setAestheticPct] = useState<number>(0);
   const [sortByAesthetic, setSortByAesthetic] = useState<boolean>(false);
 
-  const decoded = decodeURIComponent(tag);
+  const decoded = (() => {
+    if (!/%[0-9A-Fa-f]{2}/.test(tag)) return tag;
+    try {
+      return decodeURIComponent(tag);
+    } catch {
+      return tag;
+    }
+  })();
 
   useEffect(() => {
     setLoading(true);
@@ -67,7 +80,7 @@ export default function ClusterDetail() {
     setSelected(next);
   }
 
-  function selectAll() { setSelected(new Set(photos.map((p) => p.sha256))); }
+  function selectAll() { setSelected(new Set(visiblePhotos.map((p) => p.sha256))); }
   function clearSelection() { setSelected(new Set()); }
 
   function openInEditor() {
@@ -79,23 +92,27 @@ export default function ClusterDetail() {
     <div className="app">
       <Rail />
       <div className="workspace">
-        <Topbar folder="selects" context={`cluster · ${decoded}`} />
+        <Topbar folder="selects" context="Collections" />
         <StatusRow
           pos={`${photos.length} photos`}
           keepersCount={selected.size}
-          details={`${selected.size} selected · source: ${source}`}
+          details={`${selected.size} selected`}
         />
 
         <div className="cluster-detail-wrap">
           <div className="cluster-detail-toolbar">
-            <Link to="/cull/clusters" className="btn btn-text" style={{ paddingLeft: 8 }}>
-              ← All clusters
+            <Link
+              to={clustersHref}
+              className="btn btn-text"
+              style={{ paddingLeft: 8 }}
+            >
+              ← All collections
             </Link>
-            <h1>{decoded}</h1>
+            <h1>{stripPlaceSuffix(decoded)}</h1>
 
             <div style={{ flex: 1 }} />
 
-            <button className="btn btn-text" onClick={selectAll} disabled={photos.length === 0}>Select all</button>
+            <button className="btn btn-text" onClick={selectAll} disabled={visiblePhotos.length === 0}>Select all</button>
             <button className="btn btn-text" onClick={clearSelection} disabled={selected.size === 0}>Clear</button>
 
             <button
@@ -109,7 +126,11 @@ export default function ClusterDetail() {
           </div>
 
           <div className="cluster-detail-filter-row">
-            <span>Aesthetic ≥ p{aestheticPct}</span>
+            <span>
+              {aestheticPct === 0
+                ? "Showing every photo"
+                : `Best ${100 - aestheticPct}% only`}
+            </span>
             <input
               type="range"
               min={0}
@@ -128,7 +149,7 @@ export default function ClusterDetail() {
                 checked={sortByAesthetic}
                 onChange={(e) => setSortByAesthetic(e.target.checked)}
               />
-              <span>Sort by aesthetic ★</span>
+              <span>Best first</span>
             </label>
           </div>
 
@@ -136,7 +157,9 @@ export default function ClusterDetail() {
           {error && <div className="cluster-detail-empty error">{error}</div>}
           {!loading && !error && visiblePhotos.length === 0 && (
             <div className="cluster-detail-empty">
-              {photos.length === 0 ? "No photos in this cluster." : "No photos match the aesthetic filter."}
+              {photos.length === 0
+                ? "No photos in this collection."
+                : "No photos match the quality filter."}
             </div>
           )}
 
@@ -175,7 +198,7 @@ export default function ClusterDetail() {
           </div>
         </div>
 
-        <KbdFooter />
+        <KbdFooter variant="browse" />
       </div>
 
       {lightbox !== null && visiblePhotos[lightbox] && (

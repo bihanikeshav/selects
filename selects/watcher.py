@@ -27,7 +27,7 @@ import threading
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from sqlalchemy import select
 
@@ -179,26 +179,14 @@ def run_incremental_index(
 
     Returns the number of new rows ingested.
     """
-    from selects.indexer.orchestrator import index_folder
-    from selects.pipeline import run_classical_stage
-    from selects.ml.embed import run_embedding_stage
-    from selects.ml.tags import run_tag_stage
-    from selects.ml.stories import run_story_stage
+    from selects.server.pipeline_runner import run_pipeline_stages
 
-    def cb(stage: str):
-        def _progress(i, total, name):
-            if publish:
-                publish({"stage": stage, "current": i, "total": total, "message": name})
+    def _publish(msg: dict) -> None:
+        if publish:
+            publish(msg)
 
-        return _progress
-
-    added = index_folder(cfg, cb("index"), paths=paths)
-    if added:
-        run_classical_stage(cfg, cb("classical"))
-        run_embedding_stage(cfg, cb("embed"))
-        run_tag_stage(cfg, cb("tag"))
-        run_story_stage(cfg, cb("story"))
-    return added
+    counts = run_pipeline_stages(cfg, _publish, paths=paths) or {}
+    return int(counts.get("index", 0))
 
 
 # --------------------------------------------------------------------------- #
@@ -215,9 +203,11 @@ class LibraryWatcher:
         cfg: FolderConfig,
         publish: Optional[PublishFn] = None,
         interval: Optional[int] = None,
+        manager: Optional[Any] = None,
     ) -> None:
         self.cfg = cfg
         self.publish = publish
+        self.manager = manager
         settings = load_watch_settings(cfg)
         self.interval = interval or settings.interval or DEFAULT_INTERVAL_SECONDS
         self._debouncer = Debouncer()
@@ -232,6 +222,15 @@ class LibraryWatcher:
 
     def start(self) -> None:
         with self._lock:
+            t = self._thread
+            stopping = self._stop_event.is_set()
+        # stop()+start() must work: join a stopping/dead thread instead of
+        # no-op'ing while it is still in Event.wait(interval).
+        if t is not None and (stopping or not t.is_alive()):
+            t.join(timeout=2.0)
+        with self._lock:
+            if self._thread is not None and not self._thread.is_alive():
+                self._thread = None
             if self.is_running:
                 return
             self._stop_event.clear()
@@ -248,6 +247,12 @@ class LibraryWatcher:
             settings = load_watch_settings(self.cfg)
             settings.enabled = False
             save_watch_settings(self.cfg, settings)
+            t = self._thread
+        if t is not None and t.is_alive():
+            t.join(timeout=2.0)
+        with self._lock:
+            if self._thread is not None and not self._thread.is_alive():
+                self._thread = None
 
     def status(self) -> dict:
         settings = load_watch_settings(self.cfg)
@@ -276,17 +281,26 @@ class LibraryWatcher:
 
         added = 0
         if stable:
-            added = run_incremental_index(self.cfg, stable, self.publish)
-            settings.new_files_found = added
-            if added and self.publish:
-                self.publish(
-                    {
-                        "type": "watch",
-                        "stage": "watch",
-                        "new_files_found": added,
-                        "message": f"{added} new file(s) indexed",
-                    }
-                )
+            mgr = self.manager
+            if mgr is not None and not mgr.begin_indexing():
+                log.info("watch: skip poll, indexing already running")
+                save_watch_settings(self.cfg, settings)
+                return 0
+            try:
+                added = run_incremental_index(self.cfg, stable, self.publish)
+                settings.new_files_found = added
+                if added and self.publish:
+                    self.publish(
+                        {
+                            "type": "watch",
+                            "stage": "watch",
+                            "new_files_found": added,
+                            "message": f"{added} new file(s) indexed",
+                        }
+                    )
+            finally:
+                if mgr is not None:
+                    mgr.end_indexing()
         save_watch_settings(self.cfg, settings)
         return added
 
@@ -302,13 +316,17 @@ _watchers_lock = threading.Lock()
 def get_or_create_watcher(
     cfg: FolderConfig,
     publish: Optional[PublishFn] = None,
+    manager: Optional[Any] = None,
 ) -> LibraryWatcher:
     key = str(cfg.folder)
     with _watchers_lock:
         w = _watchers.get(key)
         if w is None:
-            w = LibraryWatcher(cfg, publish=publish)
+            w = LibraryWatcher(cfg, publish=publish, manager=manager)
             _watchers[key] = w
-        elif publish is not None:
-            w.publish = publish
+        else:
+            if publish is not None:
+                w.publish = publish
+            if manager is not None:
+                w.manager = manager
         return w

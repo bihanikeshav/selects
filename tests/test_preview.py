@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import numpy as np
 
 from selects.indexer.preview import write_previews

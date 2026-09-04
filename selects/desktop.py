@@ -22,6 +22,23 @@ log = logging.getLogger(__name__)
 WINDOW_TITLE = "Selects"
 
 
+def _splash(text: str) -> None:
+    """Update the PyInstaller boot-splash caption if one is showing.
+
+    The windowed bundle displays a static splash while the (large) ML bundle
+    loads. On a cold first launch Windows Defender scans every bundled native
+    library as it is memory-mapped, which can take a minute or more with no
+    visible progress. Updating the caption turns an apparently-frozen splash
+    into honest feedback. No-op when unpackaged or if pyi_splash is absent.
+    """
+    try:
+        import pyi_splash  # type: ignore
+
+        pyi_splash.update_text(text)
+    except Exception:
+        pass
+
+
 class _NativeChrome:
     """JS-exposed API so the web UI can retint the native title bar when the
     app theme toggles — the frontend calls ``window.pywebview.api.set_theme``.
@@ -82,12 +99,23 @@ def run_app(host: str = "127.0.0.1", port: int = 8000) -> None:
     """Start the server and open the native app window."""
     import uvicorn
 
+    from selects.cli import lan_bind_refused
     from selects.logging_setup import setup_logging
+
+    refused = lan_bind_refused(host)
+    if refused:
+        raise SystemExit(refused)
 
     log_path = setup_logging()
     log.info("selects desktop starting; logs at %s", log_path)
 
+    _splash("Starting Selects...")
+
     from selects.launcher import _server_ready
+
+    # Importing the server pulls in the imaging/ML stack. On a cold first launch
+    # this is the slow step (bundle scanned by the OS), so say so on the splash.
+    _splash("Loading photo engine (first launch can take a minute)...")
     from selects.server.app import build_app
     from selects.server.library_manager import LibraryManager
 
@@ -98,7 +126,7 @@ def run_app(host: str = "127.0.0.1", port: int = 8000) -> None:
             manager.activate(active_id)
         except Exception:  # noqa: BLE001 — stale/removed active library is non-fatal
             pass
-    app = build_app(manager=manager, run_background=True)
+    app = build_app(manager=manager, run_background=True, bind_host=host)
 
     url = f"http://{host}:{port}"
 
@@ -110,11 +138,14 @@ def run_app(host: str = "127.0.0.1", port: int = 8000) -> None:
         # own handler anyway (setup_logging), so uvicorn's config isn't needed.
         uvicorn.run(app, host=host, port=port, log_level="warning", log_config=None)
 
+    _splash("Starting server...")
     threading.Thread(target=_serve, daemon=True).start()
 
     if not _server_ready(url):
         print(f"[selects] server failed to start on {url}")
         return
+
+    _splash("Opening interface...")
 
     try:
         import webview

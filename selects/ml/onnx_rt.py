@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from pathlib import Path
 from typing import Sequence
 
@@ -45,6 +46,7 @@ _EP_PRIORITY: tuple[str, ...] = (
 )
 
 _SESSIONS: dict[str, "object"] = {}
+_SESSIONS_LOCK = threading.Lock()
 
 
 def available_providers() -> list[str]:
@@ -80,6 +82,8 @@ class _ResilientSession:
         self._providers = providers
         self._sess = None       # active underlying InferenceSession
         self._cpu_only = False
+        self._build_lock = threading.Lock()
+        self._run_lock = threading.Lock()
 
     def _build(self, cpu_only: bool):
         import onnxruntime as ort
@@ -92,23 +96,27 @@ class _ResilientSession:
         return s
 
     def _session(self):
-        if self._sess is None:
-            self._sess = self._build(self._cpu_only)
-        return self._sess
+        if self._sess is not None:
+            return self._sess
+        with self._build_lock:
+            if self._sess is None:
+                self._sess = self._build(self._cpu_only)
+            return self._sess
 
     def run(self, output_names, input_feed, run_options=None):
-        try:
-            return self._session().run(output_names, input_feed, run_options)
-        except Exception as exc:
-            if self._cpu_only:
-                raise
-            log.warning(
-                "ONNX run failed on %s for %s (%s); falling back to CPU for this model",
-                self._providers, Path(self._path).name, type(exc).__name__,
-            )
-            self._cpu_only = True
-            self._sess = self._build(True)
-            return self._sess.run(output_names, input_feed, run_options)
+        with self._run_lock:
+            try:
+                return self._session().run(output_names, input_feed, run_options)
+            except Exception as exc:
+                if self._cpu_only:
+                    raise
+                log.warning(
+                    "ONNX run failed on %s for %s (%s); falling back to CPU for this model",
+                    self._providers, Path(self._path).name, type(exc).__name__,
+                )
+                self._cpu_only = True
+                self._sess = self._build(True)
+                return self._sess.run(output_names, input_feed, run_options)
 
     def __getattr__(self, name):
         # Delegate everything else (get_inputs/get_outputs/get_providers/...).
@@ -120,11 +128,13 @@ def make_session(onnx_path, prefer: Sequence[str] | None = None, cache: bool = T
     key = str(Path(onnx_path).resolve())
     if cache and key in _SESSIONS:
         return _SESSIONS[key]
-
-    sess = _ResilientSession(key, select_providers(prefer))
-    if cache:
-        _SESSIONS[key] = sess
-    return sess
+    with _SESSIONS_LOCK:
+        if cache and key in _SESSIONS:
+            return _SESSIONS[key]
+        sess = _ResilientSession(key, select_providers(prefer))
+        if cache:
+            _SESSIONS[key] = sess
+        return sess
 
 
 def _onnx_dir() -> Path:

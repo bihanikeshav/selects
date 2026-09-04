@@ -601,14 +601,36 @@
       <div class="wrap">
         <p class="privacy-line reveal">100% local. Scoring, faces, search and polish run on your machine. No account, no upload, works offline.</p>
         <div class="section-head center reveal">
-          <h2>Download selects.</h2>
-          <p>Free builds for Windows, macOS, and Linux. Unzip, point it at a folder, start sorting.</p>
+          <h2>Get selects.</h2>
+          <p>One line installs it with its own Python - no security warnings, nothing to set up first.</p>
         </div>
+        <style>
+          .install-lead{max-width:760px;margin:0 auto 20px;display:flex;flex-direction:column;gap:8px;align-items:center}
+          .install-lead .os-label{font-size:12px;letter-spacing:.08em;text-transform:uppercase;opacity:.55;margin:0 0 8px}
+          .install-lead .pip-chip{max-width:100%}
+          .install-lead .pip-chip code{white-space:normal;word-break:break-all;text-align:left}
+          .install-alt{opacity:.7;font-size:14px;margin:8px 0 20px}
+        </style>
+        <div class="install-lead reveal">
+          <button class="pip-chip" type="button" data-cmd="curl -LsSf https://bihanikeshav.github.io/selects/install.sh | sh" aria-label="Copy the macOS and Linux install command">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            <code>curl -LsSf https://bihanikeshav.github.io/selects/install.sh | sh</code>
+            <span class="pip-copied">Copy</span>
+          </button>
+          <p class="os-label">macOS &amp; Linux</p>
+          <button class="pip-chip" type="button" data-cmd="irm https://bihanikeshav.github.io/selects/install.ps1 | iex" aria-label="Copy the Windows install command">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            <code>irm https://bihanikeshav.github.io/selects/install.ps1 | iex</code>
+            <span class="pip-copied">Copy</span>
+          </button>
+          <p class="os-label">Windows (PowerShell)</p>
+        </div>
+        <p class="install-alt center reveal">Prefer a self-contained download? Grab a bundle below.</p>
         <div class="download-grid reveal">
           <article class="os" style="--glow:var(--blue)">
             <div class="os-name"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 3h8.2v8.2H3zM12.8 3H21v8.2h-8.2zM3 12.8h8.2V21H3zM12.8 12.8H21V21h-8.2z"/></svg>Windows</div>
-            <div class="meta">x64 · DirectML GPU</div>
-            <p class="note">GPU accelerated. Unzip and run <code>selects.exe</code>.</p>
+            <div class="meta">x64 · DirectML included</div>
+            <p class="note">Windows bundle includes DirectML; photo scoring currently runs on CPU. Unzip and run <code>selects.exe</code>.</p>
             <a class="btn btn-primary" href="https://github.com/bihanikeshav/selects/releases/latest/download/selects-windows-x64.zip">Download Windows</a>
           </article>
           <article class="os" style="--glow:var(--green)">
@@ -625,7 +647,7 @@
           </article>
         </div>
         <div class="pip reveal">
-          <button class="pip-chip" id="pipCopy" type="button" aria-label="Copy pip install command">
+          <button class="pip-chip" id="pipCopy" type="button" data-cmd="pip install selects" aria-label="Copy pip install command">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
             <code>pip install selects</code>
             <span class="pip-copied" id="pipCopied">Copy</span>
@@ -692,17 +714,16 @@
     }, {threshold:.12});
     document.querySelectorAll('.reveal').forEach(el=>observer.observe(el));
 
-    const pipCopy = document.getElementById('pipCopy');
-    const pipCopied = document.getElementById('pipCopied');
-    if(pipCopy){
+    document.querySelectorAll('.pip-chip[data-cmd]').forEach((chip)=>{
+      const copied = chip.querySelector('.pip-copied');
       let copyTimer;
-      pipCopy.addEventListener('click', ()=>{
-        const text = 'pip install selects';
+      chip.addEventListener('click', ()=>{
+        const text = chip.getAttribute('data-cmd');
         const done = ()=>{
-          pipCopy.classList.add('copied');
-          pipCopied.textContent = 'Copied';
+          chip.classList.add('copied');
+          if(copied) copied.textContent = 'Copied';
           clearTimeout(copyTimer);
-          copyTimer = setTimeout(()=>{ pipCopy.classList.remove('copied'); pipCopied.textContent = 'Copy'; }, 1800);
+          copyTimer = setTimeout(()=>{ chip.classList.remove('copied'); if(copied) copied.textContent = 'Copy'; }, 1800);
         };
         if(navigator.clipboard && navigator.clipboard.writeText){
           navigator.clipboard.writeText(text).then(done).catch(done);
@@ -710,7 +731,7 @@
           done();
         }
       });
-    }
+    });
   </script>
 </body>
 </html>

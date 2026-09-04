@@ -1,15 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { getWatchStatus, updateWatch } from "../api/watch";
 import type { WatchStatus } from "../api/watch";
+import { useProgressSocket, type ProgressMsg } from "../hooks/useProgressSocket";
 import "./WatchCard.css";
-
-interface WatchEventMsg {
-  type?: string;
-  stage?: string;
-  new_files_found?: number;
-  message?: string;
-}
 
 function formatLastRun(iso: string | null): string {
   if (!iso) return "never";
@@ -26,7 +20,6 @@ export default function WatchCard() {
   const [status, setStatus] = useState<WatchStatus | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const wsRef = useRef<WebSocket | null>(null);
 
   async function load() {
     try {
@@ -40,32 +33,12 @@ export default function WatchCard() {
 
   useEffect(() => {
     load();
-    connect();
-    return () => {
-      wsRef.current?.close();
-      wsRef.current = null;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function connect() {
-    if (wsRef.current) return;
-    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(`${proto}//${window.location.host}/ws/progress`);
-    wsRef.current = ws;
-    ws.onmessage = (ev) => {
-      try {
-        const msg = JSON.parse(ev.data) as WatchEventMsg;
-        if (msg.type !== "watch" && msg.stage !== "watch") return;
-        load();
-      } catch {
-        /* ignore malformed frames */
-      }
-    };
-    ws.onclose = () => {
-      wsRef.current = null;
-    };
-  }
+  useProgressSocket((msg: ProgressMsg) => {
+    if (msg.type !== "watch" && msg.stage !== "watch") return;
+    load();
+  });
 
   async function onToggle() {
     if (!status) return;

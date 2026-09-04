@@ -13,14 +13,14 @@ import json
 import logging
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 
 import requests
-from sklearn.cluster import DBSCAN
 import numpy as np
 
+from selects import __version__
 from selects.ml.trip_data import KM_PER_DEG_LAT, km_per_deg_lon, load_landmarks
 
 log = logging.getLogger(__name__)
@@ -31,7 +31,7 @@ _NOMINATIM_INTERVAL = 1.1  # seconds between calls
 
 _SESSION = requests.Session()
 _SESSION.headers.update({
-    "User-Agent": "selects/0.1 (research)",
+    "User-Agent": f"selects/{__version__} (https://github.com/bihanikeshav/selects)",
     "Accept-Language": "en",
 })
 
@@ -91,7 +91,7 @@ def cluster_day_photos(
         return []
 
     coords = np.array([[p["gps_lat"], p["gps_lon"]] for p in gps_photos])
-    labels = DBSCAN(eps=DBSCAN_EPS, min_samples=DBSCAN_MIN_SAMPLES, metric="euclidean").fit_predict(coords)
+    labels = _gps_cluster_labels(coords)
 
     clusters: dict[int, list[dict]] = {}
     for label, photo in zip(labels, gps_photos):
@@ -109,6 +109,31 @@ def cluster_day_photos(
 
     ordered = sorted(clusters.values(), key=median_time)
     return ordered
+
+
+def _gps_cluster_labels(coords: np.ndarray) -> np.ndarray:
+    """DBSCAN when sklearn imports; grid fallback if sklearn/pyarrow crashes."""
+    try:
+        from sklearn.cluster import DBSCAN
+
+        return DBSCAN(
+            eps=DBSCAN_EPS, min_samples=DBSCAN_MIN_SAMPLES, metric="euclidean"
+        ).fit_predict(coords)
+    except Exception:
+        log.warning("sklearn GPS clustering unavailable; using grid fallback")
+        labels = np.full(len(coords), -1, dtype=int)
+        cells: dict[tuple[int, int], list[int]] = {}
+        for i, (lat, lon) in enumerate(coords):
+            key = (int(round(lat / DBSCAN_EPS)), int(round(lon / DBSCAN_EPS)))
+            cells.setdefault(key, []).append(i)
+        lab = 0
+        for idxs in cells.values():
+            if len(idxs) < DBSCAN_MIN_SAMPLES:
+                continue
+            for i in idxs:
+                labels[i] = lab
+            lab += 1
+        return labels
 
 
 def _check_known_landmark(lat: float, lon: float, landmarks: list[dict]) -> Optional[str]:
@@ -232,7 +257,7 @@ def reverse_geocode(
         row = GeocodeCache(lat_round=lat_r, lon_round=lon_r, payload=None,
                            display_name=landmark_name, wikipedia_summary=summary)
         session_db.add(row)
-        session_db.commit()
+        session_db.flush()
         log.info("Landmark match: (%.4f, %.4f) -> %s", lat, lon, landmark_name)
         return landmark_name, summary
 
@@ -262,7 +287,7 @@ def reverse_geocode(
         row = GeocodeCache(lat_round=lat_r, lon_round=lon_r, payload=None,
                            display_name="Unknown location", wikipedia_summary=None)
         session_db.add(row)
-        session_db.commit()
+        session_db.flush()
         return "Unknown location", None
 
     payload_text = json.dumps(data)
@@ -275,7 +300,7 @@ def reverse_geocode(
     row = GeocodeCache(lat_round=lat_r, lon_round=lon_r, payload=payload_text,
                        display_name=name, wikipedia_summary=summary)
     session_db.add(row)
-    session_db.commit()
+    session_db.flush()
     return name, summary
 
 
@@ -377,6 +402,7 @@ def build_visits_for_day(
         return []
 
     landmarks = load_landmarks(cfg) if cfg is not None else []
+    from selects.db import session_scope
 
     visits = []
     for rank, cluster in enumerate(clusters):
@@ -396,8 +422,10 @@ def build_visits_for_day(
         # Elevation: photos don't have elevation in the schema, skip
         elevation_m = None
 
-        # Reverse geocode using a fresh session
-        with Session() as s:
+        # Reverse geocode in a short-lived session the caller commits.
+        # reverse_geocode only add/flush — it must not commit a session that
+        # may also be holding story rows.
+        with session_scope(Session) as s:
             name, summary = reverse_geocode(lat_c, lon_c, s, landmarks)
 
         visits.append(VisitData(

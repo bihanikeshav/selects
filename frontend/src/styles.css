@@ -23,7 +23,7 @@
   display: flex;
   align-items: center;
   gap: 18px;
-  padding: 10px 24px;
+  padding: 6px 24px;
   border-bottom: 1px solid var(--md-outline-var);
   background:
     linear-gradient(180deg, var(--md-surface) 0%, var(--md-surface-c-low) 100%);
@@ -155,10 +155,10 @@
   --dur-medium: 300ms;
   --dur-long:   500ms;
 
-  /* Typography stack */
-  --font-display: "Google Sans Display", "Google Sans", "Roboto Flex", system-ui, sans-serif;
-  --font-body:    "Roboto Flex", "Roboto", system-ui, sans-serif;
-  --font-mono:    "Google Sans Code", "Roboto Mono", ui-monospace, monospace;
+  /* Typography stack — local UI fonts only (no webfont round-trip). */
+  --font-display: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --font-body:    "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --font-mono:    "Cascadia Mono", "Segoe UI Mono", ui-monospace, monospace;
 
   --rail-w: 80px;
   --topbar-h: 64px;
@@ -365,6 +365,57 @@ button.rail-item {
 
 .rail-spacer { flex: 1; }
 
+/* Global "an index is running" pill, pinned above Library in the rail. */
+.indexing-pill {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 60px;
+  padding: 6px 2px;
+  border-radius: var(--r-md, 10px);
+  background: color-mix(in srgb, var(--md-primary) 14%, transparent);
+  color: var(--md-primary);
+  text-decoration: none;
+  text-align: center;
+}
+.indexing-pill:hover {
+  background: color-mix(in srgb, var(--md-primary) 22%, transparent);
+}
+.indexing-pill:focus-visible {
+  outline: 2px solid var(--md-primary);
+  outline-offset: 2px;
+}
+/* Auth-rejected variant (socket closed 4401): a notice, not a live run. */
+.indexing-pill.is-auth {
+  background: color-mix(in srgb, var(--g-yellow, #e0a800) 16%, transparent);
+  color: var(--g-yellow, #e0a800);
+  cursor: help;
+}
+.indexing-pill.is-auth .indexing-pill-dot {
+  animation: none;
+}
+.indexing-pill-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: indexing-pulse 1.4s ease-in-out infinite;
+}
+.indexing-pill-label {
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+@keyframes indexing-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .indexing-pill-dot { animation: none; }
+}
+
 .rail-divider {
   width: 28px;
   height: 1px;
@@ -401,17 +452,17 @@ button.rail-item {
   overflow-y: auto;
 }
 
-/* Canonical page header — a fixed-height (170px) shell so EVERY tab's header
+/* Canonical page header — a fixed-height (148px) shell so EVERY tab's header
    lines up, whether it carries a mode bar, a control strip, or neither. The
    Topbar / above-bar / controls take their natural height; the title band
    (.page-header) flexes to fill whatever is left, keeping the total at 170px. */
 .page-shell {
-  /* 170px is a FLOOR, not a fixed height: plain tabs sit at exactly 170 (the
+  /* 148px is a FLOOR, not a fixed height: plain tabs sit at exactly 148 (the
      title band flexes to fill), but content-rich headers (Search with its
      filter strip, Duplicates with its summary tiles) grow past it instead of
      clipping. The workspace grid gives the header an `auto` row, so a taller
      header just shrinks the scrollable content row — the page never scrolls. */
-  min-height: 170px;
+  min-height: 148px;
   display: flex;
   flex-direction: column;
   background: var(--md-surface);
@@ -419,7 +470,7 @@ button.rail-item {
 .page-header {
   flex: 1 1 auto;
   min-height: 0;
-  padding: 12px 24px;
+  padding: 6px 24px;
   border-bottom: 1px solid var(--md-outline-var);
   display: flex;
   align-items: center;
@@ -429,7 +480,8 @@ button.rail-item {
 .page-title {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 32px;
+  font-size: 28px;
+  line-height: 1.15;
   font-weight: 400;
   letter-spacing: -0.01em;
 }
@@ -476,9 +528,16 @@ button.rail-item {
   z-index: 2;
 }
 
+/* The breadcrumb's search shortcut is a 44px hit target elsewhere; in the
+   topbar it sets the whole bar's height, so keep it compact here. */
+.topbar .icon-btn {
+  width: 32px;
+  height: 32px;
+}
+
 .topbar-folder {
   font-family: var(--font-display);
-  font-size: 22px;
+  font-size: 19px;
   font-weight: 500;
   letter-spacing: -0.005em;
   display: flex;
@@ -621,8 +680,56 @@ button.rail-item {
   gap: 6px;
 }
 
-/* Action cluster floating on the cull preview frame (Like / Discard / Enhance / Straighten) */
+/* Header controls: the "Show" filter + the sort-order group. */
+.cull-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cull-show-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--md-on-surface-var);
+}
+
+.cull-show-filter select {
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--md-on-surface);
+  background: var(--md-surface-c);
+  border: 1px solid var(--md-outline-var);
+  border-radius: var(--r-sm);
+  padding: 4px 8px;
+}
+
+.cull-sort-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.cull-sort-group .btn {
+  font-size: 12px;
+  padding: 3px 10px;
+}
+
+/* Action cluster floating on the review frame (Keep / Reject / Auto edit / Straighten) */
+.cull-actions {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+  display: flex;
+  gap: 6px;
+}
+
 .cull-action-btn {
+  background: rgba(0, 0, 0, 0.55);
+  color: #FFFFFF;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -653,6 +760,131 @@ button.rail-item {
 }
 .cull-action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
+.cull-action-btn.is-kept {
+  background: var(--g-green);
+  color: #FFFFFF;
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--g-green) 35%, transparent),
+    0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.cull-action-btn.is-on {
+  background: var(--md-primary);
+  color: var(--md-on-primary);
+}
+
+/* Burst badge on the frame — count, kept tally and the [ ] steppers. */
+.burst-badge {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px 7px 10px;
+  border-radius: 999px;
+  background: var(--g-yellow);
+  color: #000000;
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  animation: burst-pulse 1500ms ease-out 1;
+}
+
+.burst-badge-count { font-family: var(--font-mono); }
+
+.burst-badge-kept {
+  background: var(--g-green);
+  color: #FFFFFF;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.burst-badge-step {
+  background: rgba(0, 0, 0, 0.12);
+  color: #000000;
+  border: 0;
+  border-radius: 4px;
+  padding: 2px 7px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.burst-badge-step:hover { background: rgba(0, 0, 0, 0.22); }
+
+/* "+N similar shots" affordance on a collapsed burst. */
+.cull-similar-btn {
+  position: absolute;
+  bottom: 48px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(0, 0, 0, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 8px;
+  color: #FFFFFF;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+}
+
+.cull-similar-btn:disabled { cursor: wait; }
+
+/* Centred message stage (error / empty). */
+.cull-stage--message {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cull-message {
+  text-align: center;
+  color: var(--md-on-surface-var);
+  font-family: var(--font-display);
+  line-height: 1.6;
+}
+
+.cull-message-title {
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--md-on-surface);
+  margin-bottom: 8px;
+}
+
+.cull-message-body { font-size: 13px; }
+
+.cull-message-detail {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  background: var(--md-surface-c);
+  padding: 8px 16px;
+  border-radius: var(--r-md);
+  display: inline-block;
+}
+
+/* Session progress strip above the keyboard footer. */
+.cull-progress-strip {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 5px 24px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--md-on-surface-var);
+  border-top: 1px solid var(--md-outline-var);
+  background: var(--md-surface-c-low);
+}
+
 .gold-frame {
   position: relative;
   border-radius: var(--r-xl);
@@ -660,14 +892,12 @@ button.rail-item {
   background: #0a0a0c;
   box-shadow: var(--md-elev-2);
   min-height: 0;
-  /* Square canvas — letterboxed for both landscape and portrait. We cap by
-     height so the frame never overflows the cull-stage row. */
-  aspect-ratio: 1 / 1;
+  /* The frame takes the whole column between the rail and the side panel;
+     the image inside letterboxes by height only. */
   height: 100%;
   max-height: 100%;
-  width: auto;
+  width: 100%;
   max-width: 100%;
-  justify-self: center;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -695,6 +925,18 @@ button.rail-item {
   pointer-events: none;
 }
 
+.gold-overlay-back {
+  margin-top: 4px;
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 6px;
+  color: #FFFFFF;
+  font-size: 12px;
+  padding: 2px 8px;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
 .gold-overlay .filename {
   font-family: var(--font-mono);
   font-size: 12px;
@@ -716,8 +958,6 @@ button.rail-item {
   box-shadow: var(--md-elev-1);
   pointer-events: auto;
 }
-
-.gold-overlay .stamp svg { width: 14px; height: 14px; color: var(--g-yellow); }
 
 /* burst strip */
 .burst-strip {
@@ -785,33 +1025,22 @@ button.rail-item {
   outline-offset: 2px;
 }
 
-.burst-thumb.is-silver .badge {
-  background: var(--md-surface-c-highest);
-  color: var(--md-on-surface);
-  box-shadow: 0 0 0 1.5px var(--md-outline-var) inset;
-}
-
-.burst-thumb.is-silver {
-  outline: 2px solid var(--md-outline);
-  outline-offset: 2px;
-}
-
-.burst-thumb.is-liked::after {
+.burst-thumb.is-kept::after {
   content: "";
   position: absolute;
   inset: 0;
-  border: 2px solid var(--g-red);
+  border: 2px solid var(--g-green);
   border-radius: var(--r-sm);
   pointer-events: none;
 }
 
-.burst-thumb .liked-pip {
+.burst-thumb .kept-pip {
   position: absolute;
   top: 4px;
   right: 4px;
   width: 20px; height: 20px;
   border-radius: 50%;
-  background: var(--g-red);
+  background: var(--g-green);
   color: #fff;
   display: grid;
   place-items: center;
@@ -1061,9 +1290,18 @@ button.rail-item {
 
 .clusters-header {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: stretch;
 }
+
+.clusters-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.clusters-header-row + .sub { margin-top: 6px; }
 
 .clusters-header h1 {
   font-family: var(--font-display);
@@ -1204,6 +1442,47 @@ button.rail-item {
 }
 
 .stories-header .sub { font-size: 14px; color: var(--md-on-surface-var); }
+
+.stories-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Search field + strictness control strip under the Stories title. */
+.stories-search-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0 18px;
+}
+
+.stories-search-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--md-surface-c-low);
+  border: 1px solid var(--md-outline-var);
+  border-radius: 999px;
+  padding: 10px 18px;
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--md-on-surface);
+  outline: none;
+}
+.stories-search-input:focus-visible {
+  border-color: var(--md-primary);
+}
+
+.strictness {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.strictness-label {
+  font-size: 12px;
+  color: var(--md-on-surface-var);
+}
 
 .story-card {
   display: grid;
@@ -1720,7 +1999,14 @@ button.rail-item {
   gap: 10px;
 }
 
+.curated-cell {
+  position: relative;
+}
+
 .curated-tile {
+  display: block;
+  width: 100%;
+  padding: 0;
   position: relative;
   border: 1px solid var(--md-outline-var);
   border-radius: var(--r-md);
@@ -1755,7 +2041,7 @@ button.rail-item {
   display: block;
 }
 
-.curated-tile-unlike {
+.curated-tile-remove {
   position: absolute;
   top: 6px;
   left: 6px;
@@ -1763,34 +2049,22 @@ button.rail-item {
   height: 26px;
   display: grid;
   place-items: center;
-  background: var(--g-red);
+  background: rgba(0, 0, 0, 0.6);
   color: #fff;
   border: 0;
   border-radius: 50%;
   cursor: pointer;
-  transition: transform var(--dur-short) var(--ease-standard), filter var(--dur-short) var(--ease-standard);
+  transition: transform var(--dur-short) var(--ease-standard), background-color var(--dur-short) var(--ease-standard);
 }
 
-.curated-tile-unlike:hover {
+.curated-tile-remove:hover {
   transform: scale(1.08);
-  filter: brightness(1.1);
+  background: var(--g-red);
 }
 
-.curated-tile-unlike:focus-visible {
+.curated-tile-remove:focus-visible {
   outline: 2px solid var(--md-on-surface);
   outline-offset: 2px;
-}
-
-.curated-tile-score {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  background: rgba(0, 0, 0, 0.75);
-  color: #fff;
-  font-size: 10px;
-  padding: 2px 6px;
-  border-radius: var(--r-xs);
-  font-family: var(--font-mono);
 }
 
 .curated-kbd {
@@ -1925,6 +2199,71 @@ button.rail-item {
   overflow-y: auto;
   padding: 24px 32px 32px;
   background: var(--md-surface);
+}
+
+@keyframes skeleton-shimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
+.skeleton-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px;
+}
+
+.page-skeleton {
+  padding: 24px 32px 32px;
+  min-height: 60vh;
+}
+
+.skeleton-tile {
+  aspect-ratio: 1;
+  border-radius: var(--r-md);
+  background: linear-gradient(
+    90deg,
+    var(--md-surface-c) 25%,
+    color-mix(in srgb, var(--md-on-surface) 8%, var(--md-surface-c)) 37%,
+    var(--md-surface-c) 63%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.2s ease-in-out infinite;
+}
+
+.cull-stage--skeleton {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 16px;
+  padding: 24px 32px;
+}
+
+.cull-skeleton-hero {
+  flex: 1;
+  min-height: 280px;
+  border-radius: var(--r-lg);
+  background: linear-gradient(
+    90deg,
+    var(--md-surface-c) 25%,
+    color-mix(in srgb, var(--md-on-surface) 8%, var(--md-surface-c)) 37%,
+    var(--md-surface-c) 63%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.2s ease-in-out infinite;
+}
+
+.cull-skeleton-film {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 8px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-tile,
+  .cull-skeleton-hero {
+    animation: none;
+  }
 }
 
 /* ===== People merge mode =============================================== */
@@ -2875,6 +3214,16 @@ button.rail-item {
   max-width: 720px;
 }
 
+.lib-advanced-link {
+  margin: 0;
+  font-size: 13px;
+}
+.lib-advanced-link a {
+  color: var(--md-on-surface-var);
+  text-decoration: underline;
+}
+.lib-advanced-link a:hover { color: var(--md-primary); }
+
 .lib-path {
   font-family: var(--font-mono);
   font-size: 13px;
@@ -3302,10 +3651,3 @@ button.rail-item {
   padding: 12px;
 }
 
-/* Quick-sort quality filter chips (Sort page header) */
-.sort-quality-chips {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: 10px;
-}

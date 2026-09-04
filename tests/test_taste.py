@@ -8,7 +8,7 @@ import pytest
 
 from selects.config import get_folder_config
 from selects.db import init_db, session_scope
-from selects.db.models import AestheticScore, Embedding, Photo, Swipe
+from selects.db.models import Embedding, Photo, Swipe
 from selects.ml import taste
 from selects.ml.curation import curate
 
@@ -39,12 +39,12 @@ def _make_library(tmp_path: Path, n_keep: int, n_reject: int, with_scores: bool 
                 sha = f"sha{pid:06d}"
                 s.add(Photo(id=pid, path=f"p{pid}.jpg", sha256=sha))
                 s.flush()  # photos row must exist before FK dependents
-                s.add(Embedding(photo_id=pid, siglip=_fp16_blob(_synthetic_embedding(positive))))
+                s.add(Embedding(
+                    photo_id=pid,
+                    siglip=_fp16_blob(_synthetic_embedding(positive)),
+                    aesthetic_iqa=0.5 if with_scores else None,
+                ))
                 s.add(Swipe(photo_id=pid, decision="keep" if positive else "reject"))
-                if with_scores:
-                    # All photos get the SAME aesthetic so any ordering change
-                    # in curate() must come from the taste blend.
-                    s.add(AestheticScore(photo_id=pid, ap25_score=0.5, nima_score=5.0))
     return cfg, Session
 
 
@@ -185,11 +185,10 @@ def test_curate_blends_taste_into_ranking(tmp_path):
 def test_curate_taste_never_dominates(tmp_path):
     # With a huge aesthetic gap, taste (capped at 0.4) cannot flip the leader.
     cfg, Session = _make_library(tmp_path, n_keep=150, n_reject=150, with_scores=True)
-    # Give one *rejected* photo a massively better aesthetic score.
+    # Give one *rejected* photo a massively better CLIP-IQA score.
     with session_scope(Session) as s:
-        sc = s.get(AestheticScore, 151)  # first reject
-        sc.ap25_score = 10.0
-        sc.nima_score = 10.0
+        emb = s.get(Embedding, 151)  # first reject
+        emb.aesthetic_iqa = 1.0
     taste.train_taste_model(cfg)
 
     with session_scope(Session) as s:

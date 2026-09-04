@@ -24,7 +24,7 @@ from fastapi.testclient import TestClient
 from selects.config import get_folder_config
 from selects.db import _ENGINES, _ENGINES_LOCK, init_db, session_scope
 from selects.db.models import (
-    AestheticScore, FaceEmbedding, Moment, MomentMember, Photo,
+    Embedding, FaceEmbedding, Moment, MomentMember, Photo,
 )
 from selects.ml.face_attributes import (
     EYES_CLOSED_THRESHOLD,
@@ -33,6 +33,7 @@ from selects.ml.face_attributes import (
     estimate_pose_from_kps,
     eyes_open_score,
     face_quality_penalty,
+    photo_eyes_open_ratio,
     rollup_face_quality,
 )
 
@@ -73,6 +74,22 @@ def test_eyes_open_score_open_vs_closed() -> None:
     assert open_score > 0.8
     assert closed_score < 0.1
     assert closed_score < EYES_CLOSED_THRESHOLD < open_score
+
+
+def test_photo_eyes_open_ratio_from_landmarks() -> None:
+    from types import SimpleNamespace
+
+    open_lmk, kps = _synthetic_landmarks(eye_ratio=0.35)
+    closed_lmk, _ = _synthetic_landmarks(eye_ratio=0.05)
+    open_face = SimpleNamespace(kps=kps, landmark_2d_106=open_lmk)
+    closed_face = SimpleNamespace(kps=kps, landmark_2d_106=closed_lmk)
+    haar_face = SimpleNamespace(kps=None, landmark_2d_106=None)
+
+    assert photo_eyes_open_ratio([]) is None
+    assert photo_eyes_open_ratio([haar_face]) is None
+    assert photo_eyes_open_ratio([open_face]) == 1.0
+    assert photo_eyes_open_ratio([closed_face]) == 0.0
+    assert photo_eyes_open_ratio([open_face, closed_face]) == 0.5
 
 
 def test_eyes_open_score_intermediate_is_monotonic() -> None:
@@ -184,9 +201,8 @@ def test_penalty_no_faces_or_unknown_is_zero() -> None:
 
 def _seed_burst(tmp_path: Path, *, combined_a: float, combined_b: float):
     """Two photos in one moment: A has a closed-eyes face, B has eyes open.
-    combined = 0.6*ap25 + 0.4*nima; we set nima == ap25 == combined for
-    simplicity. The moment's primary points at a third photo that is NOT in
-    scope, so curate's aesthetic pick decides the stack top."""
+    combined is CLIP-IQA in [0, 1]. The moment's primary points at a third
+    photo that is NOT in scope, so curate's aesthetic pick decides the stack top."""
     cfg = get_folder_config(tmp_path)
     Session = init_db(cfg.db_path)
     with session_scope(Session) as s:
@@ -196,8 +212,8 @@ def _seed_burst(tmp_path: Path, *, combined_a: float, combined_b: float):
         s.add_all([pa, pb, pc])
         s.flush()
         s.add_all([
-            AestheticScore(photo_id=pa.id, ap25_score=combined_a, nima_score=combined_a),
-            AestheticScore(photo_id=pb.id, ap25_score=combined_b, nima_score=combined_b),
+            Embedding(photo_id=pa.id, siglip=b"\x00" * 2304, aesthetic_iqa=combined_a),
+            Embedding(photo_id=pb.id, siglip=b"\x00" * 2304, aesthetic_iqa=combined_b),
         ])
         m = Moment(
             primary_photo_id=pc.id,
@@ -228,8 +244,8 @@ def _seed_burst(tmp_path: Path, *, combined_a: float, combined_b: float):
 def test_curate_prefers_eyes_open_among_near_equal(tmp_path: Path) -> None:
     from selects.ml.curation import curate
 
-    # A slightly better aesthetically (7.0 vs 6.9) but eyes closed.
-    Session, (a_id, b_id) = _seed_burst(tmp_path, combined_a=7.0, combined_b=6.9)
+    # A slightly better aesthetically (0.70 vs 0.69) but eyes closed.
+    Session, (a_id, b_id) = _seed_burst(tmp_path, combined_a=0.70, combined_b=0.69)
     with session_scope(Session) as s:
         out = curate(s, [a_id, b_id], pct_floor=0.0)
     assert len(out) == 1
@@ -239,8 +255,9 @@ def test_curate_prefers_eyes_open_among_near_equal(tmp_path: Path) -> None:
 def test_curate_does_not_override_big_aesthetic_gap(tmp_path: Path) -> None:
     from selects.ml.curation import curate
 
-    # A is much better (8.0 vs 6.5); the bounded penalty must not flip it.
-    Session, (a_id, b_id) = _seed_burst(tmp_path, combined_a=8.0, combined_b=6.5)
+    # A is better by more than PENALTY_CAP (0.10 > 0.05); the bounded
+    # penalty must not flip it. A 0–10-era cap of 0.5 *would* flip this.
+    Session, (a_id, b_id) = _seed_burst(tmp_path, combined_a=0.70, combined_b=0.60)
     with session_scope(Session) as s:
         out = curate(s, [a_id, b_id], pct_floor=0.0)
     assert len(out) == 1

@@ -1,6 +1,8 @@
 """Tests for selects.gpu capability detection."""
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from selects.gpu import GpuCapabilities, detect_capabilities
 
 
@@ -28,12 +30,26 @@ class TestDetectCapabilities:
             assert caps.provider != "CPUExecutionProvider"
             assert caps.device_name is not None
 
-    def test_vram_absent_when_gpu_unavailable(self) -> None:
+    def test_vram_is_optional(self) -> None:
         caps = detect_capabilities()
-        if not caps.gpu_available:
-            assert caps.vram_total_mb is None
+        assert caps.vram_total_mb is None or caps.vram_total_mb >= 0
 
     def test_no_exception_on_detection(self) -> None:
         # Just confirming detect_capabilities() never raises
         caps = detect_capabilities()
         assert caps is not None
+
+    def test_gpu_available_false_when_models_cpu_only(self) -> None:
+        dml_first = ["DmlExecutionProvider", "CPUExecutionProvider"]
+        with (
+            patch("selects.ml.onnx_rt.available_providers", return_value=dml_first),
+            patch("selects.ml.onnx_rt.select_providers", return_value=dml_first),
+            patch(
+                "selects.ml.onnx_rt._CPU_ONLY_MODELS",
+                {"siglip_text", "siglip_vision", "ram_plus"},
+            ),
+        ):
+            caps = detect_capabilities()
+        assert caps.gpu_available is False
+        assert caps.provider == "CPUExecutionProvider"
+        assert "DmlExecutionProvider" in caps.installed_providers

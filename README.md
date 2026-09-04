@@ -8,6 +8,8 @@
 
 Point it at a folder of photos and videos. It indexes, scores, clusters, and groups them into
 day-by-day stories, surfaces the best shots, and gets out of your way. Nothing is uploaded anywhere.
+(The Map view is an exception: it loads OpenStreetMap tiles from the internet, and reverse
+geocoding of GPS coordinates into place names is optional and can be disabled.)
 
 [![PyPI](https://img.shields.io/pypi/v/selects?color=1f6feb)](https://pypi.org/project/selects/)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
@@ -43,7 +45,7 @@ The only network call is an optional place-name lookup for geotagged shots.
 | People | ArcFace embeddings clustered into named "Person" identities |
 | Face-aware culling | Eyes-open / head-pose scoring picks the best frame in a burst |
 | Stories | GPS + time clustering into day-by-day, place-by-place trips |
-| Aesthetic curation | AP25 + NIMA scoring with percentile "best-of" gating |
+| Aesthetic curation | CLIP-IQA scoring with percentile "best-of" gating |
 | Duplicate finder | Exact + near-duplicate report with reclaimable-storage summary |
 | Keyboard culling | Arrow-key review, undo, 100% zoom, synced-zoom compare |
 | Taste learning | A local model that nudges scoring toward your keep/reject history |
@@ -54,34 +56,49 @@ The only network call is an optional place-name lookup for geotagged shots.
 
 ## Install
 
-**Desktop app (recommended)** — download the bundle for your OS from
-[Releases](https://github.com/bihanikeshav/selects/releases) and run it. No Python required; it
-downloads its AI models on first launch.
-
-**Via pip** (Python 3.11+):
+**One line (recommended)** — installs via [uv](https://docs.astral.sh/uv/), which brings its own
+Python, so there is nothing to install first and no downloaded app for macOS Gatekeeper or Windows
+SmartScreen to flag. It opens the web UI; AI models download from the app's first-run setup screen.
 
 ```bash
-pip install selects          # app + web GUI + CLI
-pip install "selects[ml]"    # add the on-device AI (torch, insightface, …)
-selects serve                # open the web UI
-selects index /path/to/trip  # or run headless from the CLI
+# macOS / Linux
+curl -LsSf https://bihanikeshav.github.io/selects/install.sh | sh
+
+# Windows (PowerShell)
+irm https://bihanikeshav.github.io/selects/install.ps1 | iex
 ```
 
-RAM++ tagging installs separately (no PyPI release):
-`pip install git+https://github.com/xinyu1205/recognize-anything.git`
+**Desktop bundle** — prefer a self-contained download? Grab the bundle for your OS from
+[Releases](https://github.com/bihanikeshav/selects/releases) and run it. No Python required; it
+downloads its AI models on first launch. (Unsigned, so the OS shows a one-time "unverified" prompt —
+right-click → Open on macOS, or More info → Run anyway on Windows.)
+
+**Via pip / uv** (Python 3.11+):
+
+```bash
+uv tool install "selects[ml]"  # or: pip install "selects[ml]"
+pip install selects            # base app + web GUI + CLI, no on-device AI
+pip install "selects[ml,desktop]"  # AI + a native desktop window instead of a browser tab
+selects serve                  # open the web UI (port 8000; honors SELECTS_WEB_PORT)
+selects index /path/to/trip    # or run headless from the CLI
+```
+
+RAM++ is the ONNX graph in the `selects-onnx` bundle — it is already part of `[ml]`. No extra
+`pip install` and no `recognize-anything` git checkout.
 
 ### Platform support
 
-Builds are **CPU-only** today — universal, just slower on the ML stages. `selects doctor` reports
-detected hardware; GPU acceleration is on the [roadmap](#roadmap).
+SigLIP, CLIP-IQA, and RAM++ run on **CPU** on every platform. The Windows `[ml]` extra installs
+DirectML (`onnxruntime-directml`), but those transformer graphs are forced onto the CPU EP —
+DirectML is listed, not used for scoring. `selects doctor` reports whether SigLIP would actually
+run on a non-CPU provider (today: no). GPU acceleration is on the [roadmap](#roadmap).
 
-| Platform | CPU today | GPU (planned) |
-|---|:---:|---|
-| Windows (x64) | ✓ | NVIDIA / CUDA |
-| macOS (Apple Silicon) | ✓ | Metal (MPS) + CoreML |
-| macOS (Intel) | ✓ | — |
-| Linux (x64) | ✓ | NVIDIA / CUDA |
-| AMD / Intel GPUs | ✓ (as CPU) | ONNX Runtime DirectML / ROCm |
+| Platform | Scoring | GPU EP |
+|---|---|---|
+| Windows (x64) | CPU | DirectML bundled; unused for SigLIP/RAM++ |
+| macOS (Apple Silicon) | CPU | CoreML may be present; unused for SigLIP/RAM++ |
+| macOS (Intel) | CPU | — |
+| Linux (x64) | CPU | CUDA may be present; unused for SigLIP/RAM++ |
 
 ## Architecture
 
@@ -95,7 +112,7 @@ flowchart TD
     API["FastAPI + WebSocket API"]
     Pipeline["Pipeline orchestrator"]
     Classical["Classical scoring<br/>(blur, exposure, faces)"]
-    ML["ML stages<br/>(SigLIP, ArcFace, RAM++, VLM)"]
+    ML["ML stages<br/>(SigLIP, CLIP-IQA, ArcFace, RAM++)"]
     Files[("Photos & videos<br/>local disk")]
     DB[("Per-library SQLite<br/>&lt;folder&gt;/.selects/")]
 
@@ -114,18 +131,22 @@ Each stage reads/writes `<folder>/.selects/index.db` and is independently re-run
 | # | Stage | Does |
 |---|---|---|
 | 1 | `index` | walk & hash files, decode previews/thumbnails, read EXIF/GPS |
-| 2 | `classical` | blur / exposure / clipped-highlight / face scoring; auto-reject gate |
-| 3 | `embed` | SigLIP-SO400M image embeddings + CLIP-IQA aesthetic score |
-| 4 | `tag` | zero-shot tagging via SigLIP text-prompt similarity |
-| 5 | `ram_tag` | RAM++ open-vocabulary tagging |
-| 6 | `smart_tag` | HDBSCAN clustering over embeddings + VLM cluster names |
-| 7 | `thematic` / `date` | rule-driven location and day clustering from GPS/time |
+| 2 | `video` | sample frames, classical quality, highlights, dead-footage flags |
+| 3 | `classical` | blur / exposure / clipped-highlight / face scoring; auto-reject gate |
+| 4 | `embed` | SigLIP-SO400M image embeddings + CLIP-IQA aesthetic score |
+| 5 | `tag` | zero-shot tagging via SigLIP text-prompt similarity |
+| 6 | `ram_tag` | RAM++ open-vocabulary tagging (ONNX in `selects-onnx`) |
+| 7 | `smart_tag` | HDBSCAN clustering over embeddings + SigLIP zero-shot names |
 | 8 | `face_embed` | ArcFace embeddings for detected faces |
-| 9 | `moment` | collapse near-duplicate/burst photos into one best pick |
-| 10 | `story` | build day/place stories from moments, tags, and locations |
+| 9 | `persons` | cluster ArcFace embeddings into named Person identities |
+| 10 | `moment` | collapse near-duplicate/burst photos into one best pick |
+| 11 | `story` | build day/place stories from moments, tags, and locations |
+| 12 | `thematic` | rule-driven location/theme clusters from GPS, people, tags, time |
+| 13 | `date` | group photos by calendar day |
 
-Aesthetic curation combines AP25 + NIMA with configurable per-scope and library-wide percentile
-thresholds (see [Configuration](#configuration)).
+`speed_mode=fast` skips `ram_tag`, `smart_tag`, `face_embed`, and `persons`. Aesthetic curation
+ranks on CLIP-IQA (`Embedding.aesthetic_iqa` in [0, 1]) with configurable per-scope and
+library-wide percentile thresholds (see [Configuration](#configuration)).
 
 ## Roadmap
 
@@ -147,7 +168,7 @@ thresholds (see [Configuration](#configuration)).
 Requires Python 3.11+ and Node 18+.
 
 ```bash
-pip install -e ".[ml]"        # ML stack (torch, transformers, insightface, …); omit [ml] for classical-only
+pip install -e ".[ml]"        # ML stack (onnxruntime, insightface, sklearn, …); omit [ml] for classical-only
 selects serve /path/to/photos # backend + web UI (indexes in the background)
 
 cd frontend && npm install && npm run dev   # hot-reloading UI (separate terminal)
@@ -161,19 +182,19 @@ check hardware with `selects doctor`.
 
 ## Configuration
 
-Per-folder via `pydantic-settings`; override any field with a `SELECTS_`-prefixed env var (or `.env`),
-e.g. `SELECTS_WEB_PORT=9000`. See `selects/config.py`.
+`selects serve` binds **8000** by default. If `--port` is omitted, it honors `SELECTS_WEB_PORT`.
+Per-folder settings via `pydantic-settings`; override any field with a `SELECTS_`-prefixed env
+var (or `.env`). See `selects/config.py`.
 
 | Field | Default | Notes |
 |---|---|---|
-| `web_port` | `8765` | Web UI/API port |
+| `web_port` | `8000` | Web UI/API port (`selects serve` / `SELECTS_WEB_PORT`) |
 | `web_host` | `127.0.0.1` | Bind host |
-| `burst_window_seconds` | `3` | Time window for grouping burst shots |
-| `burst_similarity_threshold` | `0.92` | Similarity cutoff for burst grouping |
-| `ap_weight` / `nima_weight` | `0.6` / `0.4` | Weights in the combined aesthetic score |
-| `aesthetic_per_scope_pct` | `75.0` | Must be top `(100 - pct)`% within its scope |
-| `aesthetic_library_pct` | `50.0` | Must also be top `(100 - pct)`% library-wide |
-| `speed_mode` | `full` | `fast` skips some ML stages for a quick pass |
+| `burst_window_seconds` | `12` | Time window for grouping burst shots |
+| `burst_similarity_threshold` | `0.96` | Similarity cutoff for burst grouping |
+| `aesthetic_per_scope_pct` | `75.0` | CLIP-IQA: must be top `(100 - pct)`% within its scope |
+| `aesthetic_library_pct` | `50.0` | CLIP-IQA: must also be top `(100 - pct)`% library-wide |
+| `speed_mode` | `full` | `fast` skips `ram_tag`, `smart_tag`, `face_embed`, `persons` |
 
 Derived paths under `<folder>/.selects/`: `index.db`, `thumbs/`, `previews/`.
 
@@ -190,7 +211,16 @@ back to defaults); see [`examples/ladakh/`](examples/ladakh/):
 
 ```bash
 pip install -e ".[dev]" && pytest && ruff check .
+cd frontend && npm run lint && npm run e2e   # ESLint + Playwright smoke test
 ```
+
+`npm run e2e` needs Chromium once (`npx playwright install chromium`). It builds the SPA into
+`selects/server/static/`, indexes a throwaway six-photo library in the temp directory and drives the
+real server on port 8765. Point `SELECTS_PYTHON` at the interpreter that has `selects` installed if
+it is not the one on `PATH` (e.g. `SELECTS_PYTHON=../.venv/Scripts/python.exe`).
+
+For the native desktop window (`pywebview`), install `selects[desktop]` (or `selects[ml,desktop]`
+for AI + the desktop window).
 
 Schema is managed with Alembic; migrations ship in `selects/db/migrations/` (no `alembic.ini`) and
 `init_db()` upgrades each library's DB to head on open. After editing `selects/db/models.py`,
@@ -212,8 +242,7 @@ autogenerate a revision against a throwaway SQLite URL and review it — SQLite 
 
 **Desktop build** — `pip install "pyinstaller>=6.6"` then `python packaging/build.py [--ml]`. It
 builds the frontend into `selects/server/static/` (same-origin UI) and runs PyInstaller (onedir) via
-`packaging/selects.spec` into `dist/selects/`. For a smaller ML bundle, install CPU torch first:
-`pip install torch --index-url https://download.pytorch.org/whl/cpu`.
+`packaging/selects.spec` into `dist/selects/`.
 
 ## Contributing
 
@@ -228,7 +257,6 @@ formats, and tuning aesthetic/burst defaults for different shooting styles.
 
 - [ ] Aesthetic/burst thresholds were tuned on a single trip; may need adjustment for other styles/gear.
 - [ ] List endpoints use offset/limit, not cursor-based, pagination.
-- [ ] RAM++ tagging depends on a git-only model — slower, less reproducible install than the rest of `[ml]`.
 
 ## License
 

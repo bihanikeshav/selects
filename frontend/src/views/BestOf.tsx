@@ -2,10 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import PageHeader from "../components/PageHeader";
 import Rail from "../components/Rail";
+import SkeletonGrid from "../components/SkeletonGrid";
 import StackPhoto from "../components/StackPhoto";
 import Viewer from "../components/Viewer";
 import PhotoEditor from "../editor/PhotoEditor";
 import type { CuratedPhoto } from "../api/types";
+import { stripPlaceSuffix } from "../lib/placeName";
 
 type CurateResp = {
   facet: string;
@@ -67,7 +69,7 @@ export default function BestOf() {
     if (!facet || !value) return "Best of";
     if (facet === "person") return `Best of ${personLabel || `P${value}`}`;
     if (facet === "category") return `Best ${value}s`;
-    return `Best of ${value}`;
+    return `Best of ${stripPlaceSuffix(value)}`;
   }, [facet, value, personLabel]);
 
   const toggle = useCallback((sha: string) => {
@@ -122,14 +124,14 @@ export default function BestOf() {
         }}
       >
         <PageHeader
-          context={`best of: ${facet}=${value}`}
+          context={title}
           title={title}
           subtitle={
             <>
               {data ? `${data.total} curated photos` : loading ? "Loading…" : ""}
               {" · "}
               <span style={{ fontFamily: "var(--font-mono)" }}>
-                {FACET_LABELS[facet || ""] ?? facet}: {value}
+                {FACET_LABELS[facet || ""] ?? facet}: {stripPlaceSuffix(value ?? "")}
               </span>
             </>
           }
@@ -180,7 +182,7 @@ export default function BestOf() {
             </div>
           )}
           {loading ? (
-            <div style={{ color: "var(--md-on-surface-var)", padding: 24 }}>Loading…</div>
+            <SkeletonGrid count={12} />
           ) : data && data.photos.length > 0 ? (
             <div
               style={{
@@ -202,7 +204,11 @@ export default function BestOf() {
                     onFocus={() => setFocusedPhotoId(p.photo_id)}
                     onClick={(activeSha) => toggle(activeSha)}
                     onDoubleClick={() => setLightboxIdx(i)}
-                    title={`AP ${(p.ap25 ?? 0).toFixed(2)} · NIMA ${(p.nima ?? 0).toFixed(2)}${
+                    title={`Quality ${
+                      (p.iqa ?? p.combined) != null
+                        ? (p.iqa ?? p.combined)!.toFixed(2)
+                        : "—"
+                    }${
                       p.moment_size && p.moment_size > 1 ? ` · burst of ${p.moment_size}` : ""
                     }`}
                     className={isSel ? "is-selected" : undefined}
@@ -247,7 +253,9 @@ export default function BestOf() {
                         fontFamily: "var(--font-mono)",
                       }}
                     >
-                      {(p.combined ?? 0).toFixed(2)}
+                      {(p.iqa ?? p.combined) != null
+                        ? (p.iqa ?? p.combined)!.toFixed(2)
+                        : "—"}
                     </span>
                   </StackPhoto>
                 );

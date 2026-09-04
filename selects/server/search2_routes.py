@@ -18,11 +18,12 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, FastAPI, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 
 from selects.config import FolderConfig
 from selects.db import init_db, session_scope
 from selects.db.models import AestheticScore, Embedding, Photo, PhotoPerson, PhotoTag
+from selects.util import chunked
 
 # Fixed bonus added per matching tag so exact tag hits always outrank a
 # semantic-only match (SigLIP cosine scores live in roughly [-1, 1]).
@@ -57,7 +58,7 @@ def build_router(cfg: FolderConfig) -> APIRouter:
         date_from: Optional[str] = Query(None, description="ISO date/datetime lower bound (inclusive) on taken_at"),
         date_to: Optional[str] = Query(None, description="ISO date/datetime upper bound (inclusive) on taken_at"),
         min_aesthetic: Optional[float] = Query(
-            None, description="Minimum combined aesthetic score (avg of nima_score/ap25_score, 0-10ish scale)"
+            None, description="Minimum CLIP-IQA score on Embedding.aesthetic_iqa, in [0, 1]"
         ),
         limit: int = Query(120, le=1000),
     ):
@@ -101,13 +102,27 @@ def build_router(cfg: FolderConfig) -> APIRouter:
 
             combined_by_id: dict[int, float] = {}
             if min_aesthetic is not None:
-                aes_rows = s.query(AestheticScore.photo_id, AestheticScore.nima_score, AestheticScore.ap25_score).all()
-                for pid, nima, ap25 in aes_rows:
-                    vals = [v for v in (nima, ap25) if v is not None]
-                    if vals:
-                        combined_by_id[pid] = sum(vals) / len(vals)
-                passing = {pid for pid, val in combined_by_id.items() if val >= min_aesthetic}
-                _intersect(passing)
+                ap_floor = min_aesthetic * 10.0
+                score_rows = (
+                    s.query(Embedding.photo_id, Embedding.aesthetic_iqa, AestheticScore.ap25_score)
+                    .outerjoin(AestheticScore, AestheticScore.photo_id == Embedding.photo_id)
+                    .filter(
+                        or_(
+                            AestheticScore.ap25_score >= ap_floor,
+                            and_(
+                                AestheticScore.ap25_score.is_(None),
+                                Embedding.aesthetic_iqa.isnot(None),
+                                Embedding.aesthetic_iqa >= min_aesthetic,
+                            ),
+                        )
+                    )
+                    .all()
+                )
+                combined_by_id = {
+                    pid: float(ap25) / 10.0 if ap25 is not None else float(iqa)
+                    for pid, iqa, ap25 in score_rows
+                }
+                _intersect(set(combined_by_id))
 
             if has_structured_filter and not candidate_ids:
                 return {"query": q, "total": 0, "results": []}
@@ -117,7 +132,18 @@ def build_router(cfg: FolderConfig) -> APIRouter:
             if q:
                 words = _query_words(q)
                 if words:
-                    tag_rows = s.query(PhotoTag.photo_id, PhotoTag.tag).all()
+                    tag_q = s.query(PhotoTag.photo_id, PhotoTag.tag).filter(
+                        or_(*[PhotoTag.tag.ilike(f"%{w}%") for w in words])
+                    )
+                    if has_structured_filter and candidate_ids is not None:
+                        # Chunked: candidate_ids can be the whole library.
+                        tag_rows = []
+                        for chunk in chunked(list(candidate_ids)):
+                            tag_rows.extend(
+                                tag_q.filter(PhotoTag.photo_id.in_(chunk)).all()
+                            )
+                    else:
+                        tag_rows = tag_q.all()
                     for pid, tag in tag_rows:
                         if has_structured_filter and pid not in candidate_ids:
                             continue
@@ -130,29 +156,35 @@ def build_router(cfg: FolderConfig) -> APIRouter:
             sem_scores: dict[int, float] = {}
             shas: dict[int, str] = {}
             if q:
-                from selects.ml.search import cosine_scores, embed_query, siglip_bytes_to_matrix
+                from selects.ml.search import cosine_scores, embed_query, library_embedding_matrix
 
-                emb_stmt = select(Photo.id, Photo.sha256, Embedding.siglip).join(
-                    Embedding, Embedding.photo_id == Photo.id
-                )
-                if has_structured_filter:
-                    emb_stmt = emb_stmt.where(Photo.id.in_(candidate_ids))
-                rows = s.execute(emb_stmt).all()
-                if rows:
-                    ids = [r[0] for r in rows]
-                    for pid, sha in zip(ids, (r[1] for r in rows)):
+                mat, ids, sha_list = library_embedding_matrix(cfg)
+                if has_structured_filter and candidate_ids is not None:
+                    keep = [i for i, pid in enumerate(ids) if pid in candidate_ids]
+                    ids = [ids[i] for i in keep]
+                    sha_list = [sha_list[i] for i in keep]
+                    mat = mat[keep] if len(keep) else mat[:0]
+                if len(ids):
+                    for pid, sha in zip(ids, sha_list):
                         shas[pid] = sha
-                    mat = siglip_bytes_to_matrix([r[2] for r in rows])
                     qvec = embed_query(q)
                     sims = cosine_scores(mat, qvec)
                     for pid, sim in zip(ids, sims):
                         sem_scores[pid] = float(sim)
             else:
                 # no free-text query: pure filter/tag browsing — fetch sha256s for
-                # whatever candidate set structured filters produced.
-                rows = s.query(Photo.id, Photo.sha256).filter(Photo.id.in_(candidate_ids)).all()
-                for pid, sha in rows:
-                    shas[pid] = sha
+                # whatever candidate set structured filters produced. Neither a
+                # query nor a structured filter means there is nothing to search
+                # over; say so instead of silently returning "no results".
+                if candidate_ids is None:
+                    raise HTTPException(400, "provide a query or a filter")
+                for chunk in chunked(list(candidate_ids)):
+                    for pid, sha in (
+                        s.query(Photo.id, Photo.sha256)
+                        .filter(Photo.id.in_(chunk))
+                        .all()
+                    ):
+                        shas[pid] = sha
 
             # ── merge into one ranked list ───────────────────────────────────
             all_ids = set(sem_scores) | set(shas)
@@ -169,9 +201,13 @@ def build_router(cfg: FolderConfig) -> APIRouter:
                 if combined_by_id:
                     results.sort(key=lambda r: combined_by_id.get(r[0], 0.0), reverse=True)
                 else:
-                    taken_at_by_id = {
-                        pid: t for pid, t in s.query(Photo.id, Photo.taken_at).filter(Photo.id.in_(all_ids)).all()
-                    }
+                    taken_at_by_id: dict[int, Optional[datetime]] = {}
+                    for chunk in chunked(list(all_ids)):
+                        taken_at_by_id.update(
+                            s.query(Photo.id, Photo.taken_at)
+                            .filter(Photo.id.in_(chunk))
+                            .all()
+                        )
                     results.sort(key=lambda r: taken_at_by_id.get(r[0]) or datetime.min, reverse=True)
             else:
                 results.sort(key=lambda r: r[2], reverse=True)

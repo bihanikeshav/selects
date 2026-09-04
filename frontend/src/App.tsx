@@ -1,41 +1,45 @@
-import { useEffect, useState } from "react";
-import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { lazy, Suspense, useEffect } from "react";
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { libraryStatus } from "./api/client";
+import { warmupSearch } from "./api/search2";
+import { ProgressSocketProvider } from "./components/ProgressSocketProvider";
+import Rail from "./components/Rail";
 import TitleBar from "./components/TitleBar";
-import BestOf from "./views/BestOf";
 import BurstCull from "./views/BurstCull";
-import Calibrate from "./views/Calibrate";
-import CalibrateDashboard from "./views/CalibrateDashboard";
-import Clusters from "./views/Clusters";
-import ClusterDetail from "./views/ClusterDetail";
-import Curated from "./views/Curated";
-import Dedup from "./views/Dedup";
 import Libraries from "./views/Libraries";
-import MapView from "./views/Map";
 import Onboarding from "./views/Onboarding";
-import Persons from "./views/Persons";
-import PersonDetail from "./views/PersonDetail";
-import Search from "./views/Search";
-import Stories from "./views/Stories";
-import Videos from "./views/Videos";
+
+const BestOf = lazy(() => import("./views/BestOf"));
+const Calibrate = lazy(() => import("./views/Calibrate"));
+const CalibrateDashboard = lazy(() => import("./views/CalibrateDashboard"));
+const Clusters = lazy(() => import("./views/Clusters"));
+const ClusterDetail = lazy(() => import("./views/ClusterDetail"));
+const Curated = lazy(() => import("./views/Curated"));
+const Dedup = lazy(() => import("./views/Dedup"));
+const MapView = lazy(() => import("./views/Map"));
+const Persons = lazy(() => import("./views/Persons"));
+const PersonDetail = lazy(() => import("./views/PersonDetail"));
+const Search = lazy(() => import("./views/Search"));
+const Stories = lazy(() => import("./views/Stories"));
+const Videos = lazy(() => import("./views/Videos"));
 
 /**
- * On first load, ask the backend whether any library exists. If none does,
- * bounce the user to onboarding (unless they're already there). Runs once.
+ * Ask the backend whether any library exists. If none does, bounce the user
+ * to onboarding (unless they're already there or on /libraries). Re-checks
+ * when the path changes so a later empty-library state still gates.
+ *
+ * When a library already exists, leave /onboarding alone — the user may be
+ * adding a second library, or sitting on an in-progress index.
  */
 function OnboardingGate() {
   const navigate = useNavigate();
   const location = useLocation();
-  const [checked, setChecked] = useState(false);
 
   useEffect(() => {
-    if (checked) return;
     let cancelled = false;
     libraryStatus()
       .then((s) => {
         if (cancelled) return;
-        // Let the user reach the libraries screen to open an existing project
-        // instead of being trapped on onboarding.
         const allowed = ["/onboarding", "/libraries"];
         if (s.needs_onboarding && !allowed.includes(location.pathname)) {
           navigate("/onboarding", { replace: true });
@@ -43,25 +47,60 @@ function OnboardingGate() {
       })
       .catch(() => {
         /* backend unreachable — leave the app as-is */
-      })
-      .finally(() => {
-        if (!cancelled) setChecked(true);
       });
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [location.pathname, navigate]);
 
   return null;
+}
+
+/** Legacy `/clusters/:tag` bookmarks keep the tag (and `?source=`). */
+function LegacyClusterTagRedirect() {
+  const { tag = "" } = useParams();
+  const [sp] = useSearchParams();
+  const q = sp.toString();
+  return <Navigate to={`/cull/clusters/${encodeURIComponent(tag)}${q ? `?${q}` : ""}`} replace />;
+}
+
+/** Legacy `/persons/:id` bookmarks keep the person id. */
+function LegacyPersonIdRedirect() {
+  const { id = "" } = useParams();
+  return <Navigate to={`/people/${id}`} replace />;
+}
+
+function SearchEngineWarmup() {
+  useEffect(() => {
+    warmupSearch().catch(() => {});
+  }, []);
+  return null;
+}
+
+function RouteFallback() {
+  return (
+    <div className="app">
+      <Rail />
+      <div className="workspace page-skeleton" aria-busy="true">
+        <div className="skeleton-grid">
+          {Array.from({ length: 12 }, (_, i) => (
+            <div key={i} className="skeleton-tile" />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function App() {
   return (
     <BrowserRouter>
+      <ProgressSocketProvider>
       <TitleBar />
       <OnboardingGate />
-      <Routes>
+      <SearchEngineWarmup />
+      <Suspense fallback={<RouteFallback />}>
+        <Routes>
         <Route path="/onboarding" element={<Onboarding />} />
         <Route path="/libraries" element={<Libraries />} />
         {/* Cull mode — three sub-views */}
@@ -71,12 +110,11 @@ export default function App() {
         <Route path="/cull/clusters/:tag" element={<ClusterDetail />} />
         <Route path="/cull/stories" element={<Stories />} />
 
-        {/* Curated mode — three sub-views */}
+        {/* Curated mode — liked grid; clusters/stories stay on these routes */}
         <Route path="/curated" element={<Curated />} />
-        {/* Curated is standalone now — its old sub-views live only under Sort. */}
-        <Route path="/curated/clusters" element={<Navigate to="/cull/clusters" replace />} />
-        <Route path="/curated/clusters/:tag" element={<Navigate to="/cull/clusters" replace />} />
-        <Route path="/curated/stories" element={<Navigate to="/cull/stories" replace />} />
+        <Route path="/curated/clusters" element={<Clusters />} />
+        <Route path="/curated/clusters/:tag" element={<ClusterDetail />} />
+        <Route path="/curated/stories" element={<Stories />} />
 
         {/* Cross-cutting (independent of mode) */}
         <Route path="/people" element={<Persons />} />
@@ -91,11 +129,13 @@ export default function App() {
 
         {/* Legacy redirects so old bookmarks don't 404 */}
         <Route path="/clusters" element={<Navigate to="/cull/clusters" replace />} />
-        <Route path="/clusters/:tag" element={<Navigate to="/cull/clusters" replace />} />
+        <Route path="/clusters/:tag" element={<LegacyClusterTagRedirect />} />
         <Route path="/stories" element={<Navigate to="/cull/stories" replace />} />
         <Route path="/persons" element={<Navigate to="/people" replace />} />
-        <Route path="/persons/:id" element={<Navigate to="/people" replace />} />
-      </Routes>
+        <Route path="/persons/:id" element={<LegacyPersonIdRedirect />} />
+        </Routes>
+      </Suspense>
+      </ProgressSocketProvider>
     </BrowserRouter>
   );
 }

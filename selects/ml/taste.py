@@ -25,6 +25,8 @@ from typing import TYPE_CHECKING, Iterable, Optional
 import numpy as np
 from sqlalchemy.orm import Session as OrmSession
 
+from selects.util import KEEP_DECISIONS, chunked
+
 if TYPE_CHECKING:  # pragma: no cover
     from selects.config import FolderConfig
 
@@ -43,7 +45,7 @@ LEARNING_RATE = 1.0
 N_ITERS = 500
 RANDOM_SEED = 1152         # SigLIP dim, as good a seed as any
 
-_POSITIVE = ("keep", "silver")
+_POSITIVE = KEEP_DECISIONS
 _NEGATIVE = ("reject",)
 
 
@@ -316,11 +318,10 @@ def taste_scores_by_photo_id(
     if not ids:
         return {}
     out: dict[int, float] = {}
-    CHUNK = 500
-    for i in range(0, len(ids), CHUNK):
+    for chunk in chunked(ids):
         rows = (
             s.query(Embedding.photo_id, Embedding.siglip)
-            .filter(Embedding.photo_id.in_(ids[i : i + CHUNK]))
+            .filter(Embedding.photo_id.in_(chunk))
             .all()
         )
         pids = [pid for pid, blob in rows if blob]
@@ -346,13 +347,12 @@ def taste_score(cfg: "FolderConfig", sha256s: Iterable[str]) -> dict[str, float]
 
     Session = init_db(cfg.db_path)
     out: dict[str, float] = {}
-    CHUNK = 500
     with session_scope(Session) as s:
-        for i in range(0, len(shas), CHUNK):
+        for chunk in chunked(shas):
             rows = (
                 s.query(Photo.sha256, Embedding.siglip)
                 .join(Embedding, Embedding.photo_id == Photo.id)
-                .filter(Photo.sha256.in_(shas[i : i + CHUNK]))
+                .filter(Photo.sha256.in_(chunk))
                 .all()
             )
             keep = [(sh, blob) for sh, blob in rows if blob]

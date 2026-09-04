@@ -61,6 +61,36 @@ def _clean_name(name: str) -> str:
     return cleaned[:120] or "untitled"
 
 
+def _unique_fs_path(path: Path) -> Path:
+    """If *path* exists, return ``stem (n).suffix`` in the same directory."""
+    if not path.exists():
+        return path
+    stem, suffix, parent = path.stem, path.suffix, path.parent
+    n = 1
+    while True:
+        candidate = parent / f"{stem} ({n}){suffix}"
+        if not candidate.exists():
+            return candidate
+        n += 1
+
+
+def _unique_arcname(arcname: str, taken: set[str]) -> str:
+    """If *arcname* is already in the archive, return ``stem (n).suffix``."""
+    if arcname not in taken:
+        taken.add(arcname)
+        return arcname
+    p = Path(arcname)
+    stem, suffix, parent = p.stem, p.suffix, p.parent
+    n = 1
+    while True:
+        extra = f"{stem} ({n}){suffix}"
+        candidate = extra if str(parent) in (".", "") else str(parent / extra)
+        if candidate not in taken:
+            taken.add(candidate)
+            return candidate
+        n += 1
+
+
 def _dest_rel_path(item: ExportItem, structure: Structure) -> Path:
     """Relative path (under the export root) for *item*, honoring *structure*."""
     name = item.path.name
@@ -69,6 +99,71 @@ def _dest_rel_path(item: ExportItem, structure: Structure) -> Path:
     if structure == "by-day" and item.day:
         return Path(_clean_name(item.day)) / name
     return Path(name)
+
+
+def _is_zip_file(path: Path) -> bool:
+    """True if *path* is an existing regular file named as a zip archive."""
+    return path.is_file() and path.suffix.lower() == ".zip"
+
+
+def _validate_dest_dir(path: Path) -> None:
+    """Refuse files and paths whose parent is not already a directory.
+
+    Creating the dest dir if missing is only allowed as the last component
+    under an existing parent — never ``mkdir(parents=True)``.
+    """
+    if path.exists() and not path.is_dir():
+        raise ValueError(f"export target must be a directory, not a file: {path}")
+    if not path.exists() and not path.parent.is_dir():
+        raise ValueError(f"export target parent is not an existing directory: {path.parent}")
+
+
+def _ensure_dest_dir(path: Path) -> Path:
+    """Return *path* as an existing directory, creating only the last component."""
+    _validate_dest_dir(path)
+    if not path.exists():
+        path.mkdir()
+    if not path.is_dir():
+        raise ValueError(f"export target must be a directory, not a file: {path}")
+    return path
+
+
+def _zip_path_for(target: Path, zip_name: str) -> Path:
+    if target.suffix.lower() == ".zip":
+        return target
+    return target / zip_name
+
+
+def validate_export_target(
+    target: Path | str,
+    mode: Mode = "copy",
+    zip_name: str = "export.zip",
+) -> Path:
+    """Raise ``ValueError`` if *target* is not a legal export destination.
+
+    ``mode="copy"``: *target* must be an existing directory, or a name whose
+    parent already exists as a directory (last component may be created later).
+    Existing files are refused.
+
+    ``mode="zip"``: parent of the zip path must be an existing directory (for
+    an explicit ``.zip`` path) or a legal dest dir as in copy mode (zip lands
+    inside *target*). The zip path itself must not be an existing non-zip file.
+    """
+    target = Path(target)
+    if mode == "zip":
+        zip_path = _zip_path_for(target, zip_name)
+        if target.suffix.lower() == ".zip":
+            if not zip_path.parent.is_dir():
+                raise ValueError(
+                    f"zip export parent is not an existing directory: {zip_path.parent}"
+                )
+        else:
+            _validate_dest_dir(target)
+        if zip_path.exists() and not _is_zip_file(zip_path):
+            raise ValueError(f"zip export path is an existing non-zip file: {zip_path}")
+        return target
+    _validate_dest_dir(target)
+    return target
 
 
 def export_photos(
@@ -81,11 +176,14 @@ def export_photos(
 ) -> ExportResult:
     """Copy or zip *items* into *target*.
 
-    ``mode="copy"``: files land directly under *target* (creating it if
-    needed), optionally grouped into ``YYYY-MM-DD`` subfolders.
+    ``mode="copy"``: files land directly under *target*, optionally grouped
+    into ``YYYY-MM-DD`` subfolders. *target* must already be a directory, or
+    a single new name under an existing parent (no ``mkdir -p`` of arbitrary
+    trees). Existing files are refused.
     ``mode="zip"``: a single archive named *zip_name* is written directly at
     *target* (if *target* looks like a file / ends in .zip) or inside *target*
-    as a directory.
+    as a directory. The zip's parent must already exist; an existing non-zip
+    file at the zip path is refused.
 
     Missing source files are skipped (not fatal) and reported in
     ``ExportResult.skipped``. Returns counts + total bytes copied and the
@@ -95,23 +193,24 @@ def export_photos(
     target = Path(target)
     skipped: list[dict] = []
     total = len(items)
+    validate_export_target(target, mode, zip_name=zip_name)
 
     if mode == "zip":
         if target.suffix.lower() == ".zip":
             zip_path = target
         else:
-            target.mkdir(parents=True, exist_ok=True)
+            target = _ensure_dest_dir(target)
             zip_path = target / zip_name
-        zip_path.parent.mkdir(parents=True, exist_ok=True)
 
         count = 0
         total_bytes = 0
+        taken_arcnames: set[str] = set()
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
             for i, item in enumerate(items):
                 if not item.path.exists():
                     skipped.append({"photo_id": item.photo_id, "reason": "missing"})
                     continue
-                arcname = str(_dest_rel_path(item, structure))
+                arcname = _unique_arcname(str(_dest_rel_path(item, structure)), taken_arcnames)
                 try:
                     zf.write(item.path, arcname=arcname)
                     total_bytes += item.path.stat().st_size
@@ -123,15 +222,15 @@ def export_photos(
         return ExportResult(count=count, bytes=total_bytes, path=str(zip_path), skipped=skipped)
 
     # mode == "copy"
-    target.mkdir(parents=True, exist_ok=True)
+    target = _ensure_dest_dir(target)
     count = 0
     total_bytes = 0
     for i, item in enumerate(items):
         if not item.path.exists():
             skipped.append({"photo_id": item.photo_id, "reason": "missing"})
             continue
-        dst = target / _dest_rel_path(item, structure)
-        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst = _unique_fs_path(target / _dest_rel_path(item, structure))
+        dst.parent.mkdir(exist_ok=True)
         try:
             shutil.copy2(item.path, dst)
             total_bytes += dst.stat().st_size
@@ -208,11 +307,19 @@ def _minimal_xmp_sidecar(rating: int) -> str:
     )
 
 
+def _outside_library(path: Path, library_root: Path) -> bool:
+    try:
+        return not Path(path).resolve().is_relative_to(Path(library_root).resolve())
+    except (OSError, ValueError):
+        return True
+
+
 def plan_xmp_write(
     photo_id: int,
     path: Path,
     verdict: str,
     force: bool = False,
+    library_root: Optional[Path] = None,
 ) -> XmpPlan:
     """Compute what would be written for one photo, without writing anything.
 
@@ -225,6 +332,13 @@ def plan_xmp_write(
             photo_id=photo_id, path=str(path), verdict=verdict, new_rating=0,
             target=str(path), is_sidecar=False, existing_rating=None,
             action="no_op", reason=f"unknown verdict {verdict!r}",
+        )
+
+    if library_root is not None and _outside_library(path, library_root):
+        return XmpPlan(
+            photo_id=photo_id, path=str(path), verdict=verdict, new_rating=rating,
+            target=str(path), is_sidecar=False, existing_rating=None,
+            action="no_op", reason="outside library",
         )
 
     kind = classify(path)
@@ -269,14 +383,19 @@ def plan_xmp_write(
 def preview_xmp_writes(
     photos: Iterable[tuple[int, Path, str]],
     force: bool = False,
+    library_root: Optional[Path] = None,
 ) -> list[XmpPlan]:
     """Dry-run: compute the write plan for each (photo_id, path, verdict)."""
-    return [plan_xmp_write(pid, path, verdict, force=force) for pid, path, verdict in photos]
+    return [
+        plan_xmp_write(pid, path, verdict, force=force, library_root=library_root)
+        for pid, path, verdict in photos
+    ]
 
 
 def write_xmp_ratings(
     photos: Iterable[tuple[int, Path, str]],
     force: bool = False,
+    library_root: Optional[Path] = None,
 ) -> list[XmpPlan]:
     """Actually write the ratings, returning the same plan shape with results applied.
 
@@ -286,7 +405,7 @@ def write_xmp_ratings(
     """
     results: list[XmpPlan] = []
     for pid, path, verdict in photos:
-        plan = plan_xmp_write(pid, path, verdict, force=force)
+        plan = plan_xmp_write(pid, path, verdict, force=force, library_root=library_root)
         if plan.action != "write":
             results.append(plan)
             continue

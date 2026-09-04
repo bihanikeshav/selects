@@ -204,7 +204,7 @@ class LibraryManager:
 
     def list_libraries(self) -> tuple[list[dict], Optional[str]]:
         with self._lock:
-            return [self._api_dict(l) for l in self._libraries], self._active_id
+            return [self._api_dict(lib) for lib in self._libraries], self._active_id
 
     def add_library(self, name: str, path: str) -> dict:
         with self._lock:
@@ -241,7 +241,7 @@ class LibraryManager:
             if lib is None:
                 raise KeyError(lib_id)
             was_active = lib_id == self._active_id
-            self._libraries = [l for l in self._libraries if l["id"] != lib_id]
+            self._libraries = [lib for lib in self._libraries if lib["id"] != lib_id]
             if was_active:
                 # Deleting the active library is allowed: fall back to another one
                 # if any remain, otherwise clear active (back to onboarding).
@@ -262,15 +262,20 @@ class LibraryManager:
             if not cfg.db_path.exists():
                 return None
             from selects.db import init_db, session_scope
-            from selects.db.models import AestheticScore, Photo
+            from selects.db.models import AestheticScore, Embedding, Photo
 
             Session = init_db(cfg.db_path)
             with session_scope(Session) as s:
-                # Prefer the best-scoring photo as the cover, else the first.
+                # Prefer AP-V2.5, then CLIP-IQA, else first row.
                 q = (
                     s.query(Photo.sha256)
                     .outerjoin(AestheticScore, AestheticScore.photo_id == Photo.id)
-                    .order_by(AestheticScore.nima_score.desc().nullslast(), Photo.id)
+                    .outerjoin(Embedding, Embedding.photo_id == Photo.id)
+                    .order_by(
+                        AestheticScore.ap25_score.desc().nullslast(),
+                        Embedding.aesthetic_iqa.desc().nullslast(),
+                        Photo.id,
+                    )
                 )
                 for (sha,) in q.limit(25):
                     thumb = cfg.thumbs_dir / f"{sha}.jpg"
@@ -293,7 +298,7 @@ class LibraryManager:
             cfg = self._active_cfg or get_folder_config(active["path"])
             pc = count_photos(cfg) or 0
             return {
-                "needs_onboarding": pc == 0,
+                "needs_onboarding": False,
                 "active": self._api_dict(active),
                 "photo_count": pc,
                 "indexing": self._indexing,

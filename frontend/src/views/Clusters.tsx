@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import ModeViewBar, { modeFromPath } from "../components/ModeViewBar";
 import Rail from "../components/Rail";
 import Topbar from "../components/Topbar";
 import StatusRow from "../components/StatusRow";
 import { listClusters } from "../api/client";
 import type { ClusterEntry } from "../api/types";
+import { stripPlaceSuffix } from "../lib/placeName";
+import SkeletonGrid from "../components/SkeletonGrid";
 
 // Google Material quartet — rotated by tag hash
 const ACCENT_COLORS = [
@@ -165,8 +167,17 @@ function tagLabel(tag: string): string {
     animal: "Animal",
     abstract: "Abstract",
     documents: "Documents",
+    uncategorized: "Everything else",
   };
-  return labels[tag] ?? tag.charAt(0).toUpperCase() + tag.slice(1);
+  const known = labels[tag.toLowerCase()];
+  if (known) return known;
+  const spaced = stripPlaceSuffix(tag).replace(/_/g, " ");
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+/** The catch-all bucket always sorts to the bottom of the grid. */
+function isCatchAll(tag: string): boolean {
+  return tag.toLowerCase() === "uncategorized";
 }
 
 function ClusterCard({
@@ -209,26 +220,39 @@ function ClusterCard({
   );
 }
 
-type ClusterSource = "thematic" | "date" | "lookback" | "posting";
+type ClusterSource = "thematic" | "date" | "lookback" | "posting" | "";
+
+const SOURCE_TABS: ClusterSource[] = ["thematic", "", "date", "lookback", "posting"];
 
 const SOURCE_LABELS: Record<ClusterSource, { label: string; sub: string }> = {
   thematic: {
-    label: "Locations",
-    sub: "Grouped by named places visited on the trip",
+    label: "Places",
+    sub: "Named places from your trip",
+  },
+  "": {
+    label: "Scenes",
+    sub: "What the photo is of",
   },
   date: {
-    label: "By date",
-    sub: "Simplest fallback — one cluster per day, ranked by aesthetic score",
+    label: "Days",
+    sub: "One collection per day",
   },
   lookback: {
-    label: "Lookback themes",
-    sub: "Broad visual themes across the whole trip · HDBSCAN global · ranked by count",
+    label: "Themes",
+    sub: "Visual themes across the whole trip",
   },
   posting: {
-    label: "Posting groups",
-    sub: "Tight visual groups within each shooting session · ideal for carousels",
+    label: "Sessions",
+    sub: "Tight groups from one shooting session",
   },
 };
+
+function parseClusterSource(raw: string | null): ClusterSource {
+  if (raw === "" || raw === "thematic" || raw === "date" || raw === "lookback" || raw === "posting") {
+    return raw;
+  }
+  return "thematic";
+}
 
 function SourceToggle({
   value,
@@ -238,10 +262,14 @@ function SourceToggle({
   onChange: (v: ClusterSource) => void;
 }) {
   return (
-    <div className="story-group-tabs">
-      {(["thematic", "date", "lookback", "posting"] as ClusterSource[]).map(src => (
+    <div className="story-group-tabs" role="tablist" aria-label="Collection type">
+      {SOURCE_TABS.map(src => (
         <button
-          key={src}
+          key={src || "scenes"}
+          type="button"
+          role="tab"
+          aria-selected={value === src}
+          title={SOURCE_LABELS[src].sub}
           className={`story-group-tab${value === src ? " is-active" : ""}`}
           onClick={() => onChange(src)}
         >
@@ -253,7 +281,8 @@ function SourceToggle({
 }
 
 export default function Clusters() {
-  const [source, setSource] = useState<ClusterSource>("thematic");
+  const [params, setParams] = useSearchParams();
+  const [source, setSource] = useState<ClusterSource>(() => parseClusterSource(params.get("source")));
   const [clusters, setClusters] = useState<ClusterEntry[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -261,12 +290,24 @@ export default function Clusters() {
   const { pathname } = useLocation();
   const mode = modeFromPath(pathname);
 
+  function changeSource(v: ClusterSource) {
+    setSource(v);
+    const next = new URLSearchParams(params);
+    next.set("source", v);
+    setParams(next, { replace: true });
+  }
+
   useEffect(() => {
     setLoading(true);
     setError(null);
     listClusters({ source })
       .then(data => {
-        setClusters(data.clusters);
+        // "Everything else" is a leftovers bucket — never the first thing you see.
+        setClusters(
+          [...data.clusters].sort(
+            (a, b) => Number(isCatchAll(a.tag)) - Number(isCatchAll(b.tag)),
+          ),
+        );
         setTotal(data.total);
         setLoading(false);
       })
@@ -282,59 +323,48 @@ export default function Clusters() {
     <div className="app">
       <Rail />
       <div className="workspace">
-        <Topbar folder="selects" context={mode === "curated" ? "curated · clusters" : "clusters by theme"} />
+        <Topbar folder="selects" context="Collections" />
         <ModeViewBar />
         <StatusRow
-          details={loading ? "loading…" : error ? "error loading clusters" : `${clusters.length} ${source === "lookback" ? "themes" : "groups"} · ${total} photos`}
+          details={loading ? "loading…" : error ? "error loading clusters" : `${clusters.length} ${source === "lookback" ? "themes" : "collections"} · ${total} photos`}
         />
 
         <div className="clusters-wrap" style={{ gridRow: "3 / span 3" }}>
-          {loading && (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 240, color: "var(--md-on-surface-var)", fontFamily: "var(--font-display)", fontSize: 15 }}>
-              Loading clusters…
+          <div className="clusters-header">
+            <div className="clusters-header-row">
+              <h1>Collections</h1>
+              <SourceToggle value={source} onChange={changeSource} />
             </div>
-          )}
+            <div className="sub">{sourceInfo.sub}</div>
+          </div>
+
+          {loading && <SkeletonGrid count={12} />}
 
           {!loading && error && (
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: 240, gap: 12 }}>
-              <div style={{ color: "var(--md-on-surface)", fontFamily: "var(--font-display)", fontSize: 18 }}>
-                Clusters not yet available
-              </div>
-              <div style={{ color: "var(--md-on-surface-var)", fontSize: 13 }}>
-                Run <code style={{ fontFamily: "var(--font-mono)", background: "var(--md-surface-c)", padding: "2px 6px", borderRadius: 4 }}>selects index &lt;folder&gt; --pass embed</code> then{" "}
-                <code style={{ fontFamily: "var(--font-mono)", background: "var(--md-surface-c)", padding: "2px 6px", borderRadius: 4 }}>--pass smart_tag</code>
+            <div className="stories-state">
+              <div className="stories-state-title">Collections not yet available</div>
+              <div className="stories-state-sub">
+                Index this library first — collections are built while your photos
+                are being understood and tagged.
               </div>
             </div>
           )}
 
           {!loading && !error && clusters.length === 0 && (
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: 240, gap: 12 }}>
-              <div style={{ color: "var(--md-on-surface)", fontFamily: "var(--font-display)", fontSize: 18 }}>
-                No clusters yet
-              </div>
-              <div style={{ color: "var(--md-on-surface-var)", fontSize: 13 }}>
-                Embedding and smart-tag stages have not run, or no photos have tags assigned.
+            <div className="stories-state">
+              <div className="stories-state-title">No collections yet</div>
+              <div className="stories-state-sub">
+                Nothing has been grouped this way yet — try another tab above.
               </div>
             </div>
           )}
 
           {!loading && !error && clusters.length > 0 && (
-            <>
-              <div className="clusters-header">
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
-                  <h1 style={{ margin: 0 }}>Clusters by theme</h1>
-                  <SourceToggle value={source} onChange={setSource} />
-                </div>
-                <div className="sub" style={{ marginTop: 6 }}>
-                  {sourceInfo.sub}
-                </div>
-              </div>
-              <div className="cluster-grid">
-                {clusters.map(c => (
-                  <ClusterCard key={c.tag} cluster={c} source={source} mode={mode} />
-                ))}
-              </div>
-            </>
+            <div className="cluster-grid">
+              {clusters.map(c => (
+                <ClusterCard key={c.tag} cluster={c} source={source} mode={mode} />
+              ))}
+            </div>
           )}
         </div>
       </div>

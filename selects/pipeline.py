@@ -14,7 +14,12 @@ from selects.config import FolderConfig
 from selects.db import init_db, session_scope
 from selects.db.models import ClassicalScore, PipelineState, Photo
 
-# Re-export ML stages — lazy so torch is not imported at module load time.
+
+class PipelineCancelled(Exception):
+    """Raised out of a progress callback to unwind a stage when cancelled."""
+
+
+# Re-export ML stages (imported lazily).
 # Callers can do: from selects.pipeline import run_embedding_stage
 def run_embedding_stage(cfg, on_progress=None, batch_size=16):  # noqa: F811
     """Lazy proxy: imports selects.ml.embed.run_embedding_stage on first call."""
@@ -84,10 +89,12 @@ def run_classical_stage(cfg: FolderConfig, on_progress: ProgressCb = None) -> in
 
     total = len(pending_ids)
     for i, (photo_id, preview_path) in enumerate(pending_ids, start=1):
-        if on_progress:
-            on_progress(i, total, preview_path or "")
         try:
+            if on_progress:
+                on_progress(i, total, preview_path or "")
             _score_one(cfg, Session, photo_id, preview_path)
+        except PipelineCancelled:
+            raise
         except Exception as exc:
             log.warning("classical stage failed on photo %s: %s", photo_id, exc)
             with session_scope(Session) as s:
@@ -103,12 +110,16 @@ def _score_one(cfg: FolderConfig, Session, photo_id: int, preview_path: str) -> 
     blur = laplacian_variance(img)
     exp = exposure_score(img)
     faces = detect_faces(img)
+    from selects.ml.face_attributes import photo_eyes_open_ratio
+
+    eyes_ratio = photo_eyes_open_ratio(faces)
     rej = evaluate_reject(
         RejectInput(
             blur=blur,
             exposure_score=exp.score,
             clipped_ratio=exp.clipped_ratio,
             faces_count=len(faces),
+            mean=exp.mean,
         )
     )
 
@@ -117,8 +128,13 @@ def _score_one(cfg: FolderConfig, Session, photo_id: int, preview_path: str) -> 
         score.blur = blur
         score.exposure = exp.score
         score.faces_count = len(faces)
+        score.eyes_open_ratio = eyes_ratio
         score.auto_reject = rej.auto_reject
         score.reject_reason = rej.reason
+        # exposure.clipped_ratio folds both ends; store it as clipped_high so
+        # the overexposed chip can reuse the classical pass (no second decode).
+        score.luma_mean = exp.mean
+        score.clipped_high = exp.clipped_ratio
         s.add(score)
         ps = s.get(PipelineState, photo_id)
         if ps:

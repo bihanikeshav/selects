@@ -3,6 +3,8 @@ pipeline stage) and selects.server.video_routes."""
 from __future__ import annotations
 
 import json
+import threading
+import time
 from pathlib import Path
 
 import numpy as np
@@ -284,3 +286,173 @@ class TestVideoRoutes:
     def test_frames_404_unknown_sha(self, client_with_videos):
         assert client_with_videos.get(f"/api/videos/{'f' * 64}/frames").status_code == 404
         assert client_with_videos.get(f"/api/videos/{'a' * 64}/frames/99").status_code == 404
+
+    def test_frames_rejects_non_hex_sha(self, client_with_videos):
+        assert client_with_videos.get("/api/videos/zz/frames").status_code == 400
+        assert client_with_videos.get("/api/videos/not-a-hash/frames").status_code == 400
+        assert client_with_videos.get("/api/videos/not-a-hash/frames/0").status_code == 400
+        assert client_with_videos.get(f"/api/videos/{'a' * 63}/frames").status_code == 400
+
+
+# --------------------------------------------------------------------------- #
+# /api/videos/process takes the library-wide run slot
+# --------------------------------------------------------------------------- #
+
+
+def _manager_app(tmp_path: Path, monkeypatch, run_video, publish=None):
+    """A real LibraryManager + the video routes, with run_video_stage faked."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from selects.server.library_manager import LibraryManager
+    from selects.server.video_routes import register_video_routes
+
+    cfg = get_folder_config(tmp_path)
+    manager = LibraryManager(registry_path=tmp_path / "libraries.json")
+    monkeypatch.setattr("selects.server.video_routes.run_video_stage", run_video)
+
+    app = FastAPI()
+
+    @app.get("/api/libraries/status")
+    def status():
+        return manager.status()
+
+    register_video_routes(app, cfg, publish, manager)
+    return TestClient(app), manager
+
+
+def test_process_marks_the_library_as_indexing_while_it_runs(tmp_path, monkeypatch):
+    running = threading.Event()
+    release = threading.Event()
+
+    def fake_stage(cfg, cb=None, should_cancel=None):
+        running.set()
+        release.wait(timeout=10)
+
+    client, manager = _manager_app(tmp_path, monkeypatch, fake_stage)
+    try:
+        assert client.get("/api/libraries/status").json()["indexing"] is False
+        assert client.post("/api/videos/process").json() == {"started": True}
+        assert running.wait(timeout=10)
+        assert client.get("/api/libraries/status").json()["indexing"] is True
+    finally:
+        release.set()
+
+    for _ in range(200):
+        if not manager.indexing:
+            break
+        time.sleep(0.02)
+    assert manager.indexing is False
+    assert client.get("/api/libraries/status").json()["indexing"] is False
+
+
+def test_process_409s_when_an_index_run_already_holds_the_slot(tmp_path, monkeypatch):
+    def fake_stage(cfg, cb=None, should_cancel=None):
+        raise AssertionError("the stage must not start while the slot is taken")
+
+    client, manager = _manager_app(tmp_path, monkeypatch, fake_stage)
+    assert manager.begin_indexing() is True
+    r = client.post("/api/videos/process")
+    assert r.status_code == 409
+    assert r.json() == {"detail": "an indexing run is already in progress"}
+
+    # The refusal must not leave the local guard latched.
+    assert client.get("/api/videos/process/status").json()["running"] is False
+    manager.end_indexing()
+
+
+def test_run_video_stage_stops_between_videos_when_cancelled(tmp_path, sharp_video, black_video, monkeypatch):
+    """Cancel lands at the next video boundary; finished work stays committed."""
+    from selects.pipeline import PipelineCancelled
+
+    cfg = get_folder_config(tmp_path)
+    _ingest_video_row(cfg, sharp_video, "a" * 64)
+    _ingest_video_row(cfg, black_video, "b" * 64)
+    monkeypatch.setattr("selects.video._embed_best_frame", lambda img: None)
+
+    seen: list[int] = []
+
+    def cancel_after_first() -> bool:
+        seen.append(len(seen))
+        return len(seen) > 1
+
+    with pytest.raises(PipelineCancelled):
+        run_video_stage(cfg, should_cancel=cancel_after_first)
+
+    Session = init_db(cfg.db_path)
+    with session_scope(Session) as s:
+        processed = [v for v in s.query(Video).all() if v.processed_at is not None]
+        assert len(processed) == 1
+
+
+def test_cancel_ends_the_video_job_and_frees_the_slot(tmp_path, monkeypatch):
+    """POST /api/libraries/cancel must actually stop video analysis.
+
+    The manager's cancel event used to be set with nothing on the video side
+    reading it: the pill said "stopping" and the run carried on to the end.
+    """
+    from selects.pipeline import PipelineCancelled
+
+    started = threading.Event()
+
+    def fake_stage(cfg, cb=None, should_cancel=None):
+        started.set()
+        for _ in range(2000):
+            if should_cancel is not None and should_cancel():
+                raise PipelineCancelled()
+            time.sleep(0.005)
+        raise AssertionError("the stage was never cancelled")
+
+    published: list[dict] = []
+    client, manager = _manager_app(
+        tmp_path, monkeypatch, fake_stage, publish=published.append,
+    )
+
+    assert client.post("/api/videos/process").json() == {"started": True}
+    assert started.wait(timeout=10)
+    assert client.get("/api/libraries/status").json()["indexing"] is True
+
+    assert manager.request_cancel() is True
+
+    for _ in range(400):
+        if not manager.indexing:
+            break
+        time.sleep(0.02)
+    assert manager.indexing is False
+    assert client.get("/api/libraries/status").json()["indexing"] is False
+    # Not an error — a cancel is a clean stop.
+    assert client.get("/api/videos/process/status").json() == {
+        "running": False, "error": None,
+    }
+    assert published[-1] == {
+        "stage": "cancelled",
+        "current": 0,
+        "total": 0,
+        "message": "Stopped — you can pick up where you left off",
+    }
+
+
+def test_process_releases_both_guards_when_the_thread_cannot_start(tmp_path, monkeypatch):
+    client, manager = _manager_app(tmp_path, monkeypatch, lambda cfg, cb=None, should_cancel=None: None)
+
+    from selects.server import video_routes
+
+    class _BoomThread:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start(self):
+            raise RuntimeError("can't start new thread")
+
+    # Only the route's own threading reference — patching the global module
+    # would also break the test client's anyio portal thread.
+    class _Shim:
+        Thread = _BoomThread
+
+    monkeypatch.setattr(video_routes, "threading", _Shim)
+    with pytest.raises(RuntimeError):
+        client.post("/api/videos/process")
+
+    assert manager.indexing is False
+    assert client.get("/api/libraries/status").json()["indexing"] is False
+    assert client.get("/api/videos/process/status").json()["running"] is False

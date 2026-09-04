@@ -37,6 +37,19 @@ async def test_status_fresh_registry(registry_path):
         assert r2.json() == {"libraries": [], "active_id": None}
 
 
+async def test_status_registered_empty_library_is_not_onboarding(registry_path, tmp_path):
+    lib_dir = tmp_path / "trip"
+    lib_dir.mkdir()
+    app = _make_app(registry_path)
+    async with _client(app) as c:
+        r = await c.post("/api/libraries", json={"name": "Empty trip", "path": str(lib_dir)})
+        assert r.status_code == 200
+        status = (await c.get("/api/libraries/status")).json()
+        assert status["needs_onboarding"] is False
+        assert status["active"] is not None
+        assert status["photo_count"] == 0
+
+
 async def test_add_library(registry_path, tmp_path):
     lib_dir = tmp_path / "trip1"
     lib_dir.mkdir()
@@ -87,7 +100,7 @@ async def test_activate(registry_path, tmp_path):
     b.mkdir()
     app = _make_app(registry_path)
     async with _client(app) as c:
-        id_a = (await c.post("/api/libraries", json={"name": "A", "path": str(a)})).json()["library"]["id"]
+        await c.post("/api/libraries", json={"name": "A", "path": str(a)})
         id_b = (await c.post("/api/libraries", json={"name": "B", "path": str(b)})).json()["library"]["id"]
 
         # A is active (first added); activate B and verify the switch.
@@ -121,7 +134,7 @@ async def test_delete_active_falls_back_then_delete(registry_path, tmp_path):
         assert (await c.delete(f"/api/libraries/{id_a}")).status_code == 200
 
         listing = (await c.get("/api/libraries")).json()
-        assert [l["id"] for l in listing["libraries"]] == [id_b]
+        assert [lib["id"] for lib in listing["libraries"]] == [id_b]
         assert listing["active_id"] == id_b
 
         # B is now the only (active) library -> deletion allowed, active -> null.

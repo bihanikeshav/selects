@@ -5,23 +5,16 @@ import type {
   Library,
   LibraryList,
   LibraryStatus,
+  ListPhotosParams,
   ModelsStatus,
   Moment,
   PhotoList,
+  SwipeSummary,
 } from "./types";
 
 const BASE = "/api";
 
-export async function listPhotos(opts: {
-  offset?: number;
-  limit?: number;
-  rejected?: boolean;
-  tag?: string;
-  collapse?: "moments" | "none";
-  sort?: "taken_at" | "aesthetic" | "iqa" | "random";
-  min_aesthetic_pct?: number;
-  quality?: "underexposed" | "overexposed" | "out_of_focus" | "blurry_keepers";
-} = {}): Promise<PhotoList> {
+export async function listPhotos(opts: ListPhotosParams = {}): Promise<PhotoList> {
   const params = new URLSearchParams();
   if (opts.offset !== undefined) params.set("offset", String(opts.offset));
   if (opts.limit !== undefined) params.set("limit", String(opts.limit));
@@ -29,6 +22,7 @@ export async function listPhotos(opts: {
   if (opts.tag !== undefined) params.set("tag", opts.tag);
   if (opts.collapse !== undefined) params.set("collapse", opts.collapse);
   if (opts.sort !== undefined) params.set("sort", opts.sort);
+  if (opts.seed !== undefined) params.set("seed", String(opts.seed));
   if (opts.min_aesthetic_pct !== undefined) params.set("min_aesthetic_pct", String(opts.min_aesthetic_pct));
   if (opts.quality !== undefined) params.set("quality", opts.quality);
   const res = await fetch(`${BASE}/photos?${params}`);
@@ -67,7 +61,7 @@ export async function setMomentPrimary(momentId: number, photoId: number): Promi
   if (!res.ok) throw new Error(`setMomentPrimary ${res.status}`);
 }
 
-export async function recordSwipe(sha256: string, decision: "keep" | "reject" | "silver" | "skip"): Promise<void> {
+export async function recordSwipe(sha256: string, decision: "keep" | "reject"): Promise<void> {
   const res = await fetch(`${BASE}/swipes/${sha256}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -76,9 +70,35 @@ export async function recordSwipe(sha256: string, decision: "keep" | "reject" | 
   if (!res.ok) throw new Error(`recordSwipe ${res.status}`);
 }
 
+/** Clears any recorded verdict for a photo, putting it back to undecided. */
+export async function deleteSwipe(sha256: string): Promise<{ ok: boolean; deleted: boolean }> {
+  const res = await fetch(`${BASE}/swipes/${sha256}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`deleteSwipe ${res.status}`);
+  return res.json();
+}
+
+/**
+ * Verdict tally over the same photo set `/api/photos` returns — pass the same
+ * `collapse`/`quality` the list is using or the numbers will not add up.
+ */
+export async function swipeSummary(
+  collapse: "moments" | "none" = "moments",
+  quality?: string | null,
+): Promise<SwipeSummary> {
+  const q = new URLSearchParams({ collapse });
+  if (quality) q.set("quality", quality);
+  const res = await fetch(`${BASE}/swipes/summary?${q.toString()}`);
+  if (!res.ok) throw new Error(`swipeSummary ${res.status}`);
+  return res.json();
+}
+
 export async function getLikedStatus(sha256s: string[]): Promise<Record<string, boolean>> {
   if (sha256s.length === 0) return {};
-  const res = await fetch(`${BASE}/likes/status?shas=${sha256s.join(",")}`);
+  const res = await fetch(`${BASE}/likes/status`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ shas: sha256s }),
+  });
   if (!res.ok) throw new Error(`getLikedStatus ${res.status}`);
   return res.json();
 }

@@ -90,7 +90,7 @@ def run_person_stage(
             linkage="complete",
         ).fit_predict(p1_centroids)
         p1_to_merged = dict(zip(unique_p1.tolist(), merge_labels.tolist()))
-        final_labels = np.array([p1_to_merged[int(l)] for l in labels_p1])
+        final_labels = np.array([p1_to_merged[int(lbl)] for lbl in labels_p1])
     else:
         final_labels = labels_p1.copy()
 

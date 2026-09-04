@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { listCurated, recordSwipe } from "../api/client";
+import { deleteSwipe, listCurated } from "../api/client";
 import type { CuratedPhoto } from "../api/types";
 import ExportPanel from "../components/ExportPanel";
+import ModeViewBar from "../components/ModeViewBar";
 import PageHeader from "../components/PageHeader";
 import Rail from "../components/Rail";
+import SkeletonGrid from "../components/SkeletonGrid";
 import TasteCard from "../components/TasteCard";
 import Viewer from "../components/Viewer";
 import PhotoEditor from "../editor/PhotoEditor";
@@ -40,9 +42,9 @@ export default function Curated() {
     reload();
   }, [reload]);
 
-  const unlike = useCallback(async (sha: string) => {
+  const removeKeeper = useCallback(async (sha: string) => {
     try {
-      await recordSwipe(sha, "skip");
+      await deleteSwipe(sha);
       setPhotos((prev) => prev.filter((p) => p.sha256 !== sha));
       setSelected((prev) => {
         const next = new Set(prev);
@@ -50,7 +52,7 @@ export default function Curated() {
         return next;
       });
     } catch (e) {
-      setToast(`Unlike failed: ${e}`);
+      setToast(`Remove failed: ${e}`);
     }
   }, []);
 
@@ -68,7 +70,7 @@ export default function Curated() {
     setEditShas(Array.from(selected));
   }, [selected]);
 
-  // Keyboard
+  // Keyboard: X removes the focused (or lightboxed) photo from the keepers.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
@@ -80,20 +82,20 @@ export default function Curated() {
         } else if (e.key === "ArrowLeft") {
           e.preventDefault();
           setLightboxIdx((i) => (i === null ? null : Math.max(0, i - 1)));
-        } else if (e.key === "f" || e.key === "F") {
+        } else if (e.key === "x" || e.key === "X") {
           const p = photos[lightboxIdx];
-          if (p) unlike(p.sha256);
+          if (p) removeKeeper(p.sha256);
         }
         return;
       }
-      if ((e.key === "f" || e.key === "F") && focusedIdx !== null) {
+      if ((e.key === "x" || e.key === "X") && focusedIdx !== null) {
         const p = photos[focusedIdx];
-        if (p) unlike(p.sha256);
+        if (p) removeKeeper(p.sha256);
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [lightboxIdx, photos, focusedIdx, unlike]);
+  }, [lightboxIdx, photos, focusedIdx, removeKeeper]);
 
   return (
     <div className="app">
@@ -109,12 +111,13 @@ export default function Curated() {
         }}
       >
         <PageHeader
-          context="curated"
+          context="Curated"
+          above={<ModeViewBar />}
           title="Curated"
           subtitle={
             loading
               ? "Loading…"
-              : `${photos.length} liked photos · ready to edit & post · press F on a thumb to remove`
+              : `${photos.length} keepers · ready to edit & export`
           }
           actions={
             <>
@@ -176,10 +179,11 @@ export default function Curated() {
               {toast}
             </div>
           )}
+          {loading && <SkeletonGrid count={18} />}
           {!loading && photos.length === 0 && (
             <div className="cluster-detail-empty">
-              Nothing curated yet. Open Stories or a Best-Of view and press{" "}
-              <kbd className="curated-kbd">F</kbd> on the photos you want to ship.
+              No keepers yet. Press <kbd className="curated-kbd">K</kbd> on a photo
+              in Review to keep it.
             </div>
           )}
           {!loading && photos.length > 0 && (
@@ -188,38 +192,63 @@ export default function Curated() {
                 const isSel = selected.has(p.sha256);
                 const isFocused = focusedIdx === i;
                 return (
-                  <div
-                    key={p.photo_id}
-                    onMouseEnter={() => setFocusedIdx(i)}
-                    onClick={() => toggleSelected(p.sha256)}
-                    onDoubleClick={() => setLightboxIdx(i)}
-                    className={`curated-tile${isSel ? " is-selected" : ""}${isFocused ? " is-focused" : ""}`}
-                  >
-                    <img src={p.thumb_url} alt="" loading="lazy" />
+                  <div className="curated-cell" key={p.photo_id}>
                     <button
-                      className="curated-tile-unlike"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        unlike(p.sha256);
+                      type="button"
+                      aria-pressed={isSel}
+                      aria-label={`Photo ${i + 1} of ${photos.length} — select`}
+                      onFocus={() => setFocusedIdx(i)}
+                      onBlur={() => setFocusedIdx((cur) => (cur === i ? null : cur))}
+                      onClick={() => toggleSelected(p.sha256)}
+                      onDoubleClick={() => setLightboxIdx(i)}
+                      // Enter opens, Space selects. Both are handled here (and
+                      // the default button activation prevented) so the two
+                      // keys never collapse onto the same action.
+                      onKeyDown={(e) => {
+                        if (lightboxIdx !== null) return;
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          setLightboxIdx(i);
+                        } else if (e.key === " " || e.key === "Spacebar") {
+                          e.preventDefault();
+                          toggleSelected(p.sha256);
+                        }
                       }}
-                      title="Unlike (F)"
+                      // Firefox fires a synthetic click on a button's Space
+                      // *keyup*, which would toggle the selection a second time
+                      // after the keydown above already handled it. Swallowing
+                      // the keyup suppresses that click.
+                      onKeyUp={(e) => {
+                        if (e.key === " " || e.key === "Spacebar") e.preventDefault();
+                      }}
+                      title="Enter opens the photo · Space selects it · X removes it from keepers"
+                      className={`curated-tile${isSel ? " is-selected" : ""}${isFocused ? " is-focused" : ""}`}
+                    >
+                      <img src={p.thumb_url} alt="" loading="lazy" />
+                    </button>
+                    <button
+                      type="button"
+                      className="curated-tile-remove"
+                      onFocus={() => setFocusedIdx(i)}
+                      onClick={() => removeKeeper(p.sha256)}
+                      title="Remove from keepers (X)"
+                      aria-label="Remove from keepers"
                     >
                       <svg
                         viewBox="0 0 24 24"
                         width="14"
                         height="14"
-                        fill="currentColor"
+                        fill="none"
                         stroke="currentColor"
-                        strokeWidth="2"
+                        strokeWidth="2.4"
                         strokeLinecap="round"
                         strokeLinejoin="round"
+                        aria-hidden="true"
                       >
-                        <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+                        <path d="M18 6 6 18" />
+                        <path d="m6 6 12 12" />
                       </svg>
                     </button>
-                    {p.combined != null && (
-                      <span className="curated-tile-score">{p.combined.toFixed(2)}</span>
-                    )}
                   </div>
                 );
               })}

@@ -20,9 +20,6 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from datetime import time
-from typing import Iterable
-
-import numpy as np
 
 from selects.config import FolderConfig
 from selects.db import init_db, session_scope
@@ -35,6 +32,7 @@ from selects.db.models import (
     Photo,
     Visit,
 )
+from selects.util import chunked
 
 
 TIME_OF_DAY = {
@@ -183,11 +181,13 @@ def compose_story(cfg: FolderConfig, query: str) -> NLStory:
 
         # Location filter via Visit time-windows: for each named visit, pull its time range
         if req.location_names:
-            visit_rows = (
-                s.query(Visit.name, Visit.arrived_at, Visit.departed_at)
-                .filter(Visit.name.in_(req.location_names))
-                .all()
-            )
+            visit_rows = []
+            for chunk in chunked(list(req.location_names)):
+                visit_rows.extend(
+                    s.query(Visit.name, Visit.arrived_at, Visit.departed_at)
+                    .filter(Visit.name.in_(chunk))
+                    .all()
+                )
             kept = []
             for r in rows:
                 for _, arrived, departed in visit_rows:

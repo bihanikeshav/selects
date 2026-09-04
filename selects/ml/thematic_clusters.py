@@ -21,7 +21,6 @@ Algorithm:
        - "Night"           : taken_at in 20:00-23:59
        - "Indoor"          : visual tag includes "interior" or "indoor"
        - "People moments"  : faces_count >= 2 AND any labeled person
-       - "Just us"         : both dominant persons present (couple trips)
        - "On the road"     : visual tag mentions "road" or "transit"
   3. Photos that don't match any cross-cut and aren't in a top-N location
      get bucketed into "Other moments" so nothing disappears.
@@ -32,7 +31,6 @@ aesthetic_iqa desc — this lets the UI show a tight, high-quality grid.
 from __future__ import annotations
 
 import logging
-import re
 from collections import defaultdict
 from datetime import time
 from typing import Callable
@@ -44,7 +42,6 @@ from selects.db import init_db, session_scope
 from selects.db.models import (
     ClassicalScore,
     Embedding,
-    Person,
     PhotoPerson,
     PhotoTag,
     Photo,
@@ -142,15 +139,6 @@ def run_thematic_stage(
         for pid, ppid in s.query(PhotoPerson.photo_id, PhotoPerson.person_id).all():
             person_membership[pid].add(ppid)
 
-        # Top dominant persons (by photo_count) — the "couple"
-        dominant_persons = [
-            row[0]
-            for row in s.query(Person.id, Person.photo_count)
-            .order_by(Person.photo_count.desc())
-            .limit(2)
-            .all()
-        ]
-
     # ── Merge near-duplicate visit names within MERGE_KM ─────────────────────
     # Get visit coords from the visits table
     import math
@@ -226,8 +214,6 @@ def run_thematic_stage(
     def add(label: str, photo_id: int, score: float):
         clusters[label].append((photo_id, score))
         has_cluster.add(photo_id)
-
-    couple_set = set(dominant_persons) if len(dominant_persons) == 2 else set()
 
     for p in photos:
         if p.auto_reject:

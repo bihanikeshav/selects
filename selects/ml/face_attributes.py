@@ -51,13 +51,13 @@ LOOKING_AWAY_YAW_DEG = 45.0
 # ignored by the burst penalty (they still get attributes stored).
 MIN_PENALTY_FACE_AREA = 0.005
 
-# Burst-pick penalty, in combined-aesthetic units (AP25/NIMA blend lives on a
-# roughly 0-10 scale). The CAP bounds the total penalty so face quality can
-# only flip *near-equal* candidates — a bigger aesthetic gap always wins.
-PENALTY_CAP = 0.5
-CLOSED_EYE_PENALTY_SINGLE = 0.30   # exactly one face, eyes closed
-CLOSED_EYE_PENALTY_GROUP = 0.45    # per closed-eye face in a 3+ mostly-frontal group
-CLOSED_EYE_PENALTY_OTHER = 0.20    # per closed-eye face otherwise (2 faces, profiles…)
+# Burst-pick penalty, in CLIP-IQA units ([0, 1]). The CAP bounds the total
+# penalty so face quality can only flip *near-equal* candidates — a bigger
+# aesthetic gap always wins.
+PENALTY_CAP = 0.05
+CLOSED_EYE_PENALTY_SINGLE = 0.03    # exactly one face, eyes closed
+CLOSED_EYE_PENALTY_GROUP = 0.045   # per closed-eye face in a 3+ mostly-frontal group
+CLOSED_EYE_PENALTY_OTHER = 0.02    # per closed-eye face otherwise (2 faces, profiles…)
 
 _EYE_NEIGHBORHOOD_K = 8
 
@@ -190,6 +190,28 @@ def compute_face_attributes(
 
 # ── photo-level rollups ───────────────────────────────────────────────────────
 
+def photo_eyes_open_ratio(faces: Iterable) -> Optional[float]:
+    """Fraction of scored faces whose eyes are open.
+
+    A face is scored only when it has 5-point ``kps`` and 106-pt landmarks
+    (InsightFace). Haar boxes have neither, so this returns None rather than
+    advertising 1.0 with no closed-eye signal.
+    """
+    scored: list[float] = []
+    for f in faces:
+        kps = getattr(f, "kps", None)
+        lmk = getattr(f, "landmark_2d_106", None)
+        if kps is None or lmk is None:
+            continue
+        try:
+            scored.append(eyes_open_score(lmk, kps))
+        except Exception:
+            log.debug("eyes_open_ratio: score failed", exc_info=True)
+    if not scored:
+        return None
+    return sum(1.0 for e in scored if e >= EYES_CLOSED_THRESHOLD) / len(scored)
+
+
 def rollup_face_quality(faces: Iterable[FaceAttrs]) -> dict:
     """Photo-level rollups over per-face attributes.
 
@@ -211,7 +233,7 @@ def rollup_face_quality(faces: Iterable[FaceAttrs]) -> dict:
 # ── burst-pick penalty ────────────────────────────────────────────────────────
 
 def face_quality_penalty(faces: Iterable[FaceAttrs]) -> float:
-    """Bounded penalty (combined-aesthetic units) for burst picking.
+    """Bounded penalty (CLIP-IQA units in [0, 1]) for burst picking.
 
     Contextual rules:
       * 3+ faces, mostly frontal (>= 60% within FRONTAL_YAW_DEG): closed eyes
@@ -258,21 +280,24 @@ def stack_face_penalties(s, photo_ids: Iterable[int]) -> dict[int, float]:
     *s* is an open SQLAlchemy session.
     """
     from selects.db.models import FaceEmbedding
+    from selects.util import chunked
 
     ids = list(photo_ids)
     if not ids:
         return {}
-    rows = (
-        s.query(
-            FaceEmbedding.photo_id,
-            FaceEmbedding.eyes_open,
-            FaceEmbedding.yaw,
-            FaceEmbedding.pitch,
-            FaceEmbedding.face_area_ratio,
+    rows = []
+    for chunk in chunked(ids):
+        rows.extend(
+            s.query(
+                FaceEmbedding.photo_id,
+                FaceEmbedding.eyes_open,
+                FaceEmbedding.yaw,
+                FaceEmbedding.pitch,
+                FaceEmbedding.face_area_ratio,
+            )
+            .filter(FaceEmbedding.photo_id.in_(chunk))
+            .all()
         )
-        .filter(FaceEmbedding.photo_id.in_(ids))
-        .all()
-    )
     by_photo: dict[int, list[FaceAttrs]] = {}
     for pid, eyes_open, yaw, pitch, area in rows:
         by_photo.setdefault(pid, []).append(

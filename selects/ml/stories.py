@@ -10,7 +10,16 @@ import numpy as np
 
 from selects.config import FolderConfig
 from selects.db import init_db, session_scope
-from selects.db.models import ClassicalScore, Embedding, Photo, Story, StoryItem, Visit
+from selects.db.models import (
+    AestheticScore,
+    ClassicalScore,
+    Embedding,
+    Photo,
+    Story,
+    StoryItem,
+    Visit,
+)
+from selects.ml.aesthetic import rank_score
 from selects.ml.trip_data import KM_PER_DEG_LAT, km_per_deg_lon, load_keywords
 
 log = logging.getLogger(__name__)
@@ -31,6 +40,32 @@ MIN_STORY_REPS = 1
 SCENE_TIME_GAP_S = 600  # 10 minutes
 # Cosine similarity threshold: above this, same scene; below + time gap, new scene
 SCENE_SIM_THRESHOLD = 0.75
+
+
+def strip_place_suffix(name: str) -> str:
+    """Drop a trailing ``(N)`` disambiguation suffix from a visit name.
+
+    The geocoder appends ``(2)``, ``(3)`` … to same-name visits so the place
+    facet can tell them apart; ``Visit.name`` keeps the suffix in the DB (URLs
+    like ``/best/place/<name>`` resolve through it) but no reader wants to see
+    "Exploring Leh (2)". Elevation suffixes such as ``(5,359m)`` are left
+    alone — only a bare number matches.
+    """
+    import re as _re
+
+    return _re.sub(r"\s*\(\d+\)$", "", name)
+
+
+def strip_place_suffixes_in_title(title: str) -> str:
+    """Same cleanup applied to a story title built before this rule existed.
+
+    Titles embed visit names between separators ("… · Leh (2) to Nubra · 40
+    photos"), so a suffix is only removed where a name ends: at the end of the
+    string, or before one of the separators the title builder uses.
+    """
+    import re as _re
+
+    return _re.sub(r"\s\(\d+\)(?=$|\s·|,|\sto\s|\svia\s)", "", title)
 
 
 def _disambiguate_visits_globally(Session, min_separation_km: float = 2.0) -> None:
@@ -103,9 +138,11 @@ def run_story_stage(
                 ClassicalScore.auto_reject,
                 Embedding.siglip,
                 Embedding.aesthetic_iqa,
+                AestheticScore.ap25_score,
             )
             .join(Embedding, Embedding.photo_id == Photo.id)
             .outerjoin(ClassicalScore, ClassicalScore.photo_id == Photo.id)
+            .outerjoin(AestheticScore, AestheticScore.photo_id == Photo.id)
             .filter(Photo.taken_at.is_not(None))
             .order_by(Photo.taken_at)
             .all()
@@ -132,12 +169,6 @@ def run_story_stage(
         day = r.taken_at.date().isoformat()
         by_day[day].append(r)
 
-    # Wipe old stories (Visit rows cascade-delete via FK)
-    with session_scope(Session) as s:
-        s.query(StoryItem).delete()
-        s.query(Visit).delete()
-        s.query(Story).delete()
-
     eligible_days = [
         (day, photos)
         for day, photos in sorted(by_day.items())
@@ -149,6 +180,9 @@ def run_story_stage(
     # Import here to avoid circular import at module load time
     from selects.ml.locations import build_visits_for_day
 
+    # Compute every day in memory first. Wipe+insert only after this loop so a
+    # PipelineCancelled (or any exception) mid-run leaves existing stories intact.
+    pending: list[dict] = []
     for di, (day, photos) in enumerate(eligible_days):
         if on_progress:
             on_progress(di + 1, total_days, day)
@@ -161,8 +195,6 @@ def run_story_stage(
             representatives = representatives[:MAX_STORY_PHOTOS]
             representatives.sort(key=lambda x: x["taken_at"])
 
-        # Build GPS-grounded visits for this day
-        # Prepare photo dicts with GPS data (from the original DB rows)
         photo_dicts = [
             {
                 "photo_id": r.id,
@@ -173,24 +205,35 @@ def run_story_stage(
             }
             for r in photos
         ]
-        visit_data_list = build_visits_for_day(0, photo_dicts, Session, cfg)  # story_id filled in loop below
+        visit_data_list = build_visits_for_day(0, photo_dicts, Session, cfg)
 
         if len(representatives) < MIN_STORY_REPS:
             continue  # drop anemic day stories
 
-        # Build itinerary title from first/last visit
         title = _day_title_with_visits(day, len(photos), len(scenes), visit_data_list)
+        pending.append(
+            {
+                "day": day,
+                "title": title,
+                "representatives": representatives,
+                "visits": visit_data_list,
+            }
+        )
 
-        with session_scope(Session) as s:
+    with session_scope(Session) as s:
+        s.query(StoryItem).delete()
+        s.query(Visit).delete()
+        s.query(Story).delete()
+        for item in pending:
             story = Story(
-                day=day,
-                title=title,
-                photo_count=len(representatives),
+                day=item["day"],
+                title=item["title"],
+                photo_count=len(item["representatives"]),
             )
             s.add(story)
             s.flush()
             story_id = story.id
-            for rank, rep in enumerate(representatives):
+            for rank, rep in enumerate(item["representatives"]):
                 s.add(
                     StoryItem(
                         story_id=story_id,
@@ -200,8 +243,7 @@ def run_story_stage(
                         scene_rank=rep["scene_rank"],
                     )
                 )
-            # Insert Visit rows
-            for vd in visit_data_list:
+            for vd in item["visits"]:
                 s.add(Visit(
                     story_id=story_id,
                     rank=vd.rank,
@@ -215,40 +257,54 @@ def run_story_stage(
                     photo_count=vd.photo_count,
                     cover_photo_id=vd.cover_photo_id,
                 ))
-        n_stories += 1
+            n_stories += 1
 
-    # ── Cross-day place disambiguation ───────────────────────────────────────
-    # Same-name visits across different days may still be far apart geographically.
-    # Append numeric suffixes so /best/place/<name> doesn't lump distant clusters.
-    _disambiguate_visits_globally(Session, min_separation_km=2.0)
+    # Place/pattern/people run after day stories are committed. A late
+    # PipelineCancelled must not unwind those rows (they are already swapped).
+    from selects.pipeline import PipelineCancelled
 
-    # ── Per-place stories ────────────────────────────────────────────────────
-    n_stories += _build_place_stories(cfg, Session, rows, on_progress)
-    # ── Per-pattern stories ──────────────────────────────────────────────────
-    n_stories += _build_pattern_stories(cfg, Session, rows, on_progress)
-    # ── Per-people stories — use UN-deduped rows so couple shots survive ────
-    with session_scope(Session) as s:
-        all_rows = (
-            s.query(
-                Photo.id,
-                Photo.taken_at,
-                Photo.sha256,
-                Photo.gps_lat,
-                Photo.gps_lon,
-                ClassicalScore.blur,
-                ClassicalScore.faces_count,
-                ClassicalScore.auto_reject,
-                Embedding.siglip,
-                Embedding.aesthetic_iqa,
+    try:
+        # ── Cross-day place disambiguation ───────────────────────────────────
+        # Same-name visits across different days may still be far apart geographically.
+        # Append numeric suffixes so /best/place/<name> doesn't lump distant clusters.
+        _disambiguate_visits_globally(Session, min_separation_km=2.0)
+
+        if on_progress:
+            on_progress(total_days, max(total_days, 1), "places")
+        n_stories += _build_place_stories(cfg, Session, rows, on_progress)
+        if on_progress:
+            on_progress(total_days, max(total_days, 1), "patterns")
+        n_stories += _build_pattern_stories(cfg, Session, rows, on_progress)
+        # ── Per-people stories — use UN-deduped rows so couple shots survive ─
+        with session_scope(Session) as s:
+            all_rows = (
+                s.query(
+                    Photo.id,
+                    Photo.taken_at,
+                    Photo.sha256,
+                    Photo.gps_lat,
+                    Photo.gps_lon,
+                    ClassicalScore.blur,
+                    ClassicalScore.faces_count,
+                    ClassicalScore.auto_reject,
+                    Embedding.siglip,
+                    Embedding.aesthetic_iqa,
+                    AestheticScore.ap25_score,
+                )
+                .join(Embedding, Embedding.photo_id == Photo.id)
+                .outerjoin(ClassicalScore, ClassicalScore.photo_id == Photo.id)
+                .outerjoin(AestheticScore, AestheticScore.photo_id == Photo.id)
+                .filter(Photo.taken_at.is_not(None))
+                .order_by(Photo.taken_at)
+                .all()
             )
-            .join(Embedding, Embedding.photo_id == Photo.id)
-            .outerjoin(ClassicalScore, ClassicalScore.photo_id == Photo.id)
-            .filter(Photo.taken_at.is_not(None))
-            .order_by(Photo.taken_at)
-            .all()
-        )
-    all_rows = [r for r in all_rows if not (r.auto_reject or False)]
-    n_stories += _build_people_stories(cfg, Session, all_rows, on_progress)
+        all_rows = [r for r in all_rows if not (r.auto_reject or False)]
+        if on_progress:
+            on_progress(total_days, max(total_days, 1), "people")
+        n_stories += _build_people_stories(cfg, Session, all_rows, on_progress)
+    except PipelineCancelled:
+        log.info("story stage: cancelled after committing day stories; keeping them")
+        raise
 
     log.info("story stage: built %d stories total", n_stories)
     return n_stories
@@ -458,7 +514,8 @@ def _segment_scenes(photos: list) -> list[list[dict]]:
                 "blur": r.blur or 0.0,
                 "faces_count": r.faces_count or 0,
                 "embedding": emb,
-                "iqa": r.aesthetic_iqa or 0.0,
+                "iqa": rank_score(getattr(r, "ap25_score", None), None, r.aesthetic_iqa)
+                or (r.aesthetic_iqa or 0.0),
             }
         )
 
@@ -576,7 +633,7 @@ def _day_title_with_visits(day: str, n_photos: int, n_scenes: int, visits) -> st
     if not visits:
         return f"{day} · {n_photos} photos"
 
-    names = [v.name for v in visits]
+    names = [strip_place_suffix(v.name) for v in visits]
     # Dedupe preserving order
     seen = set()
     unique = [n for n in names if not (n in seen or seen.add(n))]
