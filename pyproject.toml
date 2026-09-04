@@ -75,12 +75,15 @@ line-length = 100
 target-version = "py311"
 # `ruff check .` from the repo root is the documented (and CI) command, so keep
 # it away from vendored / generated / build trees.
+# Anchored to the repo root: a bare "build" also excludes any nested
+# selects/**/build directory, which would silently drop real source from the
+# lint. "./x" matches only the top-level tree.
 extend-exclude = [
-    "frontend",
-    "vendor",
-    "dist",
-    "build",
-    ".venv",
+    "./frontend",
+    "./vendor",
+    "./dist",
+    "./build",
+    "./.venv",
 ]
 
 [tool.ruff.lint]
