@@ -209,7 +209,7 @@ async def test_list_curated_sort_aesthetic_uses_iqa(tmp_path):
         assert all(item["ap25"] is None and item["nima"] is None for item in photos)
 
 
-async def test_doctor_blurry_keepers_uses_iqa_percentile(tmp_path):
+async def test_photos_blurry_keepers_bucket_uses_iqa_percentile(tmp_path):
     from selects.db import session_scope
     from selects.db.models import ClassicalScore, Embedding, Photo
 
@@ -226,16 +226,164 @@ async def test_doctor_blurry_keepers_uses_iqa_percentile(tmp_path):
     app = build_app(cfg, run_background=False)
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        r = await client.get("/api/doctor/issues")
+        r = await client.get("/api/photos?quality=blurry_keepers&collapse=none")
         assert r.status_code == 200
         body = r.json()
-        keepers = body["blurry_keepers"]
         # Library 50th percentile of [0.2, 0.4, 0.6, 0.8] is 0.5.
-        keeper_iqas = sorted(k["combined"] for k in keepers)
-        assert len(keeper_iqas) == 2
-        assert keeper_iqas[0] == pytest.approx(0.6)
-        assert keeper_iqas[1] == pytest.approx(0.8)
-        assert body["counts"]["blurry_keepers"] == 2
+        keeper_iqas = sorted(item["aesthetic_iqa"] for item in body["items"])
+        assert keeper_iqas == [pytest.approx(0.6), pytest.approx(0.8)]
+        assert body["total"] == 2
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/doctor/issues",
+        "/api/calibrate/next",
+        "/api/search?q=hello",
+        "/api/moments",
+        "/api/photos/" + "a" * 64 + "/tags",
+    ],
+)
+async def test_removed_endpoints_are_gone(tmp_path, path):
+    from selects.db import session_scope
+    from selects.db.models import Photo, PhotoTag
+
+    cfg = get_folder_config(tmp_path)
+    Session = init_db(cfg.db_path)
+    # A real photo with tags: /api/photos/<sha>/tags would answer 200 if the
+    # endpoint still existed, so the 404 below is about the route, not the row.
+    with session_scope(Session) as s:
+        photo = Photo(path=str(tmp_path / "a.jpg"), sha256="a" * 64)
+        s.add(photo)
+        s.flush()
+        s.add(PhotoTag(photo_id=photo.id, tag="mountain", score=0.9, source="thematic"))
+
+    app = build_app(cfg, run_background=False)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        r = await client.get(path)
+        assert r.status_code == 404
+
+
+async def _seed_moment_library(tmp_path):
+    """3 photos; two of them a moment whose primary is the first.
+
+    Verdicts: keep on the primary, reject on the non-primary member.
+    """
+    from datetime import datetime
+
+    from selects.db import session_scope
+    from selects.db.models import Moment, MomentMember, Photo, Swipe
+
+    cfg = get_folder_config(tmp_path)
+    Session = init_db(cfg.db_path)
+    with session_scope(Session) as s:
+        primary = Photo(path=str(tmp_path / "a.jpg"), sha256="a" * 64, taken_at=datetime(2024, 1, 1, 10))
+        member = Photo(path=str(tmp_path / "b.jpg"), sha256="b" * 64, taken_at=datetime(2024, 1, 1, 10, 0, 1))
+        loner = Photo(path=str(tmp_path / "c.jpg"), sha256="c" * 64, taken_at=datetime(2024, 1, 1, 12))
+        s.add_all([primary, member, loner])
+        s.flush()
+        mom = Moment(
+            started_at=datetime(2024, 1, 1, 10),
+            ended_at=datetime(2024, 1, 1, 10, 0, 1),
+            size=2,
+            primary_photo_id=primary.id,
+        )
+        s.add(mom)
+        s.flush()
+        s.add(MomentMember(moment_id=mom.id, photo_id=primary.id, rank=0))
+        s.add(MomentMember(moment_id=mom.id, photo_id=member.id, rank=1))
+        s.add(Swipe(photo_id=primary.id, decision="keep"))
+        s.add(Swipe(photo_id=member.id, decision="reject"))
+    return cfg
+
+
+async def test_swipe_summary_collapse_moments_counts_primaries_only(tmp_path):
+    cfg = await _seed_moment_library(tmp_path)
+    app = build_app(cfg, run_background=False)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        body = (await client.get("/api/swipes/summary?collapse=moments")).json()
+        assert body == {
+            "total_photos": 2,
+            "kept": 1,
+            "rejected": 0,
+            "undecided": 1,
+        }
+        assert body["kept"] + body["rejected"] + body["undecided"] == body["total_photos"]
+
+        # The collapsed set matches what /api/photos returns with that collapse.
+        listing = (await client.get("/api/photos?collapse=moments")).json()
+        assert listing["total"] == body["total_photos"]
+
+
+async def test_swipe_summary_collapse_none_counts_every_photo(tmp_path):
+    cfg = await _seed_moment_library(tmp_path)
+    app = build_app(cfg, run_background=False)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        body = (await client.get("/api/swipes/summary?collapse=none")).json()
+        assert body == {
+            "total_photos": 3,
+            "kept": 1,
+            "rejected": 1,
+            "undecided": 1,
+        }
+        assert body["kept"] + body["rejected"] + body["undecided"] == body["total_photos"]
+
+
+async def test_swipe_summary_counts_silver_as_kept_and_skip_as_undecided(tmp_path):
+    from selects.db import session_scope
+    from selects.db.models import Photo, Swipe
+
+    cfg = get_folder_config(tmp_path)
+    Session = init_db(cfg.db_path)
+    with session_scope(Session) as s:
+        silver = Photo(path=str(tmp_path / "s.jpg"), sha256="a" * 64)
+        skipped = Photo(path=str(tmp_path / "k.jpg"), sha256="b" * 64)
+        s.add_all([silver, skipped])
+        s.flush()
+        s.add(Swipe(photo_id=silver.id, decision="silver"))
+        s.add(Swipe(photo_id=skipped.id, decision="skip"))
+
+    app = build_app(cfg, run_background=False)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        body = (await client.get("/api/swipes/summary")).json()
+        assert body == {"total_photos": 2, "kept": 1, "rejected": 0, "undecided": 1}
+
+
+async def test_delete_swipe_clears_the_verdict(tmp_path):
+    from selects.db import session_scope
+    from selects.db.models import Photo, Swipe
+
+    cfg = get_folder_config(tmp_path)
+    Session = init_db(cfg.db_path)
+    sha = "a" * 64
+    with session_scope(Session) as s:
+        s.add(Photo(path=str(tmp_path / "a.jpg"), sha256=sha))
+
+    app = build_app(cfg, run_background=False)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        assert (await client.post(f"/api/swipes/{sha}", json={"decision": "keep"})).status_code == 200
+
+        first = await client.delete(f"/api/swipes/{sha}")
+        assert first.status_code == 200
+        assert first.json() == {"ok": True, "deleted": True}
+
+        second = await client.delete(f"/api/swipes/{sha}")
+        assert second.status_code == 200
+        assert second.json() == {"ok": True, "deleted": False}
+
+        unknown = await client.delete("/api/swipes/" + "f" * 64)
+        assert unknown.status_code == 404
+        assert (await client.delete("/api/swipes/zz")).status_code == 400
+
+    with session_scope(Session) as s:
+        photo = s.query(Photo).filter(Photo.sha256 == sha).one()
+        assert s.get(Swipe, photo.id) is None
 
 
 async def test_thumb_rejects_non_hex_sha(tmp_path):
@@ -486,3 +634,42 @@ async def test_calibrate_extremes_uses_iqa_without_nima_ap25(tmp_path):
 
     with session_scope(Session) as s:
         assert s.get(PhotoRating, high_id) is not None
+
+
+async def test_story_title_and_breadcrumb_drop_geocoder_suffix(tmp_path):
+    """`Leh (2)` is a disambiguation artefact: the DB keeps it, the UI must not."""
+    from datetime import datetime
+
+    from selects.db import session_scope
+    from selects.db.models import Photo, Story, StoryItem, Visit
+
+    cfg = get_folder_config(tmp_path)
+    Session = init_db(cfg.db_path)
+    with session_scope(Session) as s:
+        photo = Photo(path=str(tmp_path / "a.jpg"), sha256="a" * 64, taken_at=datetime(2024, 5, 1, 9))
+        s.add(photo)
+        s.flush()
+        story = Story(
+            day="2024-05-01",
+            title="2024-05-01 · Exploring Leh (2) · 1 photos",
+            photo_count=1,
+        )
+        s.add(story)
+        s.flush()
+        s.add(StoryItem(story_id=story.id, photo_id=photo.id, rank=0))
+        s.add(Visit(
+            story_id=story.id, rank=0, name="Leh (2)", lat=34.1, lon=77.5,
+            elevation_m=3500,
+            arrived_at=datetime(2024, 5, 1, 8), departed_at=datetime(2024, 5, 1, 18),
+            photo_count=1,
+        ))
+        story_id = story.id
+
+    app = build_app(cfg, run_background=False)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        body = (await client.get(f"/api/stories/{story_id}")).json()
+        assert body["title"] == "2024-05-01 · Exploring Leh · 1 photos"
+        assert body["itinerary_breadcrumb"] == "Leh (3,500m)"
+        # The DB value survives so /best/place/<name> keeps resolving.
+        assert body["visits"][0]["name"] == "Leh (2)"

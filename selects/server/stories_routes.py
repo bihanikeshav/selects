@@ -36,9 +36,11 @@ def _build_breadcrumb(visits: list[VisitOut]) -> str:
     """Build one-line breadcrumb string from visits, e.g. 'Leh > Khardung La > Nubra'."""
     if not visits:
         return ""
+    from selects.ml.stories import strip_place_suffix
+
     parts = []
     for v in visits:
-        label = v.name
+        label = strip_place_suffix(v.name)
         if v.elevation_m:
             label = f"{label} ({v.elevation_m:,}m)"
         parts.append(label)
@@ -78,10 +80,12 @@ def _story_to_out(
     ]
     breadcrumb = _build_breadcrumb(visits_out)
 
+    from selects.ml.stories import strip_place_suffixes_in_title
+
     return StoryOut(
         id=st.id,
         day=st.day,
-        title=st.title,
+        title=strip_place_suffixes_in_title(st.title),
         photo_count=st.photo_count,
         items=items,
         visits=visits_out,
@@ -148,7 +152,7 @@ def register_stories_routes(app: FastAPI, cfg: FolderConfig) -> None:
         text→image cosine similarity to the query; stories whose top photo
         falls below a small threshold are dropped.
         """
-        from selects.ml.curation import curate
+        from selects.ml.curation import compute_rank_threshold, curate
 
         include_set: Optional[set[str]] = (
             {t.strip() for t in include_tags.split(",") if t.strip()}
@@ -168,7 +172,18 @@ def register_stories_routes(app: FastAPI, cfg: FolderConfig) -> None:
             except Exception:
                 q_vec = None
 
+        eff_library = library_pct if library_pct is not None else cfg.aesthetic_library_pct
+
         with session_scope(Session) as s:
+            # The library-wide gate is the same for every story in this
+            # response, so resolve it once instead of once per story.
+            library_floor = (
+                compute_rank_threshold(
+                    s, ap_w=cfg.ap_weight, nima_w=cfg.nima_weight, pct_floor=eff_library,
+                )
+                if curated
+                else None
+            )
             stories = s.query(Story).order_by(Story.day).all()
             result = []
             match_scores: list[float] = []  # parallel to result; used to sort if NL search active
@@ -258,13 +273,13 @@ def register_stories_routes(app: FastAPI, cfg: FolderConfig) -> None:
                         if is_people_story
                         else (scope_pct if scope_pct is not None else cfg.aesthetic_per_scope_pct)
                     )
-                    eff_library = library_pct if library_pct is not None else cfg.aesthetic_library_pct
                     curated_list = curate(
                         s, photo_ids,
                         sort="chronological",
                         ap_w=cfg.ap_weight, nima_w=cfg.nima_weight,
                         pct_floor=eff_scope,
                         library_pct_floor=eff_library,
+                        library_threshold=library_floor,
                     )
                     kept_ids = {c.photo_id for c in curated_list}
                     for c in curated_list:

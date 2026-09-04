@@ -369,3 +369,25 @@ class TestRunStoryStage:
 
         # Should build 0 stories because <3 non-rejected photos on that day
         assert n == 0
+
+
+class TestVisitSuffixStrippedFromTitles:
+    """Geocoder disambiguation suffixes (`Leh (2)`) are display-only noise."""
+
+    def test_strip_place_suffix_only_removes_a_trailing_number(self):
+        from selects.ml.stories import strip_place_suffix
+
+        assert strip_place_suffix("Leh (2)") == "Leh"
+        assert strip_place_suffix("Leh") == "Leh"
+        assert strip_place_suffix("Khardung La (5,359m)") == "Khardung La (5,359m)"
+        assert strip_place_suffix("Nubra (2) Valley") == "Nubra (2) Valley"
+
+    def test_day_title_drops_the_suffix(self):
+        from types import SimpleNamespace
+
+        from selects.ml.stories import _day_title_with_visits
+
+        visits = [SimpleNamespace(name="Leh (2)")]
+        assert _day_title_with_visits("2024-05-01", 10, 2, visits) == (
+            "2024-05-01 · Exploring Leh · 10 photos"
+        )

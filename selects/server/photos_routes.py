@@ -13,11 +13,35 @@ from selects.db.models import (
     AestheticScore, ClassicalScore, Embedding, Moment, MomentMember, Photo, PhotoTag,
 )
 from selects.server.images_routes import _require_sha256
-from selects.server.schemas import (
-    MomentList, MomentMemberOut, MomentOut, PhotoList, PhotoOut,
-)
+from selects.server.schemas import MomentMemberOut, MomentOut, PhotoList, PhotoOut
 
 log = logging.getLogger(__name__)
+
+# Verdicts that count as "kept". "silver" is the legacy second keep tier;
+# "skip" is deliberately absent — a skipped photo is still undecided.
+KEEP_DECISIONS = ("keep", "silver")
+
+
+def collapse_to_moment_primaries(stmt):
+    """Restrict a Photo-rooted statement to one row per burst.
+
+    A photo survives when it belongs to no moment, or when it is its moment's
+    primary. ``/api/photos?collapse=moments`` and ``/api/swipes/summary`` share
+    this predicate so their totals always agree.
+    """
+    return (
+        stmt.outerjoin(MomentMember, Photo.id == MomentMember.photo_id)
+        .outerjoin(Moment, MomentMember.moment_id == Moment.id)
+        .where(
+            (MomentMember.photo_id.is_(None))
+            | (Moment.primary_photo_id == Photo.id)
+        )
+    )
+
+
+def collapsed_photo_ids(s) -> set[int]:
+    """Return the photo ids that survive moment collapsing."""
+    return set(s.execute(collapse_to_moment_primaries(select(Photo.id))).scalars().all())
 
 
 def register_photos_routes(app: FastAPI, cfg: FolderConfig) -> None:
@@ -111,14 +135,7 @@ def register_photos_routes(app: FastAPI, cfg: FolderConfig) -> None:
             # Collapse: drop non-primary moment members in SQL, before offset/limit,
             # so pagination doesn't lose photos across page boundaries.
             if collapse == "moments":
-                base = base.outerjoin(
-                    MomentMember, Photo.id == MomentMember.photo_id
-                ).outerjoin(
-                    Moment, MomentMember.moment_id == Moment.id
-                ).where(
-                    (MomentMember.photo_id.is_(None))
-                    | (Moment.primary_photo_id == Photo.id)
-                )
+                base = collapse_to_moment_primaries(base)
 
             # Sort's null policy is a filter (iqa) or not (aesthetic = nulls last).
             # Count AFTER every filter, then order and page.
@@ -187,45 +204,6 @@ def register_photos_routes(app: FastAPI, cfg: FolderConfig) -> None:
                     )
                 )
         return PhotoList(total=total, items=items)
-
-    @app.get("/api/moments", response_model=MomentList)
-    def list_moments():
-        """Return all moments with their members."""
-        with session_scope(Session) as s:
-            moments = s.query(Moment).order_by(Moment.started_at).all()
-            result = []
-            for mom in moments:
-                primary_photo = s.get(Photo, mom.primary_photo_id)
-                member_rows = (
-                    s.query(MomentMember, Photo)
-                    .join(Photo, Photo.id == MomentMember.photo_id)
-                    .filter(MomentMember.moment_id == mom.id)
-                    .order_by(MomentMember.rank)
-                    .all()
-                )
-                members = [
-                    MomentMemberOut(
-                        photo_id=p.id,
-                        sha256=p.sha256,
-                        rank=mm.rank,
-                        thumb_url=f"/api/thumb/{p.sha256}",
-                        preview_url=f"/api/preview/{p.sha256}",
-                        taken_at=p.taken_at.isoformat() if p.taken_at else None,
-                    )
-                    for mm, p in member_rows
-                ]
-                result.append(
-                    MomentOut(
-                        id=mom.id,
-                        primary_photo_id=mom.primary_photo_id,
-                        primary_sha256=primary_photo.sha256 if primary_photo else "",
-                        started_at=mom.started_at.isoformat(),
-                        ended_at=mom.ended_at.isoformat(),
-                        size=mom.size,
-                        members=members,
-                    )
-                )
-        return MomentList(total=len(result), moments=result)
 
     @app.get("/api/photos/{sha256}/moment", response_model=Optional[MomentOut])
     def get_photo_moment(sha256: str):
@@ -337,6 +315,22 @@ def register_photos_routes(app: FastAPI, cfg: FolderConfig) -> None:
                 s.add(Swipe(photo_id=photo.id, decision=decision))
         return {"ok": True, "decision": decision}
 
+    @app.delete("/api/swipes/{sha256}")
+    def delete_swipe(sha256: str):
+        """Clear a photo's verdict, putting it back to undecided."""
+        from selects.db.models import Swipe
+
+        _require_sha256(sha256)
+        with session_scope(Session) as s:
+            photo = s.query(Photo).filter(Photo.sha256 == sha256).first()
+            if not photo:
+                raise HTTPException(404, detail="photo not found")
+            existing = s.get(Swipe, photo.id)
+            if existing is None:
+                return {"ok": True, "deleted": False}
+            s.delete(existing)
+        return {"ok": True, "deleted": True}
+
     @app.get("/api/curated")
     def list_curated(
         sort: str = Query("aesthetic", description="aesthetic | taken_at"),
@@ -355,7 +349,7 @@ def register_photos_routes(app: FastAPI, cfg: FolderConfig) -> None:
                 s.query(Photo, Embedding.aesthetic_iqa)
                 .join(Swipe, Swipe.photo_id == Photo.id)
                 .outerjoin(Embedding, Embedding.photo_id == Photo.id)
-                .filter(Swipe.decision.in_(["keep", "silver"]))
+                .filter(Swipe.decision.in_(KEEP_DECISIONS))
             )
             if sort == "aesthetic":
                 base = base.order_by(Embedding.aesthetic_iqa.desc().nulls_last())
@@ -391,44 +385,44 @@ def register_photos_routes(app: FastAPI, cfg: FolderConfig) -> None:
             if sha_list:
                 q = q.filter(Photo.sha256.in_(sha_list))
             for sha, decision in q.all():
-                out[sha] = decision in ("keep", "silver")
+                out[sha] = decision in KEEP_DECISIONS
         return out
 
     @app.get("/api/swipes/summary")
-    def swipes_summary():
-        from sqlalchemy import func
+    def swipes_summary(
+        collapse: str = Query(
+            "moments",
+            description="'moments' counts one photo per burst (as /api/photos does); 'none' counts all",
+        ),
+    ):
+        """Verdict counts over the same photo set ``/api/photos`` returns.
 
+        Exactly three verdicts are reported, and they always add up to
+        ``total_photos``: a "skip" is undecided, a legacy "silver" is kept.
+        """
         from selects.db.models import Swipe
 
         with session_scope(Session) as s:
-            rows = s.query(Swipe.decision, func.count(Swipe.photo_id)).group_by(Swipe.decision).all()
-            counts = {d: c for d, c in rows}
-            total_photos = s.query(Photo).count()
+            if collapse == "moments":
+                counted_ids = collapsed_photo_ids(s)
+            else:
+                counted_ids = set(s.execute(select(Photo.id)).scalars().all())
+
+            kept = rejected = 0
+            for photo_id, decision in s.execute(
+                select(Swipe.photo_id, Swipe.decision)
+            ).all():
+                if photo_id not in counted_ids:
+                    continue
+                if decision in KEEP_DECISIONS:
+                    kept += 1
+                elif decision == "reject":
+                    rejected += 1
+
+        total_photos = len(counted_ids)
         return {
             "total_photos": total_photos,
-            "kept": counts.get("keep", 0) + counts.get("silver", 0),
-            "rejected": counts.get("reject", 0),
-            "skipped": counts.get("skip", 0),
-            "undecided": total_photos - sum(counts.values()),
-        }
-
-    @app.get("/api/search")
-    def search(q: str = Query(..., min_length=1), k: int = Query(60, le=300)):
-        """Free-text photo search via SigLIP image-text similarity."""
-        from selects.ml.search import search_photos
-
-        results = search_photos(cfg, q, k=k)
-        return {
-            "query": q,
-            "total": len(results),
-            "results": [
-                {
-                    "photo_id": pid,
-                    "sha256": sha,
-                    "score": score,
-                    "thumb_url": f"/api/thumb/{sha}",
-                    "preview_url": f"/api/preview/{sha}",
-                }
-                for pid, sha, score in results
-            ],
+            "kept": kept,
+            "rejected": rejected,
+            "undecided": total_photos - kept - rejected,
         }
