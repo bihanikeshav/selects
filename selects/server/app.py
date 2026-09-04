@@ -32,7 +32,7 @@ from .system_routes import register_system_routes
 from .taste_routes import register_taste_routes
 from .video_routes import register_video_routes
 from .watch_routes import register_watch_routes
-from .ws import progress_bus, register_ws
+from .ws import LAN_COOKIE, lan_auth_ok, progress_bus, register_ws
 
 log = logging.getLogger("selects.server")
 
@@ -142,6 +142,9 @@ def build_app(
         try:
             yield
         finally:
+            # Ask an in-flight index to stop at its next checkpoint before the
+            # awaiting tasks are cancelled, so its worker thread actually ends.
+            manager.request_cancel()
             for task in tasks:
                 task.cancel()
 
@@ -177,13 +180,28 @@ def build_app(
         @app.middleware("http")
         async def require_lan_token(request: Request, call_next):
             client = request.client.host if request.client else ""
-            if is_loopback_host(client) or request.url.path in ("/api/health",):
-                return await call_next(request)
-            auth = request.headers.get("authorization", "")
-            qtok = request.query_params.get("token", "")
-            if auth == f"Bearer {lan_token}" or qtok == lan_token:
-                return await call_next(request)
-            return JSONResponse({"detail": "LAN token required"}, status_code=401)
+            qtok = request.query_params.get("token")
+            allowed = request.url.path == "/api/health" or lan_auth_ok(
+                lan_token,
+                client,
+                query_token=qtok,
+                cookie=request.cookies.get(LAN_COOKIE),
+                authorization=request.headers.get("authorization"),
+            )
+            if not allowed:
+                return JSONResponse({"detail": "LAN token required"}, status_code=401)
+            response = await call_next(request)
+            # A valid ?token= mints the cookie so the rest of the session (and
+            # the websocket, and <img> tags) authenticate without the param.
+            if qtok == lan_token and request.cookies.get(LAN_COOKIE) != lan_token:
+                response.set_cookie(
+                    LAN_COOKIE,
+                    lan_token,
+                    httponly=True,
+                    samesite="Lax",
+                    path="/",
+                )
+            return response
 
     @app.get("/api/health")
     def health():
@@ -215,6 +233,6 @@ def build_app(
     register_watch_routes(app, manager, publish)
     register_fs_routes(app, bind_host=bind_host)
     register_system_routes(app, proxy)
-    register_ws(app)
+    register_ws(app, lan_token=lan_token if lan_exposed else None)
     _mount_frontend(app)
     return app

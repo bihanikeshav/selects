@@ -3,25 +3,31 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
 
-const params = new URLSearchParams(window.location.search);
-const lanToken = params.get("token") || sessionStorage.getItem("selects-lan-token");
-if (lanToken) {
-  sessionStorage.setItem("selects-lan-token", lanToken);
-  const origFetch = window.fetch.bind(window);
-  window.fetch = (input: RequestInfo | URL, init: RequestInit = {}) => {
-    const headers = new Headers(init.headers);
-    if (!headers.has("Authorization")) {
-      headers.set("Authorization", `Bearer ${lanToken}`);
-    }
-    return origFetch(input, { ...init, headers });
-  };
-}
-
 const root = document.getElementById("root");
 if (!root) throw new Error("No #root element found");
 
-createRoot(root).render(
-  <StrictMode>
-    <App />
-  </StrictMode>
-);
+const render = () =>
+  createRoot(root).render(
+    <StrictMode>
+      <App />
+    </StrictMode>
+  );
+
+// LAN mode: a valid ?token= makes the server set an HttpOnly cookie that
+// carries auth from then on, so exchange it once, drop it from the URL, and
+// only then mount the app (whose first requests rely on that cookie).
+const params = new URLSearchParams(window.location.search);
+const token = params.get("token");
+if (token) {
+  params.delete("token");
+  const query = params.toString();
+  const url = window.location.pathname + (query ? `?${query}` : "") + window.location.hash;
+  fetch(`/api/health?token=${encodeURIComponent(token)}`)
+    .catch(() => {})
+    .finally(() => {
+      window.history.replaceState(null, "", url);
+      render();
+    });
+} else {
+  render();
+}

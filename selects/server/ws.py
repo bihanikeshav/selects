@@ -5,7 +5,36 @@ from typing import AsyncIterator
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
+from .fs_routes import is_loopback_host
+
+#: Cookie the UI carries once a valid ``?token=`` has been presented once.
+LAN_COOKIE = "selects_token"
+
 _BUS: "ProgressBus | None" = None
+
+
+def lan_auth_ok(
+    lan_token: str | None,
+    client_host: str,
+    *,
+    query_token: str | None = None,
+    cookie: str | None = None,
+    authorization: str | None = None,
+) -> bool:
+    """Whether a request/websocket from *client_host* may pass the LAN gate.
+
+    Shared by the HTTP middleware in ``app.py`` and the websocket handler below
+    so both accept exactly the same credentials.
+    """
+    if not lan_token:
+        return True
+    if is_loopback_host(client_host):
+        return True
+    return (
+        authorization == f"Bearer {lan_token}"
+        or query_token == lan_token
+        or cookie == lan_token
+    )
 
 
 class ProgressBus:
@@ -36,9 +65,18 @@ def progress_bus() -> ProgressBus:
     return _BUS
 
 
-def register_ws(app: FastAPI) -> None:
+def register_ws(app: FastAPI, lan_token: str | None = None) -> None:
     @app.websocket("/ws/progress")
     async def ws_progress(websocket: WebSocket) -> None:
+        client = websocket.client.host if websocket.client else ""
+        if not lan_auth_ok(
+            lan_token,
+            client,
+            query_token=websocket.query_params.get("token"),
+            cookie=websocket.cookies.get(LAN_COOKIE),
+        ):
+            await websocket.close(code=4401)
+            return
         await websocket.accept()
         bus = progress_bus()
         try:
