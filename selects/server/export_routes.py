@@ -31,6 +31,7 @@ from selects.export import (
     validate_export_target,
     write_xmp_ratings,
 )
+from selects.util import KEEP_DECISIONS
 
 # decision -> XMP verdict key used by selects.export.VERDICT_RATING
 _DECISION_VERDICT: dict[str, str] = {
@@ -66,7 +67,7 @@ def register_export_routes(app: FastAPI, cfg: FolderConfig) -> None:
     def _resolve_source(s, source: str) -> list[ExportItem]:
         """Resolve a source spec to a list of ExportItem, in export order."""
         if source in ("curated", "liked"):
-            decisions = ["keep", "silver"] if source == "curated" else ["keep"]
+            decisions = list(KEEP_DECISIONS) if source == "curated" else ["keep"]
             rows = (
                 s.query(Photo, Swipe.swiped_at)
                 .join(Swipe, Swipe.photo_id == Photo.id)
@@ -117,7 +118,7 @@ def register_export_routes(app: FastAPI, cfg: FolderConfig) -> None:
         swiped photo whose decision maps to a verdict, filtered by *source*.
         """
         if source in ("curated", "liked"):
-            decisions = ["keep", "silver"] if source == "curated" else ["keep"]
+            decisions = list(KEEP_DECISIONS) if source == "curated" else ["keep"]
         elif source.startswith("story:"):
             try:
                 story_id = int(source.split(":", 1)[1])

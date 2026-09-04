@@ -25,6 +25,8 @@ from typing import TYPE_CHECKING, Iterable, Optional
 import numpy as np
 from sqlalchemy.orm import Session as OrmSession
 
+from selects.util import KEEP_DECISIONS
+
 if TYPE_CHECKING:  # pragma: no cover
     from selects.config import FolderConfig
 
@@ -43,7 +45,7 @@ LEARNING_RATE = 1.0
 N_ITERS = 500
 RANDOM_SEED = 1152         # SigLIP dim, as good a seed as any
 
-_POSITIVE = ("keep", "silver")
+_POSITIVE = KEEP_DECISIONS
 _NEGATIVE = ("reject",)
 
 

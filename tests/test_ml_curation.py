@@ -136,3 +136,99 @@ def test_curate_accepts_a_precomputed_library_threshold(tmp_path: Path, monkeypa
             s, ids, pct_floor=0.0, library_pct_floor=50.0, library_threshold=0.6,
         )
     assert sorted(c.iqa for c in out) == [0.9]
+
+
+def test_compute_rank_threshold_is_thread_safe_across_a_stamp_change(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Concurrent misses must not corrupt the cache while it evicts stale keys.
+
+    `/api/stories` is a sync endpoint served from the threadpool, so several
+    requests can miss at once. Two threads evicting the same stale keys while a
+    third iterates the dict is a RuntimeError or a KeyError, i.e. a 500.
+
+    The race is widened deliberately: a large batch of stale entries makes the
+    eviction scan long enough to be preempted, a slow compute puts every thread
+    into the critical section together, and a tiny switch interval forces the
+    interpreter to interleave them.
+    """
+    import sys
+    import threading
+    import time
+
+    from selects.ml import curation
+
+    Session, ids = _seed(tmp_path, [0.1, 0.5, 0.9])
+    curation.clear_threshold_cache()
+
+    # Entries left behind by an earlier state of the library: every one of them
+    # is evicted on the first miss below.
+    for i in range(300_000):
+        curation._THRESHOLD_CACHE[(("stale-stamp",), float(i), 0.4, 50.0)] = 0.0
+
+    real_compute = curation._compute_rank_threshold_uncached
+
+    def slow_compute(*args, **kwargs):
+        time.sleep(0.02)
+        return real_compute(*args, **kwargs)
+
+    monkeypatch.setattr(curation, "_compute_rank_threshold_uncached", slow_compute)
+
+    old_interval = sys.getswitchinterval()
+    sys.setswitchinterval(1e-6)
+
+    results: list[float | None] = []
+    errors: list[BaseException] = []
+    barrier = threading.Barrier(8)
+
+    def worker(pct: float) -> None:
+        try:
+            barrier.wait(timeout=10)
+            with session_scope(Session) as s:
+                value = curation.compute_rank_threshold(s, pct_floor=pct)
+            if pct == 50.0:
+                results.append(value)
+        except BaseException as exc:  # noqa: BLE001 - the assertion is "none raised"
+            errors.append(exc)
+
+    threads = [
+        threading.Thread(target=worker, args=(50.0 if i % 2 == 0 else 90.0,))
+        for i in range(8)
+    ]
+    try:
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30)
+    finally:
+        sys.setswitchinterval(old_interval)
+
+    assert errors == []
+    assert results == [pytest.approx(0.5)] * 4
+    # The stale generation is gone and only the fresh one remains.
+    assert all(k[0] != ("stale-stamp",) for k in curation._THRESHOLD_CACHE)
+    curation.clear_threshold_cache()
+
+
+def test_compute_rank_threshold_holds_the_lock_while_it_mutates_the_cache(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from selects.ml import curation
+
+    Session, ids = _seed(tmp_path, [0.1, 0.5, 0.9])
+    curation.clear_threshold_cache()
+
+    real_compute = curation._compute_rank_threshold_uncached
+    held: list[bool] = []
+
+    def checking_compute(*args, **kwargs):
+        held.append(curation._THRESHOLD_LOCK.locked())
+        return real_compute(*args, **kwargs)
+
+    monkeypatch.setattr(curation, "_compute_rank_threshold_uncached", checking_compute)
+
+    with session_scope(Session) as s:
+        curation.compute_rank_threshold(s, pct_floor=50.0)
+
+    assert held == [True]
+    assert not curation._THRESHOLD_LOCK.locked()

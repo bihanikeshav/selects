@@ -13,6 +13,7 @@ Configuration:
 """
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional
@@ -105,12 +106,18 @@ def compute_library_threshold(
 # /api/stories request used to recompute one per story. Cache them per
 # (database, database state, parameters); any write to the library changes the
 # stamp and drops the entry.
+#
+# Sync endpoints are served from Starlette's threadpool, so several requests can
+# miss at once; the lock keeps the lookup/store/evict sequence atomic. Without
+# it two threads evicting while a third iterates is a 500.
 _THRESHOLD_CACHE: dict[tuple, Optional[float]] = {}
+_THRESHOLD_LOCK = threading.Lock()
 
 
 def clear_threshold_cache() -> None:
-    """Drop every memoized library threshold (tests, and library switches)."""
-    _THRESHOLD_CACHE.clear()
+    """Drop every memoized library threshold. Used by tests."""
+    with _THRESHOLD_LOCK:
+        _THRESHOLD_CACHE.clear()
 
 
 def _db_stamp(s: OrmSession) -> Optional[tuple]:
@@ -152,18 +159,26 @@ def compute_rank_threshold(
     Memoized per (database state, ap_w, nima_w, pct_floor).
     """
     stamp = _db_stamp(s)
-    key = (stamp, ap_w, nima_w, pct_floor) if stamp is not None else None
-    if key is not None and key in _THRESHOLD_CACHE:
-        return _THRESHOLD_CACHE[key]
+    if stamp is None:
+        return _compute_rank_threshold_uncached(
+            s, ap_w=ap_w, nima_w=nima_w, pct_floor=pct_floor
+        )
 
-    value = _compute_rank_threshold_uncached(s, ap_w=ap_w, nima_w=nima_w, pct_floor=pct_floor)
-    if key is not None:
+    key = (stamp, ap_w, nima_w, pct_floor)
+    with _THRESHOLD_LOCK:
+        if key in _THRESHOLD_CACHE:
+            return _THRESHOLD_CACHE[key]
+
+        value = _compute_rank_threshold_uncached(
+            s, ap_w=ap_w, nima_w=nima_w, pct_floor=pct_floor
+        )
         # Only the current database state is worth keeping; an older stamp can
         # never be asked for again.
-        for stale in [k for k in _THRESHOLD_CACHE if k[0] != stamp]:
-            del _THRESHOLD_CACHE[stale]
+        for stale in list(_THRESHOLD_CACHE):
+            if stale[0] != stamp:
+                _THRESHOLD_CACHE.pop(stale, None)
         _THRESHOLD_CACHE[key] = value
-    return value
+        return value
 
 
 def _compute_rank_threshold_uncached(

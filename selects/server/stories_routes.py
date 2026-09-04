@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException, Query
 from selects.config import FolderConfig
 from selects.db import init_db, session_scope
 from selects.db.models import Embedding, Photo, PhotoTag, Story, StoryItem, Visit
+from selects.util import KEEP_DECISIONS
 from selects.server.schemas import (
     StoryItemOut, StoryList, StoryOut, VisitOut,
 )
@@ -257,7 +258,7 @@ def register_stories_routes(app: FastAPI, cfg: FolderConfig) -> None:
                         r[0]
                         for r in s.query(_Swipe.photo_id)
                         .filter(_Swipe.photo_id.in_(pids))
-                        .filter(_Swipe.decision.in_(["keep", "silver"]))
+                        .filter(_Swipe.decision.in_(KEEP_DECISIONS))
                         .all()
                     }
                     items_rows = [r for r in items_rows if _pid(r) in liked_pids]
