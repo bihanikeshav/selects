@@ -15,7 +15,7 @@ from selects.db.models import (
 from selects.server.schemas import (
     MomentMemberOut, MomentOut, PhotoList, QualityBucket, photo_out, require_sha256,
 )
-from selects.util import KEEP_DECISIONS
+from selects.util import KEEP_DECISIONS, chunked
 
 log = logging.getLogger(__name__)
 
@@ -165,10 +165,32 @@ def register_photos_routes(app: FastAPI, cfg: FolderConfig) -> None:
             else:  # taken_at
                 base = base.order_by(Photo.taken_at.asc().nullslast())
 
-            rows = s.execute(base.offset(offset).limit(limit)).all()
-            page_ids = [photo.id for photo, *_ in rows]
+            # Page over DISTINCT photo ids, not over join rows: a photo that is
+            # the primary of two moments occupies two rows, and paging those
+            # would hand back a page shorter than `limit` while `total` still
+            # promised a full one. GROUP BY (not DISTINCT) so the ORDER BY may
+            # name columns that are not in the select list.
+            page_ids = list(
+                s.scalars(
+                    base.with_only_columns(Photo.id)
+                    .group_by(Photo.id)
+                    .offset(offset)
+                    .limit(limit)
+                )
+            )
+
+            # Re-read the full rows for exactly that page. Chunked because a
+            # page can be up to 2000 ids and SQLite caps bound variables.
+            by_id: dict[int, tuple] = {}
+            for chunk in chunked(page_ids):
+                for photo, score, emb, aest in s.execute(
+                    base.where(Photo.id.in_(chunk))
+                ).all():
+                    by_id.setdefault(photo.id, (photo, score, emb, aest))
+            rows = [by_id[pid] for pid in page_ids if pid in by_id]
+
             moment_of: dict[int, tuple[int, int, bool]] = {}
-            if page_ids:
+            for chunk in chunked(page_ids):
                 for mm_pid, mm_mid, mom_size, mom_primary in (
                     s.query(
                         MomentMember.photo_id,
@@ -177,18 +199,13 @@ def register_photos_routes(app: FastAPI, cfg: FolderConfig) -> None:
                         Moment.primary_photo_id,
                     )
                     .join(Moment, Moment.id == MomentMember.moment_id)
-                    .filter(MomentMember.photo_id.in_(page_ids))
+                    .filter(MomentMember.photo_id.in_(chunk))
                     .all()
                 ):
                     moment_of[mm_pid] = (mm_mid, mom_size, mm_pid == mom_primary)
 
             items = []
-            seen: set[int] = set()
             for photo, score, emb, _aest in rows:
-                # Same reason the count is DISTINCT: never show one photo twice.
-                if photo.id in seen:
-                    continue
-                seen.add(photo.id)
                 moment_id: Optional[int] = None
                 moment_size: Optional[int] = None
                 if photo.id in moment_of:

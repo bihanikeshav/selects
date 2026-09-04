@@ -804,6 +804,20 @@ async def test_photos_total_counts_a_photo_in_two_moments_once(tmp_path):
         assert summary["total_photos"] == listing["total"]
         assert [item["sha256"] for item in listing["items"]] == ["a" * 64, "b" * 64]
 
+        # A page that contains the duplicated photo is still a *full* page:
+        # deduping after offset/limit used to return one item for limit=1
+        # against a promised total of 2, so the grid stalled short.
+        first = (await client.get("/api/photos?collapse=moments&limit=1")).json()
+        assert first["total"] == 2
+        assert len(first["items"]) == 1
+        assert first["items"][0]["sha256"] == "a" * 64
+
+        second = (await client.get(
+            "/api/photos?collapse=moments&limit=1&offset=1"
+        )).json()
+        assert len(second["items"]) == 1
+        assert second["items"][0]["sha256"] == "b" * 64
+
 
 async def test_person_photos_carry_aesthetic_iqa(tmp_path):
     import numpy as np

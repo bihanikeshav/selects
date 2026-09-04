@@ -86,7 +86,11 @@ plan `docs/superpowers/plans/2026-09-04-audit-repair-v2.md`.
   - a request carrying a valid `?token=` sets that cookie
     (`HttpOnly`, `SameSite=Strict`, path `/`) on the response — the
     `/api/health?token=` exchange is same-site, because the page making it
-    was served by this same origin;
+    was served by this same origin. The trade-off: a cross-site top-level
+    navigation to the bare LAN URL (a link clicked inside another web app,
+    a chat client, or a mail client) will not carry the cookie and lands on
+    a 401, so links shared that way must include `?token=`; typing the
+    address, opening a bookmark, and scanning the QR code are unaffected;
   - `/ws/progress` rejects non-loopback clients that present neither a
     valid `token` query param nor the cookie: it **accepts** the connection
     and then closes it with code 4401, reason `LAN token required`. Closing

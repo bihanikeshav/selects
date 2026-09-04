@@ -26,6 +26,7 @@ from pydantic import BaseModel
 from selects.config import FolderConfig
 from selects.db import init_db, session_scope
 from selects.db.models import Video
+from selects.pipeline import PipelineCancelled
 from selects.server.schemas import require_sha256
 from selects.video import frames_dir_for, run_video_stage
 
@@ -199,7 +200,22 @@ def register_video_routes(
                     publish({"stage": "video", "current": i, "total": total, "message": name})
 
             try:
-                run_video_stage(cfg, cb)
+                run_video_stage(
+                    cfg,
+                    cb,
+                    should_cancel=manager.should_cancel if manager is not None else None,
+                )
+            except PipelineCancelled:
+                # Same frame shape the pipeline runner publishes, so the UI's
+                # single "cancelled" handler clears the pill either way. Not an
+                # error: /process/status stays clean.
+                if publish is not None:
+                    publish({
+                        "stage": "cancelled",
+                        "current": 0,
+                        "total": 0,
+                        "message": "Stopped — you can pick up where you left off",
+                    })
             except Exception as e:  # noqa: BLE001 — surfaced via /process/status
                 with lock:
                     state["error"] = str(e)
@@ -209,7 +225,16 @@ def register_video_routes(
                 with lock:
                     state["running"] = False
 
-        threading.Thread(target=worker, daemon=True).start()
+        # If the thread cannot even start, both guards must come back off or
+        # the library is wedged as "indexing" until the process restarts.
+        try:
+            threading.Thread(target=worker, daemon=True).start()
+        except BaseException:
+            if manager is not None:
+                manager.end_indexing()
+            with lock:
+                state["running"] = False
+            raise
         return {"started": True}
 
     @router.get("/api/videos/process/status")

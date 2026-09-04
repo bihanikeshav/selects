@@ -309,13 +309,20 @@ def run_video_stage(
     on_progress: ProgressCb = None,
     n_frames: int = FRAME_SAMPLES,
     embed: bool = True,
+    should_cancel: Optional[Callable[[], bool]] = None,
 ) -> int:
     """Analyse every video with ``processed_at IS NULL``.
 
     Returns the number of videos processed (including undecodable ones, which
     are marked processed with empty analysis so the stage never loops on
     them). Safe without ML extras: the SigLIP embedding is best-effort.
+
+    *should_cancel* is polled between videos; when it returns True the stage
+    raises :class:`~selects.pipeline.PipelineCancelled`. Analysing one video is
+    not interruptible, so a cancel lands at the next boundary — every video
+    already finished stays committed and is not re-analysed on the next run.
     """
+    from selects.pipeline import PipelineCancelled
     from selects.indexer.preview import write_previews
 
     Session = init_db(cfg.db_path)
@@ -333,6 +340,9 @@ def run_video_stage(
 
     processed = 0
     for i, (vid, vpath, sha) in enumerate(pending, start=1):
+        if should_cancel is not None and should_cancel():
+            log.info("video analysis cancelled after %d of %d video(s)", processed, total)
+            raise PipelineCancelled()
         name = Path(vpath).name
         if on_progress:
             on_progress(i, total, name)
