@@ -247,7 +247,7 @@ class Moment(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     primary_photo_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("photos.id"), index=True
+        Integer, ForeignKey("photos.id", ondelete="CASCADE"), index=True
     )
     started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     ended_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
@@ -306,7 +306,7 @@ class Visit(Base):
     departed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     photo_count: Mapped[int] = mapped_column(Integer, nullable=False)
     cover_photo_id: Mapped[Optional[int]] = mapped_column(
-        Integer, ForeignKey("photos.id"), default=None
+        Integer, ForeignKey("photos.id", ondelete="SET NULL"), default=None
     )
 
     story: Mapped["Story"] = relationship("Story", back_populates="visits")
@@ -325,7 +325,7 @@ class Person(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     label: Mapped[Optional[str]] = mapped_column(Text, default=None)
     cover_face_embedding_id: Mapped[Optional[int]] = mapped_column(
-        Integer, ForeignKey("face_embeddings.id"), default=None
+        Integer, ForeignKey("face_embeddings.id", ondelete="SET NULL"), default=None
     )
     photo_count: Mapped[int] = mapped_column(Integer, default=0)
     centroid: Mapped[Optional[bytes]] = mapped_column(LargeBinary, default=None)
@@ -339,9 +339,15 @@ class PhotoPerson(Base):
 
     __tablename__ = "photo_persons"
 
-    photo_id: Mapped[int] = mapped_column(Integer, ForeignKey("photos.id"), primary_key=True)
-    person_id: Mapped[int] = mapped_column(Integer, ForeignKey("persons.id"), primary_key=True)
-    face_embedding_id: Mapped[int] = mapped_column(Integer, ForeignKey("face_embeddings.id"))
+    photo_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("photos.id", ondelete="CASCADE"), primary_key=True
+    )
+    person_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("persons.id", ondelete="CASCADE"), primary_key=True
+    )
+    face_embedding_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("face_embeddings.id", ondelete="CASCADE")
+    )
     confidence: Mapped[float] = mapped_column(Float)
 
 
@@ -351,7 +357,9 @@ class PhotoEdit(Base):
 
     __tablename__ = "photo_edits"
 
-    photo_id: Mapped[int] = mapped_column(Integer, ForeignKey("photos.id"), primary_key=True)
+    photo_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("photos.id", ondelete="CASCADE"), primary_key=True
+    )
     params: Mapped[str] = mapped_column(Text, nullable=False)  # JSON of {key: value}
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
@@ -361,7 +369,9 @@ class Swipe(Base):
 
     __tablename__ = "swipes"
 
-    photo_id: Mapped[int] = mapped_column(Integer, ForeignKey("photos.id"), primary_key=True)
+    photo_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("photos.id", ondelete="CASCADE"), primary_key=True
+    )
     decision: Mapped[str] = mapped_column(Text)  # "keep" | "reject" | "silver" | "skip"
     swiped_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 

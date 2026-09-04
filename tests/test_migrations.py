@@ -198,3 +198,151 @@ def test_init_db_is_idempotent(tmp_path: Path) -> None:
     _forget_engine(db_path)
     init_db(db_path)
     assert _stamped_revision(db_path) == _head_revision()
+
+
+PREV_HEAD = "a8b9c0d1e2f3"
+
+
+def _fk_actions(db_path: Path, table: str) -> dict[str, tuple[str, str]]:
+    """{from_column: (referred_table, on_delete)} from PRAGMA foreign_key_list."""
+    conn = sqlite3.connect(str(db_path))
+    try:
+        rows = conn.execute(f"PRAGMA foreign_key_list({table})").fetchall()
+        # cols: id, seq, table, from, to, on_update, on_delete, match
+        return {r[3]: (r[2], r[6]) for r in rows}
+    finally:
+        conn.close()
+
+
+def _build_db_at(db_path: Path, revision: str) -> None:
+    from alembic import command
+
+    from selects.db import _alembic_config
+
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    engine = sqlite3_engine(db_path)
+    try:
+        with engine.connect() as conn:
+            command.upgrade(_alembic_config(conn), revision)
+            conn.commit()
+    finally:
+        engine.dispose()
+
+
+def _seed_cascade_rows(db_path: Path) -> None:
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute("PRAGMA foreign_keys=ON")
+        for pid in (1, 2):
+            conn.execute(
+                "INSERT INTO photos (id, path) VALUES (?, ?)", (pid, f"/p{pid}.jpg")
+            )
+        conn.execute(
+            "INSERT INTO face_embeddings "
+            "(id, photo_id, face_index, embedding, bbox_x, bbox_y, bbox_w, bbox_h, confidence)"
+            " VALUES (1, 1, 0, X'00', 0, 0, 10, 10, 0.9)"
+        )
+        conn.execute(
+            "INSERT INTO persons (id, label, cover_face_embedding_id, photo_count, "
+            "created_at) VALUES (1, 'Ann', 1, 1, '2026-01-01 00:00:00')"
+        )
+        conn.execute(
+            "INSERT INTO photo_persons (photo_id, person_id, face_embedding_id, confidence)"
+            " VALUES (1, 1, 1, 0.9)"
+        )
+        conn.execute(
+            "INSERT INTO swipes (photo_id, decision, swiped_at) "
+            "VALUES (1, 'keep', '2026-01-01 00:00:00')"
+        )
+        conn.execute(
+            "INSERT INTO photo_edits (photo_id, params, updated_at) "
+            "VALUES (1, '{}', '2026-01-01 00:00:00')"
+        )
+        for mid, pid in ((1, 1), (2, 2)):
+            conn.execute(
+                "INSERT INTO moments (id, primary_photo_id, started_at, ended_at, size) "
+                "VALUES (?, ?, '2026-01-01 00:00:00', '2026-01-01 01:00:00', 1)",
+                (mid, pid),
+            )
+            conn.execute(
+                "INSERT INTO moment_members (moment_id, photo_id, rank) VALUES (?, ?, 0)",
+                (mid, pid),
+            )
+        conn.execute(
+            "INSERT INTO stories (id, day, title, photo_count, created_at) "
+            "VALUES (1, '2026-01-01', 'Day', 2, '2026-01-01 00:00:00')"
+        )
+        conn.execute(
+            "INSERT INTO visits (id, story_id, rank, name, lat, lon, arrived_at, "
+            "departed_at, photo_count, cover_photo_id) VALUES "
+            "(1, 1, 0, 'Leh', 34.0, 77.0, '2026-01-01 00:00:00', "
+            "'2026-01-01 01:00:00', 2, 1)"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_cascade_migration_preserves_rows_and_cascades_on_delete(tmp_path: Path) -> None:
+    from selects.db import session_scope
+    from selects.db.models import Moment, MomentMember, Person, PhotoEdit, PhotoPerson, Swipe, Visit
+    from selects.db.models import Photo as PhotoModel
+
+    db_path = tmp_path / ".selects" / "index.db"
+    _build_db_at(db_path, PREV_HEAD)
+    _seed_cascade_rows(db_path)
+
+    _forget_engine(db_path)
+    Session = init_db(db_path)
+    assert _stamped_revision(db_path) == _head_revision()
+
+    # Nothing lost by the table rebuilds.
+    with session_scope(Session) as s:
+        assert s.query(PhotoModel).count() == 2
+        assert s.query(MomentMember).count() == 2
+        assert s.query(Moment).count() == 2
+        assert s.query(PhotoPerson).count() == 1
+        assert s.query(Person).count() == 1
+        assert s.query(Visit).one().cover_photo_id == 1
+
+    # New FK actions.
+    assert _fk_actions(db_path, "swipes")["photo_id"] == ("photos", "CASCADE")
+    assert _fk_actions(db_path, "photo_edits")["photo_id"] == ("photos", "CASCADE")
+    assert _fk_actions(db_path, "moments")["primary_photo_id"] == ("photos", "CASCADE")
+    pp = _fk_actions(db_path, "photo_persons")
+    assert pp["photo_id"] == ("photos", "CASCADE")
+    assert pp["person_id"] == ("persons", "CASCADE")
+    assert pp["face_embedding_id"] == ("face_embeddings", "CASCADE")
+    visits = _fk_actions(db_path, "visits")
+    assert visits["cover_photo_id"] == ("photos", "SET NULL")
+    assert visits["story_id"] == ("stories", "CASCADE")  # untouched by the rebuild
+    assert _fk_actions(db_path, "persons")["cover_face_embedding_id"] == (
+        "face_embeddings",
+        "SET NULL",
+    )
+
+    # Deleting the photo cascades.
+    with session_scope(Session) as s:
+        s.delete(s.get(PhotoModel, 1))
+
+    with session_scope(Session) as s:
+        assert s.query(Swipe).count() == 0
+        assert s.query(PhotoPerson).count() == 0
+        assert s.query(PhotoEdit).count() == 0
+        assert s.query(Moment).count() == 1  # moment 2 (primary photo 2) survives
+        assert s.get(Moment, 1) is None
+        assert s.query(Visit).one().cover_photo_id is None
+        assert s.query(Person).one().cover_face_embedding_id is None
+
+
+def test_fresh_db_has_same_fk_actions_as_migrated(tmp_path: Path) -> None:
+    fresh = tmp_path / "fresh" / "index.db"
+    init_db(fresh)
+
+    migrated = tmp_path / "migrated" / "index.db"
+    _build_db_at(migrated, PREV_HEAD)
+    _forget_engine(migrated)
+    init_db(migrated)
+
+    for table in ("swipes", "photo_edits", "moments", "photo_persons", "visits", "persons"):
+        assert _fk_actions(fresh, table) == _fk_actions(migrated, table), table

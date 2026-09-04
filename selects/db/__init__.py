@@ -108,6 +108,11 @@ def init_db(db_path: Path) -> sessionmaker[Session]:
         engine = create_engine(_make_url(db_path), echo=False)
         event.listens_for(engine, "connect")(_set_sqlite_pragmas)
         _ensure_schema(engine)
+        # Migrations can leave connection-scoped PRAGMA state behind (SQLite
+        # table rebuilds need foreign_keys=OFF, and the restoring PRAGMA is a
+        # no-op inside Alembic's transaction). Dropping the pooled connections
+        # forces every later checkout through _set_sqlite_pragmas again.
+        engine.dispose()
         factory = sessionmaker(bind=engine, expire_on_commit=False)
         _ENGINES[key] = (engine, factory)
         return factory
