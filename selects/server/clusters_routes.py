@@ -5,7 +5,7 @@ import logging
 from collections import defaultdict
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Query
 from sqlalchemy import select
 
 from selects.config import FolderConfig
@@ -113,25 +113,6 @@ def register_clusters_routes(app: FastAPI, cfg: FolderConfig) -> None:
             clusters_out.sort(key=lambda c: c.count, reverse=True)
 
         return ClusterList(total=sum(c.count for c in clusters_out), clusters=clusters_out)
-
-    @app.get("/api/photos/{sha256}/tags")
-    def get_photo_tags(sha256: str):
-        """Return all tags for a photo across all sources."""
-        with session_scope(Session) as s:
-            photo = s.query(Photo).filter(Photo.sha256 == sha256).first()
-            if photo is None:
-                raise HTTPException(404, detail="Photo not found")
-
-            rows = (
-                s.query(PhotoTag.tag, PhotoTag.score, PhotoTag.source)
-                .filter(PhotoTag.photo_id == photo.id)
-                .order_by(PhotoTag.source, PhotoTag.score.desc())
-                .all()
-            )
-            result: dict[str, list[dict]] = defaultdict(list)
-            for tag, score, src in rows:
-                result[src or "legacy"].append({"tag": tag, "score": score})
-            return {"sha256": sha256, "tags_by_source": dict(result)}
 
     @app.get("/api/clusters/{tag}/photos", response_model=PhotoList)
     def list_cluster_photos(

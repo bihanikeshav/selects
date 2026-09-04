@@ -45,11 +45,6 @@ class MomentOut(BaseModel):
     members: list[MomentMemberOut]
 
 
-class MomentList(BaseModel):
-    total: int
-    moments: list[MomentOut]
-
-
 class PhotoList(BaseModel):
     total: int
     items: list[PhotoOut]

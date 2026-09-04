@@ -105,44 +105,6 @@ def register_calibrate_routes(app: FastAPI, cfg: FolderConfig) -> None:
             "rated_count": len(rated_ids),
         }
 
-    @app.get("/api/calibrate/next")
-    def calibrate_next():
-        """Return one random photo that hasn't been rated yet, with all 4 scores.
-
-        Kept for backward-compat; the primary calibration flow now uses
-        /api/calibrate/extremes.
-        """
-        import random as _random
-
-        with session_scope(Session) as s:
-            rated_ids = {r[0] for r in s.query(PhotoRating.photo_id).all()}
-            rows = (
-                s.query(Photo.id, Photo.sha256, Photo.taken_at, Embedding.aesthetic_iqa)
-                .join(Embedding, Embedding.photo_id == Photo.id)
-                .all()
-            )
-            unrated = [r for r in rows if r[0] not in rated_ids]
-            if not unrated:
-                return {"done": True, "rated_count": len(rated_ids)}
-            choice = _random.choice(unrated)
-            pid = choice[0]
-            aest = s.get(AestheticScore, pid)
-            return {
-                "done": False,
-                "photo_id": pid,
-                "sha256": choice[1],
-                "taken_at": choice[2].isoformat() if choice[2] else None,
-                "preview_url": f"/api/preview/{choice[1]}",
-                "scores": {
-                    "iqa": choice[3],
-                    "nima": aest.nima_score if aest else None,
-                    "ap25": aest.ap25_score if aest else None,
-                    "personal": aest.personal_score if aest else None,
-                },
-                "rated_count": len(rated_ids),
-                "total": len(rows),
-            }
-
     @app.post("/api/calibrate/rate_batch")
     def calibrate_rate_batch(payload: dict = Body(...)):
         """Persist many ratings at once.

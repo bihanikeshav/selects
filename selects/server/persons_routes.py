@@ -48,21 +48,29 @@ def register_persons_routes(app: FastAPI, cfg: FolderConfig) -> None:
             face_n = s.query(func.count(FaceEmbedding.id)).scalar() or 0
             faces_ran = bool(face_n) or speed != "fast"
             persons_all = s.query(Person).order_by(Person.photo_count.desc()).all()
+            visible = [
+                p for p in persons_all
+                if p.photo_count >= min_photo_count and (include_hidden or not p.hidden)
+            ]
+
+            # Every candidate cluster's faces in one query, grouped in Python.
+            # This used to be one round trip per person.
+            faces_by_person: dict[int, list] = {}
+            if visible:
+                for person_id, face in (
+                    s.query(PhotoPerson.person_id, FaceEmbedding)
+                    .join(FaceEmbedding, PhotoPerson.face_embedding_id == FaceEmbedding.id)
+                    .filter(PhotoPerson.person_id.in_([p.id for p in visible]))
+                    .all()
+                ):
+                    faces_by_person.setdefault(person_id, []).append(face)
+
             persons = []
-            for p in persons_all:
-                if p.photo_count < min_photo_count:
-                    continue
-                if p.hidden and not include_hidden:
-                    continue
+            for p in visible:
                 # Pick the best face in this cluster as cover: rank by
                 # confidence * sqrt(area). Skip the cluster if no face in it
                 # clears the thresholds.
-                face_rows = (
-                    s.query(FaceEmbedding)
-                    .join(PhotoPerson, PhotoPerson.face_embedding_id == FaceEmbedding.id)
-                    .filter(PhotoPerson.person_id == p.id)
-                    .all()
-                )
+                face_rows = faces_by_person.get(p.id)
                 if not face_rows:
                     continue
                 best_face = max(

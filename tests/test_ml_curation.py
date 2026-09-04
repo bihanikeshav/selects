@@ -69,3 +69,70 @@ def test_curate_percentile_75_keeps_top_quartile(tmp_path: Path) -> None:
     expected = sorted(v for v in iqas if v >= floor)
     assert kept == expected
     assert kept == [0.7, 0.8]
+
+
+def test_compute_rank_threshold_caches_per_db_state(tmp_path: Path, monkeypatch) -> None:
+    from selects.ml import curation
+
+    Session, ids = _seed(tmp_path, [0.1, 0.5, 0.9])
+    curation.clear_threshold_cache()
+
+    calls: list[int] = []
+    real_percentile = np.percentile
+
+    def counting_percentile(*args, **kwargs):
+        calls.append(1)
+        return real_percentile(*args, **kwargs)
+
+    monkeypatch.setattr(curation.np, "percentile", counting_percentile)
+
+    with session_scope(Session) as s:
+        first = curation.compute_rank_threshold(s, pct_floor=50.0)
+        second = curation.compute_rank_threshold(s, pct_floor=50.0)
+    assert first == second
+    assert len(calls) == 1
+
+    # A different percentile is a different cache key.
+    with session_scope(Session) as s:
+        curation.compute_rank_threshold(s, pct_floor=90.0)
+    assert len(calls) == 2
+
+
+def test_compute_rank_threshold_cache_invalidated_by_a_write(tmp_path: Path) -> None:
+    from selects.ml import curation
+
+    Session, ids = _seed(tmp_path, [0.1, 0.5, 0.9])
+    curation.clear_threshold_cache()
+
+    with session_scope(Session) as s:
+        before = curation.compute_rank_threshold(s, pct_floor=50.0)
+
+    with session_scope(Session) as s:
+        p = Photo(path=str(tmp_path / "extra.jpg"), sha256=f"{99:064x}")
+        s.add(p)
+        s.flush()
+        s.add(Embedding(photo_id=p.id, siglip=_SIGLIP, aesthetic_iqa=1.0))
+
+    with session_scope(Session) as s:
+        after = curation.compute_rank_threshold(s, pct_floor=50.0)
+
+    assert after != before
+    assert after == pytest.approx(0.7)
+
+
+def test_curate_accepts_a_precomputed_library_threshold(tmp_path: Path, monkeypatch) -> None:
+    from selects.ml import curation
+
+    Session, ids = _seed(tmp_path, [0.1, 0.5, 0.9])
+    curation.clear_threshold_cache()
+
+    def boom(*args, **kwargs):  # pragma: no cover - must not run
+        raise AssertionError("compute_rank_threshold should be bypassed")
+
+    monkeypatch.setattr(curation, "compute_rank_threshold", boom)
+
+    with session_scope(Session) as s:
+        out = curate(
+            s, ids, pct_floor=0.0, library_pct_floor=50.0, library_threshold=0.6,
+        )
+    assert sorted(c.iqa for c in out) == [0.9]

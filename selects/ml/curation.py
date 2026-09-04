@@ -14,6 +14,7 @@ Configuration:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterable, Optional
 
 import numpy as np
@@ -100,6 +101,45 @@ def compute_library_threshold(
     return float(np.percentile(arr, pct_floor))
 
 
+# Library-wide thresholds are scanned over every scored photo, and a single
+# /api/stories request used to recompute one per story. Cache them per
+# (database, database state, parameters); any write to the library changes the
+# stamp and drops the entry.
+_THRESHOLD_CACHE: dict[tuple, Optional[float]] = {}
+
+
+def clear_threshold_cache() -> None:
+    """Drop every memoized library threshold (tests, and library switches)."""
+    _THRESHOLD_CACHE.clear()
+
+
+def _db_stamp(s: OrmSession) -> Optional[tuple]:
+    """Return a cache key component that changes whenever the library does.
+
+    ``None`` for a session with no file behind it (in-memory SQLite), which
+    disables caching rather than risking a stale answer. SQLite runs in WAL
+    mode, so a committed write lands in the ``-wal`` sidecar and may leave the
+    main file's mtime untouched until a checkpoint — the sidecar's mtime and
+    size are part of the stamp for that reason.
+    """
+    try:
+        bind = s.get_bind()
+        db_file = getattr(getattr(bind, "url", None), "database", None)
+        if not db_file or db_file == ":memory:":
+            return None
+        db_path = Path(db_file)
+        db_stat = db_path.stat()
+        wal = db_path.with_name(db_path.name + "-wal")
+        try:
+            wal_stat = wal.stat()
+            wal_part = (wal_stat.st_mtime_ns, wal_stat.st_size)
+        except OSError:
+            wal_part = (0, 0)
+        return (str(db_path), db_stat.st_mtime_ns, db_stat.st_size, *wal_part)
+    except Exception:
+        return None
+
+
 def compute_rank_threshold(
     s: OrmSession,
     *,
@@ -107,7 +147,32 @@ def compute_rank_threshold(
     nima_w: float = NIMA_WEIGHT_DEFAULT,
     pct_floor: float = AESTHETIC_PCT_FLOOR_DEFAULT,
 ) -> Optional[float]:
-    """Library-wide percentile of :func:`rank_score` (AP25/10, else IQA)."""
+    """Library-wide percentile of :func:`rank_score` (AP25/10, else IQA).
+
+    Memoized per (database state, ap_w, nima_w, pct_floor).
+    """
+    stamp = _db_stamp(s)
+    key = (stamp, ap_w, nima_w, pct_floor) if stamp is not None else None
+    if key is not None and key in _THRESHOLD_CACHE:
+        return _THRESHOLD_CACHE[key]
+
+    value = _compute_rank_threshold_uncached(s, ap_w=ap_w, nima_w=nima_w, pct_floor=pct_floor)
+    if key is not None:
+        # Only the current database state is worth keeping; an older stamp can
+        # never be asked for again.
+        for stale in [k for k in _THRESHOLD_CACHE if k[0] != stamp]:
+            del _THRESHOLD_CACHE[stale]
+        _THRESHOLD_CACHE[key] = value
+    return value
+
+
+def _compute_rank_threshold_uncached(
+    s: OrmSession,
+    *,
+    ap_w: float,
+    nima_w: float,
+    pct_floor: float,
+) -> Optional[float]:
     rows = (
         s.query(
             Embedding.aesthetic_iqa,
@@ -135,6 +200,7 @@ def curate(
     nima_w: float = NIMA_WEIGHT_DEFAULT,
     pct_floor: float = AESTHETIC_PCT_FLOOR_DEFAULT,
     library_pct_floor: Optional[float] = None,
+    library_threshold: Optional[float] = None,
     sort: str = "score",
     min_keep: int = 1,
 ) -> list[CuratedPhoto]:
@@ -143,6 +209,10 @@ def curate(
     Ranking score is AP-V2.5 (scaled 0–1) when present, else CLIP-IQA.
     Missing scores are a non-gate: an unscored scope is returned (burst-dedup
     still applies).
+
+    *library_threshold* is the already-resolved value of the library gate that
+    *library_pct_floor* asks for; pass it when curating many scopes in one
+    request so the library-wide scan happens once.
     """
     ids = list(photo_ids)
     if not ids:
@@ -180,9 +250,11 @@ def curate(
 
     library_floor_val: float = -float("inf")
     if library_pct_floor is not None:
-        library_floor_val_opt = compute_rank_threshold(
-            s, ap_w=ap_w, nima_w=nima_w, pct_floor=library_pct_floor
-        )
+        library_floor_val_opt = library_threshold
+        if library_floor_val_opt is None:
+            library_floor_val_opt = compute_rank_threshold(
+                s, ap_w=ap_w, nima_w=nima_w, pct_floor=library_pct_floor
+            )
         if library_floor_val_opt is not None:
             library_floor_val = library_floor_val_opt
 

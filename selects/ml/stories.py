@@ -42,6 +42,32 @@ SCENE_TIME_GAP_S = 600  # 10 minutes
 SCENE_SIM_THRESHOLD = 0.75
 
 
+def strip_place_suffix(name: str) -> str:
+    """Drop a trailing ``(N)`` disambiguation suffix from a visit name.
+
+    The geocoder appends ``(2)``, ``(3)`` … to same-name visits so the place
+    facet can tell them apart; ``Visit.name`` keeps the suffix in the DB (URLs
+    like ``/best/place/<name>`` resolve through it) but no reader wants to see
+    "Exploring Leh (2)". Elevation suffixes such as ``(5,359m)`` are left
+    alone — only a bare number matches.
+    """
+    import re as _re
+
+    return _re.sub(r"\s*\(\d+\)$", "", name)
+
+
+def strip_place_suffixes_in_title(title: str) -> str:
+    """Same cleanup applied to a story title built before this rule existed.
+
+    Titles embed visit names between separators ("… · Leh (2) to Nubra · 40
+    photos"), so a suffix is only removed where a name ends: at the end of the
+    string, or before one of the separators the title builder uses.
+    """
+    import re as _re
+
+    return _re.sub(r"\s\(\d+\)(?=$|\s·|,|\sto\s|\svia\s)", "", title)
+
+
 def _disambiguate_visits_globally(Session, min_separation_km: float = 2.0) -> None:
     """Append numeric suffixes to same-name Visit rows separated by more
     than ``min_separation_km`` between centroids.
@@ -607,7 +633,7 @@ def _day_title_with_visits(day: str, n_photos: int, n_scenes: int, visits) -> st
     if not visits:
         return f"{day} · {n_photos} photos"
 
-    names = [v.name for v in visits]
+    names = [strip_place_suffix(v.name) for v in visits]
     # Dedupe preserving order
     seen = set()
     unique = [n for n in names if not (n in seen or seen.add(n))]

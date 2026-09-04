@@ -32,8 +32,6 @@ from selects.export import (
     write_xmp_ratings,
 )
 
-router = APIRouter()
-
 # decision -> XMP verdict key used by selects.export.VERDICT_RATING
 _DECISION_VERDICT: dict[str, str] = {
     "keep": "liked",
@@ -58,6 +56,10 @@ class XmpWriteRequest(BaseModel):
 
 
 def register_export_routes(app: FastAPI, cfg: FolderConfig) -> None:
+    # Per-registration router: a module-level one would accumulate a duplicate
+    # copy of every route each time an app is built in the same process.
+    router = APIRouter()
+
     def Session():
         return init_db(cfg.db_path)()
 
