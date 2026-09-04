@@ -50,12 +50,20 @@ test("pressing x rejects the photo and the summary counts it", async ({ page, co
   await expect(page.locator(".page-sub")).toContainText(`1 of ${PHOTO_COUNT}`);
 
   // Wait on the verdict POST itself, so a backend failure reports as such
-  // rather than as a stale counter 15 seconds later.
+  // rather than as a stale counter 15 seconds later. The "rejected" count
+  // only updates once BurstCull's debounced refreshSummary() lands its own
+  // GET — without waiting on that response too, the toContainText below is
+  // racing a network round trip against its own polling budget, which is
+  // flaky on a cold server.
   const posted = page.waitForResponse(
     (r) => r.request().method() === "POST" && /\/api\/swipes\/[0-9a-f]{64}$/.test(r.url()),
   );
+  const summaryRefreshed = page.waitForResponse(
+    (r) => r.request().method() === "GET" && r.url().includes("/api/swipes/summary"),
+  );
   await page.locator("body").press("x");
   expect((await posted).status()).toBe(200);
+  expect((await summaryRefreshed).status()).toBe(200);
 
   await expect(page.locator(".page-sub")).toContainText(`2 of ${PHOTO_COUNT}`);
   await expect(page.locator(".page-sub")).toContainText("1 rejected");
