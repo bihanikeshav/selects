@@ -1,12 +1,11 @@
 """Tests for selects.config."""
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
 
-from selects.config import FolderConfig, get_folder_config
+from selects.config import get_folder_config
 
 
 class TestFolderConfigDefaults:

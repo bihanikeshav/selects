@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.requests import Request
 
+from selects import __version__
 from selects.config import FolderConfig
 
 from .dedup_routes import register_dedup_routes
@@ -144,7 +145,7 @@ def build_app(
             for task in tasks:
                 task.cancel()
 
-    app = FastAPI(title="selects", version="0.1.13", lifespan=lifespan)
+    app = FastAPI(title="selects", version=__version__, lifespan=lifespan)
 
     app.add_middleware(
         CORSMiddleware,

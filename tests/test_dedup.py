@@ -1,12 +1,18 @@
 """Tests for selects.dedup: cross-library duplicate grouping."""
 from __future__ import annotations
 
+import time
+
 import numpy as np
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
 
 from selects.config import get_folder_config
 from selects.db import init_db, session_scope
 from selects.db.models import Embedding, Photo
 from selects.dedup import scan_all_libraries
+from selects.server.dedup_routes import register_dedup_routes
+from selects.server.library_manager import LibraryManager
 
 
 def _make_library(tmp_path, name, photos):
@@ -161,14 +167,6 @@ def test_thumb_url_only_for_active_library(tmp_path):
 
 
 # ===== route-layer test (not wired into app.py; built ad hoc here) =========
-
-import time
-
-from fastapi import FastAPI
-from httpx import ASGITransport, AsyncClient
-
-from selects.server.dedup_routes import register_dedup_routes
-from selects.server.library_manager import LibraryManager
 
 
 async def test_dedup_report_route_polls_to_completion(tmp_path):

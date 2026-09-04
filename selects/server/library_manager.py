@@ -204,7 +204,7 @@ class LibraryManager:
 
     def list_libraries(self) -> tuple[list[dict], Optional[str]]:
         with self._lock:
-            return [self._api_dict(l) for l in self._libraries], self._active_id
+            return [self._api_dict(lib) for lib in self._libraries], self._active_id
 
     def add_library(self, name: str, path: str) -> dict:
         with self._lock:
@@ -241,7 +241,7 @@ class LibraryManager:
             if lib is None:
                 raise KeyError(lib_id)
             was_active = lib_id == self._active_id
-            self._libraries = [l for l in self._libraries if l["id"] != lib_id]
+            self._libraries = [lib for lib in self._libraries if lib["id"] != lib_id]
             if was_active:
                 # Deleting the active library is allowed: fall back to another one
                 # if any remain, otherwise clear active (back to onboarding).

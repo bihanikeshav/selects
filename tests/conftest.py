@@ -1,7 +1,6 @@
 """Shared pytest fixtures for selects tests."""
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 
 import pytest

@@ -40,10 +40,9 @@ jobs:
           sudo apt-get install -y patchelf libgirepository1.0-dev gir1.2-gtk-3.0 \
             gir1.2-webkit2-4.1 libcairo2-dev
 
-      - name: Install package (CPU torch) + ML stack + Nuitka
+      - name: Install package (ML stack) + Nuitka
         run: |
-          pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install ".[ml]" "nuitka>=2.4" ordered-set zstandard
+          pip install ".[ml,desktop]" "nuitka>=2.4" ordered-set zstandard
           # pywebview GTK backend deps on Linux
           if [ "$RUNNER_OS" = "Linux" ]; then pip install pygobject pycairo; fi
         shell: bash

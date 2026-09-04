@@ -4,6 +4,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
+from selects.util import utcnow
+
 from sqlalchemy import (
     Boolean,
     DateTime,
@@ -184,7 +186,7 @@ class Story(Base):
     day: Mapped[str] = mapped_column(String(10), unique=True, index=True)  # YYYY-MM-DD
     title: Mapped[str] = mapped_column(Text, nullable=False)
     photo_count: Mapped[int] = mapped_column(Integer, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     items: Mapped[list["StoryItem"]] = relationship(
         "StoryItem", back_populates="story", cascade="all, delete-orphan", order_by="StoryItem.rank"
@@ -327,7 +329,7 @@ class Person(Base):
     )
     photo_count: Mapped[int] = mapped_column(Integer, default=0)
     centroid: Mapped[Optional[bytes]] = mapped_column(LargeBinary, default=None)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     # User can hide stranger/random clusters from the People view (not deleted).
     hidden: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
@@ -351,7 +353,7 @@ class PhotoEdit(Base):
 
     photo_id: Mapped[int] = mapped_column(Integer, ForeignKey("photos.id"), primary_key=True)
     params: Mapped[str] = mapped_column(Text, nullable=False)  # JSON of {key: value}
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 class Swipe(Base):
@@ -361,7 +363,7 @@ class Swipe(Base):
 
     photo_id: Mapped[int] = mapped_column(Integer, ForeignKey("photos.id"), primary_key=True)
     decision: Mapped[str] = mapped_column(Text)  # "keep" | "reject" | "silver" | "skip"
-    swiped_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    swiped_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 class AestheticScore(Base):
@@ -394,7 +396,7 @@ class PhotoRating(Base):
         Integer, ForeignKey("photos.id", ondelete="CASCADE"), primary_key=True
     )
     rating: Mapped[int] = mapped_column(Integer, nullable=False)
-    rated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    rated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 class PhotoCategory(Base):

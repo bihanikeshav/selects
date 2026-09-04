@@ -17,7 +17,7 @@ from PIL import Image
 
 from selects.config import FolderConfig
 from selects.db import init_db, session_scope
-from selects.db.models import Photo, PhotoTag, PipelineState
+from selects.db.models import Photo, PhotoTag
 from selects.ml.onnx_rt import model_session, repo_file
 
 log = logging.getLogger(__name__)

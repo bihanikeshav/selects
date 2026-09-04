@@ -31,15 +31,27 @@ jobs:
         with:
           path: ~/.insightface
           key: insightface-buffalo_l
-      - name: Install package + test deps (CPU torch + full ML stack)
+      - name: Install package + test deps (full ML stack)
         run: |
           # The suite exercises faces (insightface), model downloads (requests)
           # and clustering — all in the [ml] extra. Install it so tests don't
-          # ModuleNotFoundError. CPU torch first so [ml]'s torch>=2.2 reuses it.
-          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          # ModuleNotFoundError.
           pip install -e ".[ml,dev]"
       - name: Run tests
         run: pytest -q
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install ruff
+        run: pip install ruff
+      - name: Run ruff
+        run: ruff check selects tests
 
   frontend:
     runs-on: ubuntu-latest

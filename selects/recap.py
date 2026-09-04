@@ -399,8 +399,8 @@ def _render_page(
 ) -> str:
     km_stat = f'{stats["km"]:.0f} km' if stats.get("km") is not None else "—"
     stat_blocks = "".join(
-        f'<div class="recap-stat"><span class="recap-stat-num">{v}</span><span class="recap-stat-label">{l}</span></div>'
-        for v, l in [
+        f'<div class="recap-stat"><span class="recap-stat-num">{v}</span><span class="recap-stat-label">{lbl}</span></div>'
+        for v, lbl in [
             (stats["days"], "days"),
             (km_stat, "traveled"),
             (stats["taken"], "photos taken"),

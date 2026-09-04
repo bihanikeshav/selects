@@ -14,14 +14,11 @@ from selects.db.models import (
     Photo,
     PipelineState,
     Story,
-    StoryItem,
 )
 from selects.ml.stories import (
     _day_title,
     _pick_representatives,
-    _segment_scenes,
     run_story_stage,
-    MIN_DAY_PHOTOS,
     MAX_STORY_PHOTOS,
 )
 
