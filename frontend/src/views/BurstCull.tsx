@@ -77,11 +77,12 @@ export default function BurstCull() {
 
   // Verdict tally, refreshed every 15s while the tab is visible.
   const [summaryTick, setSummaryTick] = useState(0);
+  // Must mirror the list query below, or the tally won't add up to the total.
   const refreshSummary = useCallback(() => {
-    swipeSummary("moments")
+    swipeSummary(quality ? "none" : "moments", quality)
       .then(setSummary)
       .catch(() => {});
-  }, []);
+  }, [quality]);
 
   useEffect(() => {
     let cancelled = false;

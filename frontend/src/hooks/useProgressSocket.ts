@@ -23,9 +23,17 @@ function socketUrl(): string {
 
 /**
  * The single `/ws/progress` client. Opens one socket, hands every frame to
- * `onMessage`, and reconnects with 1s/2s/4s/max-10s backoff. The socket is
- * closed while the tab is hidden and reopened when it becomes visible again,
- * so a backgrounded window costs nothing.
+ * `onMessage`, and reconnects with 1s/2s/4s/max-10s backoff.
+ *
+ * The socket is deliberately kept OPEN while the tab is hidden: the server's
+ * progress bus has no replay, so a run that finishes in a background tab would
+ * otherwise never be observed (the indexing pill would stay stuck at 87% and
+ * onboarding would never reach "done"). What the hidden state does suppress is
+ * *reconnect* attempts — backoff only runs while the page is visible, and a
+ * pending reconnect is fired as soon as the tab comes back.
+ *
+ * Because a reconnect can miss frames, callers that render run state should use
+ * `onOpen` to reconcile against `GET /api/libraries/status`.
  *
  * `enabled` (default true) lets a caller keep the socket closed until it has
  * something to listen for — flipping it to false closes the socket for good.
@@ -47,9 +55,12 @@ export function useProgressSocket(
     let ws: WebSocket | null = null;
     let timer: number | undefined;
     let attempt = 0;
+    // Set when a close happened while the tab was hidden, so the reconnect is
+    // deferred to the next "visible" instead of being dropped.
+    let reconnectPending = false;
 
     function open() {
-      if (disposed || ws || document.visibilityState === "hidden") return;
+      if (disposed || ws) return;
       timer = undefined;
       const sock = new WebSocket(socketUrl());
       ws = sock;
@@ -74,7 +85,13 @@ export function useProgressSocket(
       sock.onclose = () => {
         ws = null;
         optionsRef.current.onClose?.();
-        if (disposed || document.visibilityState === "hidden") return;
+        if (disposed) return;
+        // Backoff only runs while the page is visible; otherwise remember that
+        // a reconnect is owed and do it the moment the tab is shown again.
+        if (document.visibilityState === "hidden") {
+          reconnectPending = true;
+          return;
+        }
         const delay = BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length - 1)];
         attempt += 1;
         timer = window.setTimeout(open, delay);
@@ -83,12 +100,14 @@ export function useProgressSocket(
 
     function onVisibility() {
       if (document.visibilityState === "hidden") {
+        // Keep the live socket open — only pause pending reconnect timers.
         if (timer !== undefined) {
           window.clearTimeout(timer);
           timer = undefined;
+          reconnectPending = true;
         }
-        ws?.close();
-      } else if (!ws && timer === undefined) {
+      } else if (!ws && timer === undefined && reconnectPending) {
+        reconnectPending = false;
         attempt = 0;
         open();
       }

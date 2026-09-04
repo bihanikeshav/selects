@@ -81,6 +81,9 @@ export default function Onboarding() {
   const phaseRef = useRef<Phase>(phase);
   phaseRef.current = phase;
   const lastKnownStageIdxRef = useRef(0);
+  // True once at least one indexing frame has arrived, so an "is it still
+  // running?" reconcile on socket open can't fire before the run has begun.
+  const sawIndexProgressRef = useRef(false);
 
   async function stopIndexing() {
     stoppingRef.current = true;
@@ -126,6 +129,7 @@ export default function Onboarding() {
         return;
       }
       if (msg.type === "watch" || msg.stage === "watch" || !msg.stage) return;
+      sawIndexProgressRef.current = true;
       setProgress(msg);
       // Record when each stage started (for live ETA) and learn the photo
       // count from the per-photo stages (their total == number of photos).
@@ -156,7 +160,23 @@ export default function Onboarding() {
     },
     {
       enabled: socketOn,
-      onOpen: () => setErr(null),
+      onOpen: () => {
+        setErr(null);
+        // The progress bus has no replay: a reconnect can miss the "done"
+        // frame entirely. If we had already seen indexing frames and the
+        // server says nothing is indexing any more, the run is over.
+        if (doneRef.current || stoppingRef.current) return;
+        if (phaseRef.current !== "indexing" || !sawIndexProgressRef.current) return;
+        libraryStatus()
+          .then((st) => {
+            if (st.indexing || doneRef.current || stoppingRef.current) return;
+            if (phaseRef.current !== "indexing") return;
+            doneRef.current = true;
+            setPhase("done");
+            setSocketOn(false);
+          })
+          .catch(() => {});
+      },
       onClose: () => {
         if (doneRef.current || stoppingRef.current) return;
         const p = phaseRef.current;

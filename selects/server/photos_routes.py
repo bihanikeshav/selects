@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import Body, FastAPI, HTTPException, Query
 from sqlalchemy import select
@@ -36,9 +36,34 @@ def collapse_to_moment_primaries(stmt):
     )
 
 
-def collapsed_photo_ids(s) -> set[int]:
-    """Return the photo ids that survive moment collapsing."""
-    return set(s.execute(collapse_to_moment_primaries(select(Photo.id))).scalars().all())
+def apply_quality_filter(stmt, quality: Optional[str], s, cfg):
+    """Apply the quick-sort quality-bucket predicate to a Photo-rooted statement.
+
+    The statement must already be outer-joined to ``ClassicalScore`` and
+    ``Embedding``. ``/api/photos`` and ``/api/swipes/summary`` both call this so
+    a filtered list and its tally can never disagree. Same thresholds the old
+    Doctor used, applied straight in SQL — no preview decode.
+    """
+    if quality == "underexposed":
+        return stmt.where(ClassicalScore.luma_mean < 0.32)
+    if quality == "overexposed":
+        return stmt.where(
+            (ClassicalScore.luma_mean > 0.78) | (ClassicalScore.clipped_high > 0.07)
+        )
+    if quality == "out_of_focus":
+        return stmt.where(ClassicalScore.blur < 150.0)
+    if quality == "blurry_keepers":
+        from selects.ml.curation import compute_library_threshold
+        iqa_floor = compute_library_threshold(s, pct_floor=cfg.aesthetic_library_pct)
+        keepers = [
+            ClassicalScore.blur < 400.0,
+            ClassicalScore.blur >= 150.0,
+            Embedding.aesthetic_iqa.isnot(None),
+        ]
+        if iqa_floor is not None:
+            keepers.append(Embedding.aesthetic_iqa >= iqa_floor)
+        return stmt.where(*keepers)
+    return stmt
 
 
 def register_photos_routes(app: FastAPI, cfg: FolderConfig) -> None:
@@ -56,7 +81,10 @@ def register_photos_routes(app: FastAPI, cfg: FolderConfig) -> None:
         limit: int = Query(200, le=2000),
         rejected: Optional[bool] = None,
         tag: Optional[str] = None,
-        collapse: str = Query("moments", description="'moments' collapses to primaries only; 'none' returns all"),
+        collapse: Literal["moments", "none"] = Query(
+            "moments",
+            description="'moments' collapses to primaries only; 'none' returns all",
+        ),
         sort: str = Query(
             "taken_at",
             description="'taken_at' (default), 'aesthetic' (CLIP-IQA descending, nulls last), 'iqa', 'random'",
@@ -95,30 +123,8 @@ def register_photos_routes(app: FastAPI, cfg: FolderConfig) -> None:
                 )
 
             # Quality-bucket filter for quick sorting (the 4 buckets the old
-            # Doctor surfaced). Same thresholds, applied straight in SQL on the
-            # stored ClassicalScore/AestheticScore columns — no preview decode.
-            if quality == "underexposed":
-                base = base.where(ClassicalScore.luma_mean < 0.32)
-            elif quality == "overexposed":
-                base = base.where(
-                    (ClassicalScore.luma_mean > 0.78)
-                    | (ClassicalScore.clipped_high > 0.07)
-                )
-            elif quality == "out_of_focus":
-                base = base.where(ClassicalScore.blur < 150.0)
-            elif quality == "blurry_keepers":
-                from selects.ml.curation import compute_library_threshold
-                iqa_floor = compute_library_threshold(
-                    s, pct_floor=cfg.aesthetic_library_pct,
-                )
-                keepers = [
-                    ClassicalScore.blur < 400.0,
-                    ClassicalScore.blur >= 150.0,
-                    Embedding.aesthetic_iqa.isnot(None),
-                ]
-                if iqa_floor is not None:
-                    keepers.append(Embedding.aesthetic_iqa >= iqa_floor)
-                base = base.where(*keepers)
+            # Doctor surfaced), shared with /api/swipes/summary.
+            base = apply_quality_filter(base, quality, s, cfg)
 
             # Aesthetic-percentile floor needs the library distribution
             if min_aesthetic_pct > 0:
@@ -387,12 +393,23 @@ def register_photos_routes(app: FastAPI, cfg: FolderConfig) -> None:
 
     @app.get("/api/swipes/summary")
     def swipes_summary(
-        collapse: str = Query(
+        collapse: Literal["moments", "none"] = Query(
             "moments",
             description="'moments' counts one photo per burst (as /api/photos does); 'none' counts all",
         ),
+        quality: Optional[str] = Query(
+            None,
+            description=(
+                "Same quick-sort quality bucket /api/photos accepts: "
+                "underexposed | overexposed | out_of_focus | blurry_keepers"
+            ),
+        ),
     ):
         """Verdict counts over the same photo set ``/api/photos`` returns.
+
+        ``collapse`` and ``quality`` mean exactly what they mean on
+        ``/api/photos`` (they run through the same predicates), so the tally
+        always adds up to the list total the Review page is paging through.
 
         Exactly three verdicts are reported, and they always add up to
         ``total_photos``: a "skip" is undecided, a legacy "silver" is kept.
@@ -400,10 +417,15 @@ def register_photos_routes(app: FastAPI, cfg: FolderConfig) -> None:
         from selects.db.models import Swipe
 
         with session_scope(Session) as s:
+            base = (
+                select(Photo.id)
+                .join(ClassicalScore, Photo.id == ClassicalScore.photo_id, isouter=True)
+                .join(Embedding, Photo.id == Embedding.photo_id, isouter=True)
+            )
+            base = apply_quality_filter(base, quality, s, cfg)
             if collapse == "moments":
-                counted_ids = collapsed_photo_ids(s)
-            else:
-                counted_ids = set(s.execute(select(Photo.id)).scalars().all())
+                base = collapse_to_moment_primaries(base)
+            counted_ids = set(s.execute(base).scalars().all())
 
             kept = rejected = 0
             for photo_id, decision in s.execute(
