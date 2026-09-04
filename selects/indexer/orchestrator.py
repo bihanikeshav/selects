@@ -14,6 +14,7 @@ from selects.decode.video import decode_first_frame, probe
 from selects.indexer.exif import read_exif
 from selects.indexer.preview import write_previews
 from selects.indexer.walker import FileKind, classify_paths, sha256_of, walk_supported
+from selects.util import chunked
 
 log = logging.getLogger(__name__)
 ProgressCb = Callable[[int, int, str], None] | None
@@ -137,41 +138,48 @@ def prune_missing(cfg: FolderConfig, Session) -> int:
         # the delete, because the ON DELETE CASCADE takes those rows with it.
         photo_ids = [id_ for model, id_, *_ in gone if model is Photo]
         touched_persons: set[int] = set()
-        if photo_ids:
-            touched_persons = set(
+        for batch in chunked(photo_ids):
+            touched_persons |= set(
                 s.scalars(
-                    select(PhotoPerson.person_id).where(PhotoPerson.photo_id.in_(photo_ids))
+                    select(PhotoPerson.person_id).where(PhotoPerson.photo_id.in_(batch))
                 )
             )
 
-        # One DELETE per model instead of one round trip per row; the DB-level
+        # One DELETE per batch instead of one round trip per row; the DB-level
         # ON DELETE CASCADE clears scores, tags, swipes, moment members, etc.
         for model in (Photo, Video):
             ids = [id_ for m, id_, *_ in gone if m is model]
-            if ids:
-                s.execute(delete(model).where(model.id.in_(ids)))
+            for batch in chunked(ids):
+                s.execute(delete(model).where(model.id.in_(batch)))
         s.flush()
 
         # Person.photo_count is denormalised, so pruning has to maintain it —
         # a stale count keeps ghost faces on the People page (or hides real ones
-        # behind the min_photo_count filter).
-        for person_id in touched_persons:
-            person = s.get(Person, person_id)
-            if person is None:
-                continue
-            remaining = (
-                s.scalar(
-                    select(func.count(func.distinct(PhotoPerson.photo_id))).where(
-                        PhotoPerson.person_id == person_id
+        # behind the min_photo_count filter). One GROUP BY over the surviving
+        # associations answers it for every touched person at once; a person
+        # missing from the result has no photos left and goes.
+        if touched_persons:
+            person_ids = sorted(touched_persons)
+            remaining: dict[int, int] = {}
+            for batch in chunked(person_ids):
+                for person_id, n in s.execute(
+                    select(
+                        PhotoPerson.person_id,
+                        func.count(func.distinct(PhotoPerson.photo_id)),
                     )
-                )
-                or 0
-            )
-            if remaining == 0:
-                s.delete(person)
-            else:
-                person.photo_count = remaining
-        s.flush()
+                    .where(PhotoPerson.person_id.in_(batch))
+                    .group_by(PhotoPerson.person_id)
+                ):
+                    remaining[person_id] = n
+
+            emptied = [pid for pid in person_ids if pid not in remaining]
+            for batch in chunked(emptied):
+                s.execute(delete(Person).where(Person.id.in_(batch)))
+            for person_id, n in remaining.items():
+                person = s.get(Person, person_id)
+                if person is not None:
+                    person.photo_count = n
+            s.flush()
 
         surviving = set(s.scalars(select(Photo.sha256))) | set(s.scalars(select(Video.sha256)))
         for _, _, sha, thumb, preview in gone:
