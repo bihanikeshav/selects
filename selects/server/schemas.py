@@ -31,6 +31,18 @@ def require_sha256(sha256: str) -> None:
         raise HTTPException(400, "invalid sha256")
 
 
+class StatusRequest(BaseModel):
+    """Body for the POST status-lookup endpoints (``likes/status``, ``edits/status``).
+
+    A GET with the same shas in the query string breaks once the URL grows
+    past a browser/proxy length limit, so these accept the sha list as JSON
+    instead. ``shas`` must be a JSON array of strings; anything else (a
+    non-list body, or a non-string entry) is a 422 from pydantic.
+    """
+
+    shas: list[str] = []
+
+
 class PhotoOut(BaseModel):
     id: int
     sha256: str

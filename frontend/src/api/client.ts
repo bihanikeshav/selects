@@ -101,7 +101,11 @@ export async function swipeSummary(
 
 export async function getLikedStatus(sha256s: string[]): Promise<Record<string, boolean>> {
   if (sha256s.length === 0) return {};
-  const res = await fetch(`${BASE}/likes/status?shas=${sha256s.join(",")}`);
+  const res = await fetch(`${BASE}/likes/status`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ shas: sha256s }),
+  });
   if (!res.ok) throw new Error(`getLikedStatus ${res.status}`);
   return res.json();
 }
