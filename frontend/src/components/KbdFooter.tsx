@@ -8,25 +8,20 @@ type Variant = "cull" | "browse";
 
 const CULL_GROUPS: Chip[][] = [
   [
-    { keys: ["C"], label: "keep", tone: "positive" },
+    { keys: ["K"], label: "keep", tone: "positive" },
     { keys: ["X"], label: "reject", tone: "danger" },
-    { keys: ["L"], label: "silver" },
+    { keys: ["U"], label: "undo" },
   ],
   [
-    { keys: ["F"], label: "like" },
-    { keys: ["D"], label: "discard" },
-    { keys: ["E"], label: "enhance" },
-    { keys: ["S"], label: "straighten" },
+    { keys: ["←", "→"], label: "prev / next" },
+    { keys: ["Tab"], label: "next burst" },
+    { keys: ["[", "]"], label: "burst cycle" },
   ],
   [
     { keys: ["Z"], label: "zoom" },
     { keys: ["V"], label: "compare", tone: "primary" },
-    { keys: ["U"], label: "undo" },
-  ],
-  [
-    { keys: ["↑", "↓"], label: "prev / next" },
-    { keys: ["Tab"], label: "next burst" },
-    { keys: ["[", "]"], label: "burst cycle" },
+    { keys: ["E"], label: "auto edit" },
+    { keys: ["S"], label: "straighten" },
   ],
 ];
 

@@ -621,8 +621,56 @@ button.rail-item {
   gap: 6px;
 }
 
-/* Action cluster floating on the cull preview frame (Like / Discard / Enhance / Straighten) */
+/* Header controls: the "Show" filter + the sort-order group. */
+.cull-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cull-show-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--md-on-surface-var);
+}
+
+.cull-show-filter select {
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--md-on-surface);
+  background: var(--md-surface-c);
+  border: 1px solid var(--md-outline-var);
+  border-radius: var(--r-sm);
+  padding: 4px 8px;
+}
+
+.cull-sort-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.cull-sort-group .btn {
+  font-size: 12px;
+  padding: 3px 10px;
+}
+
+/* Action cluster floating on the review frame (Keep / Reject / Auto edit / Straighten) */
+.cull-actions {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+  display: flex;
+  gap: 6px;
+}
+
 .cull-action-btn {
+  background: rgba(0, 0, 0, 0.55);
+  color: #FFFFFF;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -653,6 +701,131 @@ button.rail-item {
 }
 .cull-action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
+.cull-action-btn.is-kept {
+  background: var(--g-green);
+  color: #FFFFFF;
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--g-green) 35%, transparent),
+    0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.cull-action-btn.is-on {
+  background: var(--md-primary);
+  color: var(--md-on-primary);
+}
+
+/* Burst badge on the frame — count, kept tally and the [ ] steppers. */
+.burst-badge {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px 7px 10px;
+  border-radius: 999px;
+  background: var(--g-yellow);
+  color: #000000;
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  animation: burst-pulse 1500ms ease-out 1;
+}
+
+.burst-badge-count { font-family: var(--font-mono); }
+
+.burst-badge-kept {
+  background: var(--g-green);
+  color: #FFFFFF;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.burst-badge-step {
+  background: rgba(0, 0, 0, 0.12);
+  color: #000000;
+  border: 0;
+  border-radius: 4px;
+  padding: 2px 7px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.burst-badge-step:hover { background: rgba(0, 0, 0, 0.22); }
+
+/* "+N similar shots" affordance on a collapsed burst. */
+.cull-similar-btn {
+  position: absolute;
+  bottom: 48px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(0, 0, 0, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 8px;
+  color: #FFFFFF;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+}
+
+.cull-similar-btn:disabled { cursor: wait; }
+
+/* Centred message stage (error / empty). */
+.cull-stage--message {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cull-message {
+  text-align: center;
+  color: var(--md-on-surface-var);
+  font-family: var(--font-display);
+  line-height: 1.6;
+}
+
+.cull-message-title {
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--md-on-surface);
+  margin-bottom: 8px;
+}
+
+.cull-message-body { font-size: 13px; }
+
+.cull-message-detail {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  background: var(--md-surface-c);
+  padding: 8px 16px;
+  border-radius: var(--r-md);
+  display: inline-block;
+}
+
+/* Session progress strip above the keyboard footer. */
+.cull-progress-strip {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 5px 24px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--md-on-surface-var);
+  border-top: 1px solid var(--md-outline-var);
+  background: var(--md-surface-c-low);
+}
+
 .gold-frame {
   position: relative;
   border-radius: var(--r-xl);
@@ -660,14 +833,12 @@ button.rail-item {
   background: #0a0a0c;
   box-shadow: var(--md-elev-2);
   min-height: 0;
-  /* Square canvas — letterboxed for both landscape and portrait. We cap by
-     height so the frame never overflows the cull-stage row. */
-  aspect-ratio: 1 / 1;
+  /* The frame takes the whole column between the rail and the side panel;
+     the image inside letterboxes by height only. */
   height: 100%;
   max-height: 100%;
-  width: auto;
+  width: 100%;
   max-width: 100%;
-  justify-self: center;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -693,6 +864,18 @@ button.rail-item {
   justify-content: space-between;
   gap: 24px;
   pointer-events: none;
+}
+
+.gold-overlay-back {
+  margin-top: 4px;
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 6px;
+  color: #FFFFFF;
+  font-size: 12px;
+  padding: 2px 8px;
+  cursor: pointer;
+  pointer-events: auto;
 }
 
 .gold-overlay .filename {
@@ -785,33 +968,22 @@ button.rail-item {
   outline-offset: 2px;
 }
 
-.burst-thumb.is-silver .badge {
-  background: var(--md-surface-c-highest);
-  color: var(--md-on-surface);
-  box-shadow: 0 0 0 1.5px var(--md-outline-var) inset;
-}
-
-.burst-thumb.is-silver {
-  outline: 2px solid var(--md-outline);
-  outline-offset: 2px;
-}
-
-.burst-thumb.is-liked::after {
+.burst-thumb.is-kept::after {
   content: "";
   position: absolute;
   inset: 0;
-  border: 2px solid var(--g-red);
+  border: 2px solid var(--g-green);
   border-radius: var(--r-sm);
   pointer-events: none;
 }
 
-.burst-thumb .liked-pip {
+.burst-thumb .kept-pip {
   position: absolute;
   top: 4px;
   right: 4px;
   width: 20px; height: 20px;
   border-radius: 50%;
-  background: var(--g-red);
+  background: var(--g-green);
   color: #fff;
   display: grid;
   place-items: center;
@@ -1720,7 +1892,14 @@ button.rail-item {
   gap: 10px;
 }
 
+.curated-cell {
+  position: relative;
+}
+
 .curated-tile {
+  display: block;
+  width: 100%;
+  padding: 0;
   position: relative;
   border: 1px solid var(--md-outline-var);
   border-radius: var(--r-md);
@@ -1755,7 +1934,7 @@ button.rail-item {
   display: block;
 }
 
-.curated-tile-unlike {
+.curated-tile-remove {
   position: absolute;
   top: 6px;
   left: 6px;
@@ -1763,34 +1942,22 @@ button.rail-item {
   height: 26px;
   display: grid;
   place-items: center;
-  background: var(--g-red);
+  background: rgba(0, 0, 0, 0.6);
   color: #fff;
   border: 0;
   border-radius: 50%;
   cursor: pointer;
-  transition: transform var(--dur-short) var(--ease-standard), filter var(--dur-short) var(--ease-standard);
+  transition: transform var(--dur-short) var(--ease-standard), background-color var(--dur-short) var(--ease-standard);
 }
 
-.curated-tile-unlike:hover {
+.curated-tile-remove:hover {
   transform: scale(1.08);
-  filter: brightness(1.1);
+  background: var(--g-red);
 }
 
-.curated-tile-unlike:focus-visible {
+.curated-tile-remove:focus-visible {
   outline: 2px solid var(--md-on-surface);
   outline-offset: 2px;
-}
-
-.curated-tile-score {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  background: rgba(0, 0, 0, 0.75);
-  color: #fff;
-  font-size: 10px;
-  padding: 2px 6px;
-  border-radius: var(--r-xs);
-  font-family: var(--font-mono);
 }
 
 .curated-kbd {
@@ -3367,10 +3534,3 @@ button.rail-item {
   padding: 12px;
 }
 
-/* Quick-sort quality filter chips (Sort page header) */
-.sort-quality-chips {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: 10px;
-}
