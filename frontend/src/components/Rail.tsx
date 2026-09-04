@@ -1,6 +1,8 @@
 import { useEffect } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 
+import IndexingPill from "./IndexingPill";
+
 
 /** Retint the native desktop title bar to match the theme. No-op in a browser
  *  (window.pywebview only exists inside the pywebview desktop shell). */
@@ -26,9 +28,9 @@ function toggleTheme() {
 /**
  * Rail layout (top to bottom):
  *   - Brand
- *   - Workflow tabs: Cull, Curated (mode entry points)
+ *   - Workflow tabs: Review, Curated (mode entry points)
  *   - Cross-cutting tools: People, Search, Map, Best-of (via the curate dropdown elsewhere)
- *   - Spacer → Calibrate, Theme toggle pinned to the bottom
+ *   - Spacer → indexing pill, Library, Theme toggle pinned to the bottom
  */
 export default function Rail() {
   useEffect(() => {
@@ -46,8 +48,8 @@ export default function Rail() {
 
   const { pathname } = useLocation();
 
-  // Sort/Curated highlight only on THEIR routes — not "everything that isn't
-  // curated" (which lit Sort up on People/Search/Map/etc.).
+  // Review/Curated highlight only on THEIR routes — not "everything that isn't
+  // curated" (which lit Review up on People/Search/Map/etc.).
   const cullActive = pathname === "/cull" || pathname.startsWith("/cull/");
   const curatedActive = pathname === "/curated" || pathname.startsWith("/curated/");
 
@@ -57,7 +59,7 @@ export default function Rail() {
       <NavLink
         to="/cull"
         className={"rail-item" + (cullActive ? " is-active" : "")}
-        title="Sort — decide what's worth keeping"
+        title="Review — decide what's worth keeping"
       >
         <span className="icon" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -67,13 +69,13 @@ export default function Rail() {
             <rect x="14" y="14" width="7" height="7" rx="1.5" />
           </svg>
         </span>
-        Sort
+        Review
       </NavLink>
 
       <NavLink
         to="/curated"
         className={"rail-item" + (curatedActive ? " is-active" : "")}
-        title="Curated — photos you've Liked, ready to edit & post"
+        title="Curated — the photos you kept, ready to edit & post"
       >
         <span className="icon" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -160,6 +162,8 @@ export default function Rail() {
 
       <div className="rail-spacer"></div>
 
+      <IndexingPill />
+
       <NavLink
         to="/libraries"
         className={({ isActive }) => "rail-item" + (isActive ? " is-active" : "")}
@@ -173,20 +177,6 @@ export default function Rail() {
           </svg>
         </span>
         Library
-      </NavLink>
-
-      <NavLink
-        to="/calibrate"
-        className={({ isActive }) => "rail-item" + (isActive ? " is-active" : "")}
-        title="Calibrate the personal aesthetic model"
-      >
-        <span className="icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
-            <circle cx="12" cy="12" r="4" />
-          </svg>
-        </span>
-        Calibrate
       </NavLink>
 
       <button
