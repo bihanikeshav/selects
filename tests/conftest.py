@@ -49,21 +49,6 @@ def sqlite_999_variables(engine, limit: int = 999):
         engine.dispose()
 
 
-@pytest.fixture()
-def pin_sqlite_variables():
-    """Fixture form of :func:`sqlite_999_variables` — call it with an engine or
-    a db path and use the result as a context manager."""
-    @contextmanager
-    def _pin(engine_or_path, limit: int = 999):
-        engine = engine_or_path
-        if isinstance(engine_or_path, (str, Path)):
-            engine = engine_for(engine_or_path)
-        with sqlite_999_variables(engine, limit) as eng:
-            yield eng
-
-    return _pin
-
-
 @pytest.fixture(autouse=True)
 def isolate_registry(tmp_path_factory, monkeypatch) -> None:
     """Point the multi-library registry at an isolated temp file for every test

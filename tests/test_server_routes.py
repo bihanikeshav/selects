@@ -190,6 +190,91 @@ async def test_list_photos_sort_aesthetic_uses_iqa(tmp_path):
         assert iqas[2] is None
 
 
+async def test_list_photos_sort_random_seed_is_stable_and_pages_are_disjoint(tmp_path):
+    """``sort=random&seed=N`` must be a *fixed* shuffle: the same order on every
+    call, and consecutive OFFSET pages that never repeat a photo. Unseeded
+    ``random`` re-rolls per statement, which is what makes paging lose photos."""
+    from selects.db import session_scope
+    from selects.db.models import Photo
+
+    cfg = get_folder_config(tmp_path)
+    Session = init_db(cfg.db_path)
+    with session_scope(Session) as s:
+        s.add_all([
+            Photo(path=str(tmp_path / f"{i}.jpg"), sha256=f"{i:064x}")
+            for i in range(30)
+        ])
+
+    app = build_app(cfg, run_background=False)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        first = await client.get("/api/photos?sort=random&seed=7&collapse=none&limit=30")
+        second = await client.get("/api/photos?sort=random&seed=7&collapse=none&limit=30")
+        assert first.status_code == 200
+        order_a = [i["sha256"] for i in first.json()["items"]]
+        order_b = [i["sha256"] for i in second.json()["items"]]
+        assert len(order_a) == 30
+        assert order_a == order_b
+
+        # A different seed is a different order (the modular scatter only wraps
+        # once the seed is large, which is the range the UI draws from).
+        other = await client.get(
+            "/api/photos?sort=random&seed=1103515245&collapse=none&limit=30"
+        )
+        assert [i["sha256"] for i in other.json()["items"]] != order_a
+
+        page1 = await client.get(
+            "/api/photos?sort=random&seed=7&collapse=none&limit=10&offset=0"
+        )
+        page2 = await client.get(
+            "/api/photos?sort=random&seed=7&collapse=none&limit=10&offset=10"
+        )
+        ids1 = [i["sha256"] for i in page1.json()["items"]]
+        ids2 = [i["sha256"] for i in page2.json()["items"]]
+        assert len(ids1) == len(ids2) == 10
+        assert set(ids1).isdisjoint(ids2)
+        assert ids1 + ids2 == order_a[:20]
+
+        # No seed: still valid, just not reproducible.
+        unseeded = await client.get("/api/photos?sort=random&collapse=none&limit=30")
+        assert unseeded.status_code == 200
+        assert len(unseeded.json()["items"]) == 30
+
+
+async def test_list_photos_sort_ties_are_broken_by_id(tmp_path):
+    """Equal scores must not leave the order up to SQLite: ``Photo.id`` is the
+    final tiebreaker, so a page boundary can never repeat or drop a photo."""
+    from selects.db import session_scope
+    from selects.db.models import AestheticScore, Embedding, Photo
+
+    cfg = get_folder_config(tmp_path)
+    Session = init_db(cfg.db_path)
+    with session_scope(Session) as s:
+        photos = [
+            Photo(path=str(tmp_path / f"{i}.jpg"), sha256=f"{i:064x}")
+            for i in range(6)
+        ]
+        s.add_all(photos)
+        s.flush()
+        for p in photos:
+            s.add(Embedding(photo_id=p.id, siglip=b"\x00" * 2304, aesthetic_iqa=0.5))
+            s.add(AestheticScore(photo_id=p.id, ap25_score=5.0))
+        ordered_shas = [p.sha256 for p in sorted(photos, key=lambda p: p.id)]
+
+    app = build_app(cfg, run_background=False)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        r = await client.get("/api/photos?sort=aesthetic&collapse=none&limit=6")
+        assert r.status_code == 200
+        assert [i["sha256"] for i in r.json()["items"]] == ordered_shas
+
+        p1 = await client.get("/api/photos?sort=aesthetic&collapse=none&limit=3&offset=0")
+        p2 = await client.get("/api/photos?sort=aesthetic&collapse=none&limit=3&offset=3")
+        got = [i["sha256"] for i in p1.json()["items"]]
+        got += [i["sha256"] for i in p2.json()["items"]]
+        assert got == ordered_shas
+
+
 async def test_list_curated_sort_aesthetic_uses_iqa(tmp_path):
     from datetime import datetime
 
@@ -901,6 +986,36 @@ async def test_likes_status_post_matches_get_and_handles_edge_cases(tmp_path):
 
         bad_entry_r = await client.post("/api/likes/status", json={"shas": [1, 2, 3]})
         assert bad_entry_r.status_code == 422
+
+
+async def test_status_request_rejects_malformed_and_oversized_sha_lists(tmp_path):
+    """``StatusRequest.shas`` is validated at the edge: every entry must be a
+    64-char hex digest, and the list is capped far above any real library."""
+    cfg = get_folder_config(tmp_path)
+    init_db(cfg.db_path)
+    app = build_app(cfg, run_background=False)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        for path in ("/api/likes/status", "/api/edits/status"):
+            short = await client.post(path, json={"shas": ["a" * 63]})
+            assert short.status_code == 422, path
+
+            non_hex = await client.post(path, json={"shas": ["z" * 64]})
+            assert non_hex.status_code == 422, path
+
+            traversal = await client.post(path, json={"shas": ["../" + "a" * 61]})
+            assert traversal.status_code == 422, path
+
+            # Upper case is a valid digest.
+            upper = await client.post(path, json={"shas": ["A" * 64]})
+            assert upper.status_code == 200, path
+
+        # The length cap is on the shared model; check it once (the body is
+        # ~6 MB, so building it twice buys nothing).
+        too_many = await client.post(
+            "/api/likes/status", json={"shas": [f"{i:064x}" for i in range(100_001)]}
+        )
+        assert too_many.status_code == 422
 
 
 async def test_edits_status_post_matches_get_and_handles_edge_cases(tmp_path):
