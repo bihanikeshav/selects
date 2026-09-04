@@ -214,6 +214,13 @@ export default function Curated() {
                           toggleSelected(p.sha256);
                         }
                       }}
+                      // Firefox fires a synthetic click on a button's Space
+                      // *keyup*, which would toggle the selection a second time
+                      // after the keydown above already handled it. Swallowing
+                      // the keyup suppresses that click.
+                      onKeyUp={(e) => {
+                        if (e.key === " " || e.key === "Spacebar") e.preventDefault();
+                      }}
                       title="Enter opens the photo · Space selects it · X removes it from keepers"
                       className={`curated-tile${isSel ? " is-selected" : ""}${isFocused ? " is-focused" : ""}`}
                     >

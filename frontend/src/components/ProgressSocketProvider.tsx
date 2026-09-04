@@ -106,12 +106,20 @@ export function ProgressSocketProvider({ children }: { children: ReactNode }) {
       timer = undefined;
       const sock = new WebSocket(socketUrl());
       ws = sock;
+      // Every handler below starts with the same guard: only the socket that
+      // is *currently* `ws` may mutate shared state or fan out to subscribers.
+      // Under React StrictMode the effect mounts, tears down and remounts, so
+      // socket A's close event can land after socket B is already open — without
+      // the guard that stale close would clear `openRef` and fire a spurious
+      // `onClose` on every subscriber of the live connection.
       sock.onopen = () => {
+        if (disposed || ws !== sock) return;
         attempt = 0;
         openRef.current = true;
         fanOut((s) => s.onOpen?.());
       };
       sock.onmessage = (ev) => {
+        if (disposed || ws !== sock) return;
         try {
           const raw = JSON.parse(ev.data) as Partial<ProgressMsg>;
           const msg: ProgressMsg = {
@@ -126,11 +134,20 @@ export function ProgressSocketProvider({ children }: { children: ReactNode }) {
           /* ignore malformed frames */
         }
       };
+      sock.onerror = () => {
+        // Nothing to do for the live socket: an error is always followed by
+        // `close`, which owns the reconnect bookkeeping. The guard is here so a
+        // stale socket's error can never be mistaken for the live one's.
+        if (disposed || ws !== sock) return;
+      };
       sock.onclose = (ev) => {
+        // Guard FIRST: a close from a socket that is no longer `ws` (StrictMode
+        // remount, or a race with the cleanup below) must not clear `openRef`
+        // or tell subscribers the live connection dropped.
+        if (disposed || ws !== sock) return;
         ws = null;
         openRef.current = false;
         fanOut((s) => s.onClose?.());
-        if (disposed) return;
         if (ev.code === AUTH_CLOSE_CODE) {
           rejected = true;
           setAuthRejected(true);

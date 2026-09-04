@@ -68,6 +68,18 @@ export default function BurstCull() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const pagingRef = useRef(false);
   const exhaustedRef = useRef(false);
+  // Offset the next extra page is fetched at. Tracked separately from
+  // `photos.length` because a page can be entirely duplicates (a photo that is
+  // the primary of two moments), and the walk still has to move forward.
+  const nextOffsetRef = useRef(0);
+  // Bumped when a page yields zero *new* ids, purely to re-fire the paging
+  // effect: without it nothing in its dependency list changes and the loader
+  // stalls one page short of the tail.
+  const [pageAttempt, setPageAttempt] = useState(0);
+  // A Random session walks one seeded shuffle, so `offset` paging can't repeat
+  // or skip photos the way an unseeded `ORDER BY random()` does. A fresh seed is
+  // drawn whenever the query changes, so re-selecting Random re-shuffles.
+  const randomSeedRef = useRef(Math.floor(Math.random() * 2 ** 31));
 
   // Moment state: when a photo has a moment, we may expand it
   const [expandedMoment, setExpandedMoment] = useState<Moment | null>(null);
@@ -134,19 +146,26 @@ export default function BurstCull() {
     let cancelled = false;
     pagingRef.current = false;
     exhaustedRef.current = false;
+    nextOffsetRef.current = 0;
+    setPageAttempt(0);
     setLoadState("loading");
     setLoadError(null);
     setCompareSel([]);
+    if (sortMode === "random") {
+      randomSeedRef.current = Math.floor(Math.random() * 2 ** 31);
+    }
     // When filtering to a quality bucket, don't collapse moments — we want every
     // matching photo, not just burst primaries.
     listPhotos({
       limit: 200,
       collapse: quality ? "none" : "moments",
       sort: sortMode,
+      seed: sortMode === "random" ? randomSeedRef.current : undefined,
       quality: quality ?? undefined,
     })
       .then((data) => {
         if (cancelled) return;
+        nextOffsetRef.current = data.items.length;
         setPhotos(data.items);
         setTotal(data.total);
         setIdx(0);
@@ -185,12 +204,18 @@ export default function BurstCull() {
     if (pagingRef.current || exhaustedRef.current) return;
     pagingRef.current = true;
     let cancelled = false;
-    const offset = photos.length;
+    const offset = nextOffsetRef.current;
+    if (offset >= total) {
+      exhaustedRef.current = true;
+      pagingRef.current = false;
+      return;
+    }
     listPhotos({
       limit: 200,
       offset,
       collapse: quality ? "none" : "moments",
       sort: sortMode,
+      seed: sortMode === "random" ? randomSeedRef.current : undefined,
       quality: quality ?? undefined,
     })
       .then((data) => {
@@ -200,12 +225,20 @@ export default function BurstCull() {
           exhaustedRef.current = true;
           return;
         }
-        setPhotos((prev) => {
-          // Same SHA at two paths is two reviewable rows; dedup extra pages by id only.
-          const seenId = new Set(prev.map((p) => p.id));
-          const extra = data.items.filter((p) => !seenId.has(p.id));
-          return extra.length ? [...prev, ...extra] : prev;
-        });
+        // Always walk forward by what the server actually returned, so a page
+        // of pure duplicates doesn't pin the loader to the same offset.
+        nextOffsetRef.current = offset + data.items.length;
+        // Same SHA at two paths is two reviewable rows; dedup extra pages by id only.
+        const seenId = new Set(photos.map((p) => p.id));
+        const extra = data.items.filter((p) => !seenId.has(p.id));
+        if (extra.length) {
+          setPhotos((prev) => [...prev, ...extra]);
+        } else {
+          // Zero new ids means `photos` did not move, so nothing in this
+          // effect's dependency list changed: bump a counter to re-fire it at
+          // the next offset instead of stalling short of the tail.
+          setPageAttempt((a) => a + 1);
+        }
       })
       .catch(() => {
         // Leave exhaustedRef false so the next idx tick retries.
@@ -216,7 +249,7 @@ export default function BurstCull() {
     return () => {
       cancelled = true;
     };
-  }, [idx, photos.length, total, sortMode, quality, loadState]);
+  }, [idx, photos, total, sortMode, quality, loadState, pageAttempt]);
 
   // Keep status for every member of the expanded burst — so the badge can show
   // how many of the stack are kept and the pip strip can highlight them.

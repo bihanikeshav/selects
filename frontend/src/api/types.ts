@@ -39,6 +39,23 @@ export interface Moment {
 
 export interface PhotoList { total: number; items: Photo[]; }
 
+/** Query parameters `GET /api/photos` accepts. */
+export interface ListPhotosParams {
+  offset?: number;
+  limit?: number;
+  rejected?: boolean;
+  tag?: string;
+  collapse?: "moments" | "none";
+  sort?: "taken_at" | "aesthetic" | "iqa" | "random";
+  /**
+   * Only meaningful with `sort: "random"`: fixes the shuffle so paging with
+   * `offset` walks one stable order instead of re-shuffling per page.
+   */
+  seed?: number;
+  min_aesthetic_pct?: number;
+  quality?: "underexposed" | "overexposed" | "out_of_focus" | "blurry_keepers";
+}
+
 export interface ClusterEntry {
   tag: string;
   count: number;
