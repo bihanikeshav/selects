@@ -1,9 +1,34 @@
 """Pydantic response models shared by the domain route modules."""
 from __future__ import annotations
 
-from typing import Optional
+import re
+from typing import Literal, Optional
 
+from fastapi import HTTPException
 from pydantic import BaseModel
+
+_SHA256_RE = re.compile(r"[0-9a-f]{64}", re.I)
+
+#: The four quick-sort quality buckets ``/api/photos`` and
+#: ``/api/swipes/summary`` accept. Anything else is a 422.
+QualityBucket = Optional[
+    Literal["underexposed", "overexposed", "out_of_focus", "blurry_keepers"]
+]
+
+
+def require_sha256(sha256: str) -> None:
+    """Reject anything that is not a bare 64-char hex digest.
+
+    Shared by every route that turns a sha256 into a filesystem path, so a
+    traversal attempt can never reach the state directory.
+    """
+    if (
+        not _SHA256_RE.fullmatch(sha256 or "")
+        or ".." in sha256
+        or "/" in sha256
+        or "\\" in sha256
+    ):
+        raise HTTPException(400, "invalid sha256")
 
 
 class PhotoOut(BaseModel):
@@ -24,6 +49,33 @@ class PhotoOut(BaseModel):
     aesthetic_iqa: Optional[float] = None
     moment_id: Optional[int] = None
     moment_size: Optional[int] = None
+
+
+def photo_out(photo, score=None, emb=None, **extra) -> PhotoOut:
+    """Build a :class:`PhotoOut` from a ``(Photo, ClassicalScore, Embedding)`` row.
+
+    ``score`` and ``emb`` may be ``None`` (outer joins). ``extra`` carries the
+    per-route fields — ``moment_id`` / ``moment_size`` — so photos, clusters and
+    persons all emit the same shape and can never drift apart again.
+    """
+    return PhotoOut(
+        id=photo.id,
+        sha256=photo.sha256,
+        path=photo.path,
+        format=photo.format,
+        width=photo.width,
+        height=photo.height,
+        taken_at=photo.taken_at.isoformat() if photo.taken_at else None,
+        thumb_url=f"/api/thumb/{photo.sha256}",
+        preview_url=f"/api/preview/{photo.sha256}",
+        blur=score.blur if score else None,
+        exposure=score.exposure if score else None,
+        faces_count=score.faces_count if score else None,
+        auto_reject=score.auto_reject if score else None,
+        reject_reason=score.reject_reason if score else None,
+        aesthetic_iqa=emb.aesthetic_iqa if emb else None,
+        **extra,
+    )
 
 
 class MomentMemberOut(BaseModel):

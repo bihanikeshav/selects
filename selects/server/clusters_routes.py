@@ -12,7 +12,7 @@ from selects.config import FolderConfig
 from selects.db import init_db, session_scope
 from selects.db.models import AestheticScore, ClassicalScore, Embedding, Photo, PhotoTag
 from selects.server.schemas import (
-    ClusterEntry, ClusterList, PhotoList, PhotoOut, TagEntry, TagList,
+    ClusterEntry, ClusterList, PhotoList, TagEntry, TagList, photo_out,
 )
 
 log = logging.getLogger(__name__)
@@ -155,27 +155,7 @@ def register_clusters_routes(app: FastAPI, cfg: FolderConfig) -> None:
                 .limit(limit)
             ).all()
 
-            items = []
-            for photo, score, emb in rows:
-                items.append(
-                    PhotoOut(
-                        id=photo.id,
-                        sha256=photo.sha256,
-                        path=photo.path,
-                        format=photo.format,
-                        width=photo.width,
-                        height=photo.height,
-                        taken_at=photo.taken_at.isoformat() if photo.taken_at else None,
-                        thumb_url=f"/api/thumb/{photo.sha256}",
-                        preview_url=f"/api/preview/{photo.sha256}",
-                        blur=score.blur if score else None,
-                        exposure=score.exposure if score else None,
-                        faces_count=score.faces_count if score else None,
-                        auto_reject=score.auto_reject if score else None,
-                        reject_reason=score.reject_reason if score else None,
-                        aesthetic_iqa=emb.aesthetic_iqa if emb else None,
-                    )
-                )
+            items = [photo_out(photo, score, emb) for photo, score, emb in rows]
         return PhotoList(total=len(items), items=items)
 
     @app.get("/api/tags", response_model=TagList)

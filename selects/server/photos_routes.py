@@ -12,8 +12,9 @@ from selects.db import init_db, session_scope
 from selects.db.models import (
     AestheticScore, ClassicalScore, Embedding, Moment, MomentMember, Photo, PhotoTag,
 )
-from selects.server.images_routes import _require_sha256
-from selects.server.schemas import MomentMemberOut, MomentOut, PhotoList, PhotoOut
+from selects.server.schemas import (
+    MomentMemberOut, MomentOut, PhotoList, QualityBucket, photo_out, require_sha256,
+)
 from selects.util import KEEP_DECISIONS
 
 log = logging.getLogger(__name__)
@@ -36,7 +37,7 @@ def collapse_to_moment_primaries(stmt):
     )
 
 
-def apply_quality_filter(stmt, quality: Optional[str], s, cfg):
+def apply_quality_filter(stmt, quality: QualityBucket, s, cfg):
     """Apply the quick-sort quality-bucket predicate to a Photo-rooted statement.
 
     The statement must already be outer-joined to ``ClassicalScore`` and
@@ -93,7 +94,7 @@ def register_photos_routes(app: FastAPI, cfg: FolderConfig) -> None:
             0.0, ge=0.0, le=100.0,
             description="Drop photos whose CLIP-IQA percentile is below this value",
         ),
-        quality: Optional[str] = Query(
+        quality: QualityBucket = Query(
             None,
             description=(
                 "Quick-sort quality bucket: "
@@ -145,8 +146,11 @@ def register_photos_routes(app: FastAPI, cfg: FolderConfig) -> None:
             if sort == "iqa":
                 base = base.where(Embedding.aesthetic_iqa.isnot(None))
 
+            # DISTINCT: the collapse outer-joins can emit a photo more than
+            # once (a photo that is the primary of two moments), and the total
+            # must agree with /api/swipes/summary, which counts a set of ids.
             total = s.execute(
-                select(_func.count()).select_from(base.subquery())
+                base.with_only_columns(_func.count(_func.distinct(Photo.id)))
             ).scalar_one()
 
             if sort == "aesthetic":
@@ -179,29 +183,20 @@ def register_photos_routes(app: FastAPI, cfg: FolderConfig) -> None:
                     moment_of[mm_pid] = (mm_mid, mom_size, mm_pid == mom_primary)
 
             items = []
+            seen: set[int] = set()
             for photo, score, emb, _aest in rows:
+                # Same reason the count is DISTINCT: never show one photo twice.
+                if photo.id in seen:
+                    continue
+                seen.add(photo.id)
                 moment_id: Optional[int] = None
                 moment_size: Optional[int] = None
                 if photo.id in moment_of:
                     moment_id, moment_size, _ = moment_of[photo.id]
 
                 items.append(
-                    PhotoOut(
-                        id=photo.id,
-                        sha256=photo.sha256,
-                        path=photo.path,
-                        format=photo.format,
-                        width=photo.width,
-                        height=photo.height,
-                        taken_at=photo.taken_at.isoformat() if photo.taken_at else None,
-                        thumb_url=f"/api/thumb/{photo.sha256}",
-                        preview_url=f"/api/preview/{photo.sha256}",
-                        blur=score.blur if score else None,
-                        exposure=score.exposure if score else None,
-                        faces_count=score.faces_count if score else None,
-                        auto_reject=score.auto_reject if score else None,
-                        reject_reason=score.reject_reason if score else None,
-                        aesthetic_iqa=emb.aesthetic_iqa if emb else None,
+                    photo_out(
+                        photo, score, emb,
                         moment_id=moment_id,
                         moment_size=moment_size,
                     )
@@ -302,7 +297,7 @@ def register_photos_routes(app: FastAPI, cfg: FolderConfig) -> None:
     def record_swipe(sha256: str, decision: str = Body(..., embed=True)):
         from selects.db.models import Swipe
 
-        _require_sha256(sha256)
+        require_sha256(sha256)
         if decision not in ("keep", "reject", "silver", "skip"):
             raise HTTPException(400, detail="decision must be keep, reject, silver, or skip")
 
@@ -323,7 +318,7 @@ def register_photos_routes(app: FastAPI, cfg: FolderConfig) -> None:
         """Clear a photo's verdict, putting it back to undecided."""
         from selects.db.models import Swipe
 
-        _require_sha256(sha256)
+        require_sha256(sha256)
         with session_scope(Session) as s:
             photo = s.query(Photo).filter(Photo.sha256 == sha256).first()
             if not photo:
@@ -397,7 +392,7 @@ def register_photos_routes(app: FastAPI, cfg: FolderConfig) -> None:
             "moments",
             description="'moments' counts one photo per burst (as /api/photos does); 'none' counts all",
         ),
-        quality: Optional[str] = Query(
+        quality: QualityBucket = Query(
             None,
             description=(
                 "Same quick-sort quality bucket /api/photos accepts: "

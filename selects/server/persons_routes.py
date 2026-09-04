@@ -10,7 +10,7 @@ from selects.config import FolderConfig
 from selects.db import init_db, session_scope
 from selects.db.models import ClassicalScore, Embedding, Photo
 from selects.server.http_cache import IMMUTABLE
-from selects.server.schemas import PersonList, PersonOut, PhotoList, PhotoOut
+from selects.server.schemas import PersonList, PersonOut, PhotoList, photo_out
 
 log = logging.getLogger(__name__)
 
@@ -277,18 +277,7 @@ def register_persons_routes(app: FastAPI, cfg: FolderConfig) -> None:
                 .limit(limit)
             ).all()
 
-            items = []
-            for photo, classical, _emb in rows:
-                items.append(PhotoOut(
-                    id=photo.id, sha256=photo.sha256, path=photo.path,
-                    format=photo.format, width=photo.width, height=photo.height,
-                    taken_at=photo.taken_at.isoformat() if photo.taken_at else None,
-                    thumb_url=f"/api/thumb/{photo.sha256}",
-                    preview_url=f"/api/preview/{photo.sha256}",
-                    blur=classical.blur if classical else None,
-                    exposure=classical.exposure if classical else None,
-                    faces_count=classical.faces_count if classical else None,
-                    auto_reject=classical.auto_reject if classical else None,
-                    reject_reason=classical.reject_reason if classical else None,
-                ))
+            # Note the third element: persons used to drop aesthetic_iqa on the
+            # floor, so a person's grid could not sort or badge by looks.
+            items = [photo_out(photo, classical, emb) for photo, classical, emb in rows]
         return PhotoList(total=len(items), items=items)

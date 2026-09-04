@@ -265,3 +265,77 @@ def test_no_prune_when_walk_finds_nothing(tmp_path):
         assert s.query(Photo).count() == 1
     assert not any("missing file" in m for m in messages)
     assert (cfg.thumbs_dir / f"{sha}.jpg").exists()
+
+
+def _add_person_for(cfg, photo_names, label="Ada"):
+    """Attach one Person to each named photo via a face embedding + association."""
+    import numpy as np
+
+    from selects.db.models import FaceEmbedding, Person, PhotoPerson
+
+    Session = init_db(cfg.db_path)
+    with session_scope(Session) as s:
+        person = Person(label=label, photo_count=0)
+        s.add(person)
+        s.flush()
+        n = 0
+        for name in photo_names:
+            photo = s.query(Photo).filter(Photo.path == str(cfg.folder / name)).one()
+            fe = FaceEmbedding(
+                photo_id=photo.id,
+                face_index=0,
+                embedding=np.zeros(512, dtype=np.float16).tobytes(),
+                bbox_x=0, bbox_y=0, bbox_w=40, bbox_h=40,
+                confidence=0.9,
+            )
+            s.add(fe)
+            s.flush()
+            s.add(PhotoPerson(
+                photo_id=photo.id, person_id=person.id,
+                face_embedding_id=fe.id, confidence=0.9,
+            ))
+            n += 1
+        person.photo_count = n
+        return person.id
+
+
+def test_prune_decrements_photo_count_of_a_person_that_loses_a_photo(tmp_path):
+    from selects.db.models import Person, PhotoPerson
+
+    for name in ("a.jpg", "b.jpg", "keep.heic"):
+        src = FIXTURES_DIR / ("small.heic" if name.endswith(".heic") else "small.jpg")
+        shutil.copy(src, tmp_path / name)
+    # a.jpg and b.jpg must differ, or they share a sha and the "identity is path"
+    # rule still gives two rows — which is fine here, we only need two paths.
+    cfg = get_folder_config(tmp_path)
+    assert index_folder(cfg) == 3
+    person_id = _add_person_for(cfg, ["a.jpg", "b.jpg"])
+
+    (tmp_path / "a.jpg").unlink()
+    index_folder(cfg)
+
+    Session = init_db(cfg.db_path)
+    with session_scope(Session) as s:
+        person = s.get(Person, person_id)
+        assert person is not None
+        assert person.photo_count == 1
+        assert s.query(PhotoPerson).filter(
+            PhotoPerson.person_id == person_id
+        ).count() == 1
+
+
+def test_prune_removes_a_person_left_with_no_photos(tmp_path):
+    from selects.db.models import Person
+
+    shutil.copy(FIXTURES_DIR / "small.jpg", tmp_path / "a.jpg")
+    shutil.copy(FIXTURES_DIR / "small.heic", tmp_path / "keep.heic")
+    cfg = get_folder_config(tmp_path)
+    assert index_folder(cfg) == 2
+    person_id = _add_person_for(cfg, ["a.jpg"])
+
+    (tmp_path / "a.jpg").unlink()
+    index_folder(cfg)
+
+    Session = init_db(cfg.db_path)
+    with session_scope(Session) as s:
+        assert s.get(Person, person_id) is None

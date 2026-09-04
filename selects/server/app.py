@@ -198,7 +198,11 @@ def build_app(
                     LAN_COOKIE,
                     lan_token,
                     httponly=True,
-                    samesite="Lax",
+                    # Strict: the ?token= exchange happens on a page this
+                    # same origin already served, so nothing legitimate is a
+                    # cross-site navigation, and Strict keeps the token off
+                    # requests a third-party page provokes.
+                    samesite="Strict",
                     path="/",
                 )
             return response
@@ -229,7 +233,7 @@ def build_app(
     register_model_routes(app, publish)
     register_taste_routes(app, proxy)
     register_recap_routes(app, proxy)
-    register_video_routes(app, proxy, publish)
+    register_video_routes(app, proxy, publish, manager)
     register_watch_routes(app, manager, publish)
     register_fs_routes(app, bind_host=bind_host)
     register_system_routes(app, proxy)

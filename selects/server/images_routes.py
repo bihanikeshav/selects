@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-import re
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, Response, UploadFile
 
@@ -10,25 +9,14 @@ from selects.config import FolderConfig
 from selects.db import init_db, session_scope
 from selects.db.models import ClassicalScore, Photo
 from selects.server.http_cache import IMMUTABLE, jpeg_file
+from selects.server.schemas import require_sha256
 from selects.util import utcnow
 
 log = logging.getLogger(__name__)
 
-_SHA256_RE = re.compile(r"[0-9a-f]{64}", re.I)
-
-
-def _require_sha256(sha256: str) -> None:
-    if (
-        not _SHA256_RE.fullmatch(sha256 or "")
-        or ".." in sha256
-        or "/" in sha256
-        or "\\" in sha256
-    ):
-        raise HTTPException(400, "invalid sha256")
-
 
 def _serve_image_for(cfg: FolderConfig, sha256: str, kind: str):
-    _require_sha256(sha256)
+    require_sha256(sha256)
     parent = cfg.thumbs_dir if kind == "thumb" else cfg.previews_dir
     path = parent / f"{sha256}.jpg"
     if not path.exists():
@@ -72,7 +60,7 @@ def register_images_routes(app: FastAPI, cfg: FolderConfig) -> None:
         """Persist the editor params and the baked JPEG (<state>/edits/<sha>.jpg)."""
         from selects.db.models import PhotoEdit
 
-        _require_sha256(sha256)
+        require_sha256(sha256)
         data = await image.read()
         with session_scope(Session) as s:
             photo = s.query(Photo).filter(Photo.sha256 == sha256).first()
@@ -90,7 +78,7 @@ def register_images_routes(app: FastAPI, cfg: FolderConfig) -> None:
     @app.get("/api/editor/result/{sha256:path}")
     def editor_result(sha256: str):
         """Serve the baked edited JPEG if one exists, else the preview."""
-        _require_sha256(sha256)
+        require_sha256(sha256)
         out = cfg.state_dir / "edits" / f"{sha256}.jpg"
         if out.exists():
             return jpeg_file(out)
@@ -108,7 +96,7 @@ def register_images_routes(app: FastAPI, cfg: FolderConfig) -> None:
 
         Cached per-(sha, preset, grade, straighten).
         """
-        _require_sha256(sha256)
+        require_sha256(sha256)
         from io import BytesIO
 
         from PIL import Image
@@ -172,7 +160,7 @@ def register_images_routes(app: FastAPI, cfg: FolderConfig) -> None:
 
         Used by the ScoresCard preview to show RGB+luma distribution.
         """
-        _require_sha256(sha256)
+        require_sha256(sha256)
         import numpy as _np
         from PIL import Image as _PILImage
 

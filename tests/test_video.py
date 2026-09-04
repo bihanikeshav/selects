@@ -3,6 +3,7 @@ pipeline stage) and selects.server.video_routes."""
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 import numpy as np
@@ -290,3 +291,72 @@ class TestVideoRoutes:
         assert client_with_videos.get("/api/videos/not-a-hash/frames").status_code == 400
         assert client_with_videos.get("/api/videos/not-a-hash/frames/0").status_code == 400
         assert client_with_videos.get(f"/api/videos/{'a' * 63}/frames").status_code == 400
+
+
+# --------------------------------------------------------------------------- #
+# /api/videos/process takes the library-wide run slot
+# --------------------------------------------------------------------------- #
+
+
+def _manager_app(tmp_path: Path, monkeypatch, run_video):
+    """A real LibraryManager + the video routes, with run_video_stage faked."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from selects.server.library_manager import LibraryManager
+    from selects.server.video_routes import register_video_routes
+
+    cfg = get_folder_config(tmp_path)
+    manager = LibraryManager(registry_path=tmp_path / "libraries.json")
+    monkeypatch.setattr("selects.server.video_routes.run_video_stage", run_video)
+
+    app = FastAPI()
+
+    @app.get("/api/libraries/status")
+    def status():
+        return manager.status()
+
+    register_video_routes(app, cfg, None, manager)
+    return TestClient(app), manager
+
+
+def test_process_marks_the_library_as_indexing_while_it_runs(tmp_path, monkeypatch):
+    import threading
+
+    running = threading.Event()
+    release = threading.Event()
+
+    def fake_stage(cfg, cb=None):
+        running.set()
+        release.wait(timeout=10)
+
+    client, manager = _manager_app(tmp_path, monkeypatch, fake_stage)
+    try:
+        assert client.get("/api/libraries/status").json()["indexing"] is False
+        assert client.post("/api/videos/process").json() == {"started": True}
+        assert running.wait(timeout=10)
+        assert client.get("/api/libraries/status").json()["indexing"] is True
+    finally:
+        release.set()
+
+    for _ in range(200):
+        if not manager.indexing:
+            break
+        time.sleep(0.02)
+    assert manager.indexing is False
+    assert client.get("/api/libraries/status").json()["indexing"] is False
+
+
+def test_process_409s_when_an_index_run_already_holds_the_slot(tmp_path, monkeypatch):
+    def fake_stage(cfg, cb=None):
+        raise AssertionError("the stage must not start while the slot is taken")
+
+    client, manager = _manager_app(tmp_path, monkeypatch, fake_stage)
+    assert manager.begin_indexing() is True
+    r = client.post("/api/videos/process")
+    assert r.status_code == 409
+    assert r.json() == {"detail": "an indexing run is already in progress"}
+
+    # The refusal must not leave the local guard latched.
+    assert client.get("/api/videos/process/status").json()["running"] is False
+    manager.end_indexing()
