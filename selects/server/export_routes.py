@@ -16,9 +16,9 @@ from __future__ import annotations
 import threading
 import uuid
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal
 
-from fastapi import APIRouter, Body, FastAPI, HTTPException, Query
+from fastapi import APIRouter, FastAPI, HTTPException, Query
 from pydantic import BaseModel
 
 from selects.config import FolderConfig

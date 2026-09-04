@@ -4,7 +4,6 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 import numpy as np
-import pytest
 
 from selects.ml.moments import _matches, run_moment_stage, TIME_GAP_S, VISUAL_SIM_THRESH
 
@@ -100,11 +99,8 @@ class TestMatches:
         assert not _matches(a, b)
 
     def test_gps_close_enough_passes(self):
-        a = _photo(taken_at=BASE_TIME, emb=SHARED_EMB, lat=34.0, lon=77.0, seed=1)
-        b = _photo(taken_at=BASE_TIME, emb=SHARED_EMB, lat=34.00015, lon=77.00015, seed=2)
-        # sqrt(0.00015^2 + 0.00015^2) ≈ 0.000212 — just above 0.0002; should fail
-        # Actually 0.000212 > 0.0002 so this is rejected.
-        # Let's use 0.0001 each — distance ~0.000141 which is < 0.0002 → passes
+        # sqrt(0.00015^2 + 0.00015^2) ≈ 0.000212 — just above 0.0002; should fail.
+        # Use 0.0001 each — distance ~0.000141 which is < 0.0002 → passes.
         a2 = _photo(taken_at=BASE_TIME, emb=SHARED_EMB, lat=34.0, lon=77.0, seed=1)
         b2 = _photo(taken_at=BASE_TIME, emb=SHARED_EMB, lat=34.0001, lon=77.0001, seed=2)
         assert _matches(a2, b2)
@@ -128,10 +124,7 @@ class TestMatches:
         assert _matches(a, b)
 
     def test_different_faces_rejects(self):
-        face_a = _face_emb(1)
-        face_b = _face_emb(2)
-        # Make them orthogonal
-        # Create perpendicular vectors
+        # Perpendicular vectors: cosine = 0.
         dim = 512
         v1 = np.zeros(dim, dtype=np.float32)
         v1[0] = 1.0
@@ -143,8 +136,10 @@ class TestMatches:
 
     def test_multiple_faces_at_least_one_shared_matches(self):
         shared_face = _face_emb(10)
-        v1 = np.zeros(512, dtype=np.float32); v1[0] = 1.0
-        v2 = np.zeros(512, dtype=np.float32); v2[1] = 1.0
+        v1 = np.zeros(512, dtype=np.float32)
+        v1[0] = 1.0
+        v2 = np.zeros(512, dtype=np.float32)
+        v2[1] = 1.0
         a = _photo(taken_at=BASE_TIME, emb=SHARED_EMB, faces=[v1, shared_face], seed=1)
         b = _photo(taken_at=BASE_TIME, emb=SHARED_EMB, faces=[v2, shared_face], seed=2)
         assert _matches(a, b)  # v1 vs v2 fails, but shared_face vs shared_face passes
@@ -213,13 +208,12 @@ def test_run_moment_stage_dissimilar_photos_no_moments(tmp_path):
     cfg = _make_cfg(tmp_path)
     Session = init_db(cfg.db_path)
 
-    emb_a = _unit_emb(100)
-    emb_b = _unit_emb(200)
-    # Ensure they are dissimilar
-    # If cosine >= 0.90 by chance, force them orthogonal
-    dim = len(emb_a)
-    e_a = np.zeros(dim, dtype=np.float32); e_a[0] = 1.0
-    e_b = np.zeros(dim, dtype=np.float32); e_b[1] = 1.0
+    # Force the two embeddings orthogonal so they are always dissimilar.
+    dim = len(_unit_emb(100))
+    e_a = np.zeros(dim, dtype=np.float32)
+    e_a[0] = 1.0
+    e_b = np.zeros(dim, dtype=np.float32)
+    e_b[1] = 1.0
 
     t0 = BASE_TIME
     t1 = BASE_TIME + timedelta(seconds=10)
@@ -242,7 +236,7 @@ def test_run_moment_stage_dissimilar_photos_no_moments(tmp_path):
 def test_run_moment_stage_time_gap_prevents_linking(tmp_path):
     """Photos >60s apart must not form a moment even if visually identical."""
     from selects.db import init_db, session_scope
-    from selects.db.models import Embedding, Moment, Photo, PipelineState
+    from selects.db.models import Embedding, Photo, PipelineState
 
     cfg = _make_cfg(tmp_path)
     Session = init_db(cfg.db_path)

@@ -1,9 +1,7 @@
 """Tests for selects.ml.embed — unit tests using CPU/synthetic data."""
 from __future__ import annotations
 
-import struct
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest

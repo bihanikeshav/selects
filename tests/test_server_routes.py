@@ -31,6 +31,19 @@ async def test_health_endpoint(tmp_path):
         assert r.status_code == 200
 
 
+async def test_openapi_version_matches_package_version(tmp_path):
+    import selects
+
+    cfg = get_folder_config(tmp_path)
+    init_db(cfg.db_path)
+    app = build_app(cfg, run_background=False)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        r = await client.get("/openapi.json")
+        assert r.status_code == 200
+        assert r.json()["info"]["version"] == selects.__version__
+
+
 async def test_list_photos_returns_indexed_files(populated_folder):
     cfg = get_folder_config(populated_folder)
     init_db(cfg.db_path)

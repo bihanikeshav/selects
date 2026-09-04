@@ -22,7 +22,6 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -31,6 +30,7 @@ import numpy as np
 from selects.config import FolderConfig
 from selects.db import init_db, session_scope
 from selects.db.models import Video
+from selects.util import utcnow
 
 log = logging.getLogger(__name__)
 
@@ -383,7 +383,7 @@ def run_video_stage(
             v.highlights_json = json.dumps(analysis.highlights)
             if siglip_blob is not None:
                 v.siglip = siglip_blob
-            v.processed_at = datetime.utcnow()
+            v.processed_at = utcnow()
             s.add(v)
 
         processed += 1

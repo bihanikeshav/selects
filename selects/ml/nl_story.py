@@ -20,9 +20,6 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from datetime import time
-from typing import Iterable
-
-import numpy as np
 
 from selects.config import FolderConfig
 from selects.db import init_db, session_scope

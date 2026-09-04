@@ -8,6 +8,8 @@
 
 Point it at a folder of photos and videos. It indexes, scores, clusters, and groups them into
 day-by-day stories, surfaces the best shots, and gets out of your way. Nothing is uploaded anywhere.
+(The Map view is an exception: it loads OpenStreetMap tiles from the internet, and reverse
+geocoding of GPS coordinates into place names is optional and can be disabled.)
 
 [![PyPI](https://img.shields.io/pypi/v/selects?color=1f6feb)](https://pypi.org/project/selects/)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
@@ -76,6 +78,7 @@ right-click → Open on macOS, or More info → Run anyway on Windows.)
 ```bash
 uv tool install "selects[ml]"  # or: pip install "selects[ml]"
 pip install selects            # base app + web GUI + CLI, no on-device AI
+pip install "selects[ml,desktop]"  # AI + a native desktop window instead of a browser tab
 selects serve                  # open the web UI (port 8000; honors SELECTS_WEB_PORT)
 selects index /path/to/trip    # or run headless from the CLI
 ```
@@ -187,8 +190,8 @@ var (or `.env`). See `selects/config.py`.
 |---|---|---|
 | `web_port` | `8000` | Web UI/API port (`selects serve` / `SELECTS_WEB_PORT`) |
 | `web_host` | `127.0.0.1` | Bind host |
-| `burst_window_seconds` | `3` | Time window for grouping burst shots |
-| `burst_similarity_threshold` | `0.92` | Similarity cutoff for burst grouping |
+| `burst_window_seconds` | `12` | Time window for grouping burst shots |
+| `burst_similarity_threshold` | `0.96` | Similarity cutoff for burst grouping |
 | `aesthetic_per_scope_pct` | `75.0` | CLIP-IQA: must be top `(100 - pct)`% within its scope |
 | `aesthetic_library_pct` | `50.0` | CLIP-IQA: must also be top `(100 - pct)`% library-wide |
 | `speed_mode` | `full` | `fast` skips `ram_tag`, `smart_tag`, `face_embed`, `persons` |
@@ -208,7 +211,11 @@ back to defaults); see [`examples/ladakh/`](examples/ladakh/):
 
 ```bash
 pip install -e ".[dev]" && pytest && ruff check .
+cd frontend && npm run lint && npm run e2e   # ESLint + Playwright smoke test
 ```
+
+For the native desktop window (`pywebview`), install `selects[desktop]` (or `selects[ml,desktop]`
+for AI + the desktop window).
 
 Schema is managed with Alembic; migrations ship in `selects/db/migrations/` (no `alembic.ini`) and
 `init_db()` upgrades each library's DB to head on open. After editing `selects/db/models.py`,

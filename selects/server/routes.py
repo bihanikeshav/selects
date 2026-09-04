@@ -6,8 +6,6 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Optional
 
-log = logging.getLogger(__name__)
-
 from fastapi import Body, FastAPI, File, Form, HTTPException, Query, Response, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -19,6 +17,9 @@ from selects.db.models import (
     AestheticScore, ClassicalScore, Embedding, Moment, MomentMember, Photo, PhotoCategory,
     PhotoPerson, PhotoRating, PhotoTag, Story, StoryItem, Visit,
 )
+from selects.util import utcnow
+
+log = logging.getLogger(__name__)
 
 _SHA256_RE = re.compile(r"[0-9a-f]{64}", re.I)
 
@@ -649,7 +650,7 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
     @app.get("/api/tags", response_model=TagList)
     def list_tags():
         """Return all distinct tags with counts, sorted by count descending."""
-        from sqlalchemy import func, text
+        from sqlalchemy import text
         with session_scope(Session) as s:
             result = s.execute(
                 text("SELECT tag, COUNT(*) as n FROM photo_tags GROUP BY tag ORDER BY n DESC")
@@ -985,8 +986,6 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
         image: UploadFile = File(...),
     ):
         """Persist the editor params and the baked JPEG (<state>/edits/<sha>.jpg)."""
-        from datetime import datetime as _dt
-
         from selects.db.models import PhotoEdit
 
         _require_sha256(sha256)
@@ -1000,7 +999,7 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
             (edits_dir / f"{sha256}.jpg").write_bytes(data)
             pe = s.get(PhotoEdit, photo.id) or PhotoEdit(photo_id=photo.id)
             pe.params = params
-            pe.updated_at = _dt.utcnow()
+            pe.updated_at = utcnow()
             s.add(pe)
         return {"ok": True}
 
@@ -1250,13 +1249,13 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
         g = _np.histogram(arr[..., 1], bins=edges)[0].astype(int)
         b = _np.histogram(arr[..., 2], bins=edges)[0].astype(int)
         luma = (0.299 * arr[..., 0] + 0.587 * arr[..., 1] + 0.114 * arr[..., 2]).astype(_np.uint8)
-        l = _np.histogram(luma, bins=edges)[0].astype(int)
+        luma_hist = _np.histogram(luma, bins=edges)[0].astype(int)
         return {
             "bins": bins,
             "r": r.tolist(),
             "g": g.tolist(),
             "b": b.tolist(),
-            "luma": l.tolist(),
+            "luma": luma_hist.tolist(),
         }
 
     # ── Persons (face identity clusters) ─────────────────────────────────────
@@ -2221,7 +2220,6 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
         """Persist many ratings at once.
         Body: {ratings: [{photo_id: int, rating: -1|0|1}, ...]}.
         """
-        from datetime import datetime as _dt
         ratings = payload.get("ratings") or []
         n_written = 0
         with session_scope(Session) as s:
@@ -2233,16 +2231,15 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
                 existing = s.get(PhotoRating, pid)
                 if existing:
                     existing.rating = rating
-                    existing.rated_at = _dt.utcnow()
+                    existing.rated_at = utcnow()
                 else:
-                    s.add(PhotoRating(photo_id=pid, rating=rating, rated_at=_dt.utcnow()))
+                    s.add(PhotoRating(photo_id=pid, rating=rating, rated_at=utcnow()))
                 n_written += 1
         return {"ok": True, "n": n_written}
 
     @app.post("/api/calibrate/rate")
     def calibrate_rate(payload: dict = Body(...)):
         """Persist a single rating. Body: {photo_id: int, rating: -1|0|1}."""
-        from datetime import datetime as _dt
         photo_id = payload.get("photo_id")
         rating = payload.get("rating")
         if not isinstance(photo_id, int):
@@ -2253,9 +2250,9 @@ def register_routes(app: FastAPI, cfg: FolderConfig) -> None:
             existing = s.get(PhotoRating, photo_id)
             if existing:
                 existing.rating = rating
-                existing.rated_at = _dt.utcnow()
+                existing.rated_at = utcnow()
             else:
-                s.add(PhotoRating(photo_id=photo_id, rating=rating, rated_at=_dt.utcnow()))
+                s.add(PhotoRating(photo_id=photo_id, rating=rating, rated_at=utcnow()))
         return {"ok": True}
 
     @app.get("/api/calibrate/agreement")
