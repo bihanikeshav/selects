@@ -70,3 +70,8 @@ desktop.ini
 nuitka-crash-report.xml
 dist/nuitka/
 *.build/
+
+# Playwright e2e artefacts
+frontend/test-results/
+frontend/playwright-report/
+frontend/.playwright/
