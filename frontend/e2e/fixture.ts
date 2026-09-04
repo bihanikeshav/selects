@@ -88,6 +88,18 @@ function stop(child: ChildProcess): void {
   }
 }
 
+/** Resolve once the server process is really gone (or after 10s). */
+function waitForExit(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, 10_000);
+    child.once("exit", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
 export default async function globalSetup(): Promise<() => Promise<void>> {
   const { libDir, registry } = paths();
   // A throwaway registry: never touch the developer's ~/.selects/libraries.json.
@@ -127,7 +139,15 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
 
   return async () => {
     stop(child);
-    rmSync(libDir, { recursive: true, force: true });
-    rmSync(registry, { force: true });
+    await waitForExit(child);
+    // Best effort: on Windows the killed server's SQLite handles can linger a
+    // moment, and a temp dir left behind must never fail an otherwise green run.
+    for (const target of [libDir, registry]) {
+      try {
+        rmSync(target, { recursive: true, force: true, maxRetries: 20, retryDelay: 200 });
+      } catch (e) {
+        console.warn(`e2e teardown: could not remove ${target}: ${String(e)}`);
+      }
+    }
   };
 }
