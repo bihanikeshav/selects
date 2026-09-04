@@ -173,8 +173,12 @@ def build_router(cfg: FolderConfig) -> APIRouter:
                         sem_scores[pid] = float(sim)
             else:
                 # no free-text query: pure filter/tag browsing — fetch sha256s for
-                # whatever candidate set structured filters produced.
-                for chunk in chunked(list(candidate_ids or [])):
+                # whatever candidate set structured filters produced. The
+                # endpoint rejects a request with neither q nor a structured
+                # filter, so there is always a candidate set here; assert it
+                # rather than silently degrading to "no results".
+                assert candidate_ids is not None, "no q and no structured filter"
+                for chunk in chunked(list(candidate_ids)):
                     for pid, sha in (
                         s.query(Photo.id, Photo.sha256)
                         .filter(Photo.id.in_(chunk))
