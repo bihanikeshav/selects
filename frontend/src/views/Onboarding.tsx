@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import {
   activateLibrary,
   createLibrary,
+  libraryStatus,
   listLibraries,
   modelsStatus,
   startIndexing,
@@ -16,37 +17,12 @@ import {
   estimateRemainingSeconds,
   estimateTotalSeconds,
   fmtDuration,
+  STAGE_LABELS,
   STAGE_SEQUENCE,
   type Backend,
 } from "../lib/eta";
+import { useProgressSocket, type ProgressMsg } from "../hooks/useProgressSocket";
 import FolderPicker from "../components/FolderPicker";
-
-interface ProgressMsg {
-  stage: string;
-  current: number;
-  total: number;
-  message?: string;
-}
-
-const STAGE_LABELS: Record<string, string> = {
-  models: "Downloading AI models",
-  index: "index",
-  video: "video",
-  classical: "classical",
-  embed: "embed",
-  aesthetic: "aesthetic",
-  tag: "tag",
-  category: "category",
-  ram_tag: "ram_tag",
-  smart_tag: "smart_tag",
-  face_embed: "face_embed",
-  persons: "persons",
-  moment: "moment",
-  story: "story",
-  thematic: "thematic",
-  date: "date",
-  done: "Done",
-};
 
 // Stages shown in the indexing checklist (models is handled as its own gate).
 const STAGE_ORDER = STAGE_SEQUENCE;
@@ -65,7 +41,7 @@ const STEPS = [
   {
     n: 3,
     title: "Review the best",
-    body: "Walk through curated stories, keep the keepers and skip the rest in seconds.",
+    body: "Walk through curated stories, keep the keepers and reject the rest in seconds.",
   },
 ];
 
@@ -93,7 +69,7 @@ export default function Onboarding() {
   const [installedCount, setInstalledCount] = useState(0);
   const [installedMb, setInstalledMb] = useState(0);
   const [downloading, setDownloading] = useState(false);
-  const wsRef = useRef<WebSocket | null>(null);
+  const [socketOn, setSocketOn] = useState(false);
   const libIdRef = useRef<string | null>(null);
   const [sys, setSys] = useState<SystemInfo | null>(null);
   const [nPhotos, setNPhotos] = useState(0);
@@ -109,6 +85,7 @@ export default function Onboarding() {
   async function stopIndexing() {
     stoppingRef.current = true;
     setStopping(true);
+    setSocketOn(false);
     try {
       await fetch("/api/libraries/cancel", { method: "POST" });
     } catch {
@@ -117,13 +94,6 @@ export default function Onboarding() {
     // Partial progress is kept; the user lands back in the app and can resume.
     navigate("/");
   }
-
-  useEffect(() => {
-    return () => {
-      stoppingRef.current = true;
-      wsRef.current?.close();
-    };
-  }, []);
 
   // Detect CPU vs GPU once so the indexing screen can set expectations.
   // If libraries already exist, this page was opened via "Add library" — offer a
@@ -148,68 +118,78 @@ export default function Onboarding() {
   // Messages are routed by `stage`: "models" frames drive the download gate
   // (and, on their "done" message, hand off to indexing on the same socket);
   // every other stage drives the indexing checklist, ending at stage "done".
+  useProgressSocket(
+    (msg: ProgressMsg) => {
+      if (msg.stage === "models") {
+        setModelProgress(msg);
+        if (msg.message === "done") beginIndexing();
+        return;
+      }
+      if (msg.type === "watch" || msg.stage === "watch" || !msg.stage) return;
+      setProgress(msg);
+      // Record when each stage started (for live ETA) and learn the photo
+      // count from the per-photo stages (their total == number of photos).
+      if (stageStartRef.current.stage !== msg.stage) {
+        stageStartRef.current = { stage: msg.stage, at: Date.now() };
+      }
+      const knownIdx = STAGE_ORDER.indexOf(msg.stage);
+      if (knownIdx >= 0) lastKnownStageIdxRef.current = knownIdx;
+      if (
+        msg.total > 0 &&
+        (msg.stage === "index" ||
+          msg.stage === "video" ||
+          msg.stage === "classical" ||
+          msg.stage === "embed" ||
+          msg.stage === "aesthetic" ||
+          msg.stage === "tag" ||
+          msg.stage === "ram_tag" ||
+          msg.stage === "smart_tag" ||
+          msg.stage === "face_embed")
+      ) {
+        setNPhotos((prev) => Math.max(prev, msg.total));
+      }
+      if (msg.stage === "done") {
+        doneRef.current = true;
+        setPhase("done");
+        setSocketOn(false);
+      }
+    },
+    {
+      enabled: socketOn,
+      onOpen: () => setErr(null),
+      onClose: () => {
+        if (doneRef.current || stoppingRef.current) return;
+        const p = phaseRef.current;
+        if (p === "indexing" || p === "models") {
+          setErr("Progress connection lost — reconnecting…");
+        }
+      },
+    },
+  );
+
   function connectProgress() {
-    if (wsRef.current) return;
-    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(`${proto}//${window.location.host}/ws/progress`);
-    wsRef.current = ws;
-    ws.onmessage = (ev) => {
-      try {
-        const msg = JSON.parse(ev.data) as ProgressMsg;
-        if (msg.stage === "models") {
-          setModelProgress(msg);
-          if (msg.message === "done") {
-            beginIndexing();
-          }
-          return;
-        }
-        setProgress(msg);
-        // Record when each stage started (for live ETA) and learn the photo
-        // count from the per-photo stages (their total == number of photos).
-        if (stageStartRef.current.stage !== msg.stage) {
-          stageStartRef.current = { stage: msg.stage, at: Date.now() };
-        }
-        const knownIdx = STAGE_ORDER.indexOf(msg.stage);
-        if (knownIdx >= 0) lastKnownStageIdxRef.current = knownIdx;
-        if (
-          msg.total > 0 &&
-          (msg.stage === "index" ||
-            msg.stage === "video" ||
-            msg.stage === "classical" ||
-            msg.stage === "embed" ||
-            msg.stage === "aesthetic" ||
-            msg.stage === "tag" ||
-            msg.stage === "ram_tag" ||
-            msg.stage === "smart_tag" ||
-            msg.stage === "face_embed")
-        ) {
-          setNPhotos((prev) => Math.max(prev, msg.total));
-        }
-        if (msg.stage === "done") {
-          doneRef.current = true;
-          setPhase("done");
-          ws.close();
-        }
-      } catch {
-        /* ignore malformed frames */
-      }
-    };
-    ws.onclose = () => {
-      wsRef.current = null;
-      if (doneRef.current || stoppingRef.current) return;
-      const p = phaseRef.current;
-      if (p === "indexing" || p === "models") {
-        setErr("Progress connection closed unexpectedly.");
-      }
-    };
+    setSocketOn(true);
   }
 
-  function retryProgress() {
+  /**
+   * Retry after a dropped connection. If the backend says an index is already
+   * running, only reattach the socket — re-POSTing would start a second run.
+   */
+  async function retryProgress() {
     setErr(null);
     doneRef.current = false;
     stoppingRef.current = false;
     connectProgress();
-    if (phaseRef.current === "indexing") beginIndexing();
+    if (phaseRef.current === "indexing") {
+      let running = false;
+      try {
+        running = Boolean((await libraryStatus()).indexing);
+      } catch {
+        /* status unreachable — fall through and try to (re)start */
+      }
+      if (!running) beginIndexing();
+      return;
+    }
     if (phaseRef.current === "models") {
       setDownloading(true);
       startModelsDownload().catch((e) => {
@@ -263,7 +243,7 @@ export default function Onboarding() {
     } catch (e2) {
       setErr(e2 instanceof Error ? e2.message : String(e2));
       setPhase("form");
-      wsRef.current?.close();
+      setSocketOn(false);
     }
   }
 

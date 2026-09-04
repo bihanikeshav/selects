@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 import {
   activateLibrary,
@@ -115,7 +115,7 @@ export default function Libraries() {
         style={{ display: "grid", gridTemplateRows: "auto 1fr", height: "100vh", maxHeight: "100vh", overflow: "hidden" }}
       >
         <PageHeader
-          context="libraries"
+          context="Libraries"
           title="Libraries"
           subtitle={loading ? "loading…" : `${libs.length} ${libs.length === 1 ? "library" : "libraries"} · double-click a cover to open`}
           actions={
@@ -199,6 +199,9 @@ export default function Libraries() {
             <div className="lib-active-settings-body">
               <ModelsCard />
               <WatchCard />
+              <p className="lib-advanced-link">
+                <Link to="/calibrate">Advanced: calibrate the scoring model</Link>
+              </p>
             </div>
           </details>
         </div>

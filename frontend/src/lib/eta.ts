@@ -19,7 +19,8 @@ const PER_PHOTO_SEC: Record<string, { cpu: number; gpu: number }> = {
   date: { cpu: 0.01, gpu: 0.01 },
 };
 
-export const STAGE_SEQUENCE = [
+/** Pipeline stages in the order the backend runs them (DEFAULT_STAGE_ORDER). */
+const ORDERED_STAGES = [
   "index",
   "video",
   "classical",
@@ -35,7 +36,42 @@ export const STAGE_SEQUENCE = [
   "story",
   "thematic",
   "date",
-];
+] as const;
+
+export type Stage = (typeof ORDERED_STAGES)[number];
+
+export const STAGE_SEQUENCE: string[] = [...ORDERED_STAGES];
+
+/**
+ * Plain-language name for every pipeline stage — the single source of truth
+ * for what the onboarding checklist and the rail's indexing pill display.
+ * The `satisfies` clause makes a missing label a compile error.
+ */
+const PIPELINE_STAGE_LABELS = {
+  index: "Scanning photos",
+  video: "Skimming videos",
+  classical: "Checking focus and exposure",
+  embed: "Understanding each photo",
+  aesthetic: "Scoring looks",
+  tag: "Tagging scenes",
+  category: "Sorting by subject",
+  ram_tag: "Labelling objects",
+  smart_tag: "Grouping similar shots",
+  face_embed: "Finding faces",
+  persons: "Grouping people",
+  moment: "Grouping bursts",
+  story: "Building stories",
+  thematic: "Building collections",
+  date: "Grouping by day",
+} satisfies Record<Stage, string>;
+
+/** Stage labels plus the two out-of-pipeline stages the socket also emits. */
+export const STAGE_LABELS: Record<string, string> = {
+  ...PIPELINE_STAGE_LABELS,
+  models: "Downloading AI models",
+  done: "Done",
+  cancelled: "Stopped",
+};
 
 export type Backend = "cpu" | "gpu";
 
