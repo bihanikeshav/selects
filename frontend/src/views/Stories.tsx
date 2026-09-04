@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { Link } from "react-router-dom";
 import ModeViewBar, { modeFromPath } from "../components/ModeViewBar";
 import Rail from "../components/Rail";
@@ -9,7 +9,8 @@ import StatusRow from "../components/StatusRow";
 import { useLocation } from "react-router-dom";
 import { getLikedStatus } from "../api/client";
 import type { StoryEntry, VisitEntry } from "../api/types";
-import { useLikeStatus, useToggleLike } from "../hooks/useLikes";
+import { useKeepStatus, useToggleKeep } from "../hooks/useKeep";
+import { stripPlaceSuffix } from "../lib/placeName";
 import SkeletonGrid from "../components/SkeletonGrid";
 
 // Google Material accent quartet — rotated by day hash
@@ -105,11 +106,11 @@ function VisitRow({ visit, expanded, onToggle }: {
         aria-expanded={expanded}>
         {visit.cover_thumb_url && (
           <div className="visit-cover">
-            <img src={visit.cover_thumb_url} alt={visit.name} loading="lazy" />
+            <img src={visit.cover_thumb_url} alt="" loading="lazy" />
           </div>
         )}
         <div className="visit-info">
-          <div className="visit-name">{visit.name}</div>
+          <div className="visit-name">{stripPlaceSuffix(visit.name)}</div>
           <div className="visit-meta">
             <span className="visit-time">{timeRange}</span>
             <span className="visit-dot" aria-hidden="true" />
@@ -185,7 +186,15 @@ function ItinerarySection({ visits }: { visits: VisitEntry[] }) {
   );
 }
 
-function StoryCard({ story }: { story: StoryEntry }) {
+function StoryCard({
+  story,
+  kept,
+  onKeepChange,
+}: {
+  story: StoryEntry;
+  kept: Record<string, boolean>;
+  onKeepChange: (sha: string, isKept: boolean) => void;
+}) {
   const accent = accentFor(story.day);
   const dayLabel = formatDayLabel(story.day);
   const [playerStartIdx, setPlayerStartIdx] = useState<number | null>(null);
@@ -193,15 +202,6 @@ function StoryCard({ story }: { story: StoryEntry }) {
   const [exporting, setExporting] = useState(false);
   const [exportResult, setExportResult] = useState<string | null>(null);
   const [focusedPhotoId, setFocusedPhotoId] = useState<number | null>(null);
-  const [likedMap, setLikedMap] = useState<Record<string, boolean>>({});
-
-  useEffect(() => {
-    const shas = story.items.map((it) => it.sha256);
-    if (shas.length === 0) return;
-    getLikedStatus(shas)
-      .then(setLikedMap)
-      .catch(() => undefined);
-  }, [story.items]);
 
   async function exportStory() {
     setExporting(true);
@@ -231,9 +231,11 @@ function StoryCard({ story }: { story: StoryEntry }) {
         <div className="story-day-label">{dayLabel}</div>
         <h2 className="story-title">
           {story.visits && story.visits.length > 0
-            ? (story.visits.length === 1
-                ? story.visits[0].name
-                : `${story.visits[0].name} to ${story.visits[story.visits.length - 1].name}`)
+            ? story.visits.length === 1
+              ? stripPlaceSuffix(story.visits[0].name)
+              : `${stripPlaceSuffix(story.visits[0].name)} to ${stripPlaceSuffix(
+                  story.visits[story.visits.length - 1].name,
+                )}`
             : story.day}
         </h2>
         <div className="count">
@@ -307,11 +309,9 @@ function StoryCard({ story }: { story: StoryEntry }) {
                       setPlayerStartIdx(i);
                       setPlayerOpen(true);
                     }}
-                    initialLiked={likedMap[item.sha256] ?? false}
+                    initialLiked={kept[item.sha256] ?? false}
                     hotkeysEnabled={!playerOpen}
-                    onLikeChange={(sha, liked) =>
-                      setLikedMap((m) => ({ ...m, [sha]: liked }))
-                    }
+                    onLikeChange={onKeepChange}
                     style={{
                       width: "100%",
                       height: "100%",
@@ -370,12 +370,12 @@ function StoryPlayer({
     setStackIdx(0);
   }, [index]);
 
-  // Load liked status for current photo
+  // Load keep status for the current photo
   const activeSha = stackMoment?.members[stackIdx]?.sha256 ?? item?.sha256 ?? null;
-  const { liked: activeLikedMap, setLiked: setActiveLikedMap } = useLikeStatus(
+  const { kept: activeKeptMap, setKept: setActiveKeptMap } = useKeepStatus(
     activeSha ? [activeSha] : [],
   );
-  const liked = Boolean(activeSha && activeLikedMap[activeSha]);
+  const isKept = Boolean(activeSha && activeKeptMap[activeSha]);
 
   // Autoplay
   useEffect(() => {
@@ -386,10 +386,10 @@ function StoryPlayer({
     return () => clearTimeout(t);
   }, [index, playing, story.items.length]);
 
-  const toggleLikeInner = useToggleLike(setActiveLikedMap);
-  const toggleLike = useCallback(() => {
-    if (activeSha) toggleLikeInner(activeSha, liked);
-  }, [activeSha, liked, toggleLikeInner]);
+  const toggleKeepInner = useToggleKeep(setActiveKeptMap);
+  const toggleKeep = useCallback(() => {
+    if (activeSha) toggleKeepInner(activeSha, isKept);
+  }, [activeSha, isKept, toggleKeepInner]);
 
   const cycleStack = useCallback(
     async (delta: number) => {
@@ -442,9 +442,9 @@ function StoryPlayer({
       } else if (e.key === "ArrowLeft") {
         e.preventDefault();
         setIndex((i) => (i - 1 + story.items.length) % story.items.length);
-      } else if (e.key === "f" || e.key === "F") {
+      } else if (e.key === "k" || e.key === "K") {
         e.preventDefault();
-        toggleLike();
+        toggleKeep();
       } else if (e.key === "e" || e.key === "E") {
         e.preventDefault();
         setEnhancedOn((v) => !v);
@@ -458,7 +458,7 @@ function StoryPlayer({
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, story.items.length, cycleStack, toggleLike]);
+  }, [onClose, story.items.length, cycleStack, toggleKeep]);
 
   if (!item) return null;
 
@@ -500,13 +500,14 @@ function StoryPlayer({
 
         {/* Action cluster */}
         <button
-          onClick={toggleLike}
-          title={liked ? "Unlike (F)" : "Like — F"}
+          onClick={toggleKeep}
+          title={isKept ? "Remove from keepers (K)" : "Keep — K"}
+          aria-pressed={isKept}
           style={{
             padding: "6px 12px 6px 10px",
             borderRadius: 999,
             border: 0,
-            background: liked ? "var(--g-red)" : "rgba(255,255,255,0.12)",
+            background: isKept ? "var(--g-green)" : "rgba(255,255,255,0.12)",
             color: "#fff",
             cursor: "pointer",
             display: "flex",
@@ -521,7 +522,7 @@ function StoryPlayer({
             viewBox="0 0 24 24"
             width="13"
             height="13"
-            fill={liked ? "currentColor" : "none"}
+            fill={isKept ? "currentColor" : "none"}
             stroke="currentColor"
             strokeWidth="2"
             strokeLinecap="round"
@@ -529,7 +530,7 @@ function StoryPlayer({
           >
             <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
           </svg>
-          {liked ? "Liked" : "Like · F"}
+          {isKept ? "Kept" : "Keep · K"}
         </button>
         <button
           onClick={() => setEnhancedOn((v) => !v)}
@@ -723,7 +724,7 @@ function StoryPlayer({
               opacity: 0.6,
             }}
           >
-            ← → Prev/Next · F like · E enhance · S straighten · [ ] burst cycle · P play · Esc close
+            ← → prev / next · K keep · E auto edit · S straighten · [ ] burst cycle · P play · Esc close
           </span>
         </div>
       </div>
@@ -811,7 +812,7 @@ function BestOfDropdown() {
             <>
               <FacetGroup label="Category" entries={facets.categories.map(c => ({ value: c.value, label: c.value, count: c.count }))} hrefBase="/best/category/" />
               <FacetGroup label="People" entries={facets.persons.map(p => ({ value: p.value, label: p.label, count: p.count }))} hrefBase="/best/person/" />
-              <FacetGroup label="Place" entries={facets.places.map(p => ({ value: p.value, label: p.value, count: p.count }))} hrefBase="/best/place/" />
+              <FacetGroup label="Place" entries={facets.places.map(p => ({ value: p.value, label: stripPlaceSuffix(p.value), count: p.count }))} hrefBase="/best/place/" />
               <FacetGroup label="Day" entries={facets.days.map(d => ({ value: d.value, label: d.value, count: d.count }))} hrefBase="/best/day/" />
             </>
           )}
@@ -870,6 +871,47 @@ function FacetGroup({
   );
 }
 
+/** How aggressively stories are trimmed. The pair is (scope percentile,
+ *  library-wide percentile floor) sent to `/api/stories`. */
+const STRICTNESS_LEVELS = [
+  { key: "relaxed", label: "Relaxed", scope: 60, library: 40, hint: "More shots per day" },
+  { key: "balanced", label: "Balanced", scope: 75, library: 50, hint: "A good mix" },
+  { key: "strict", label: "Strict", scope: 90, library: 65, hint: "Only the standouts" },
+] as const;
+
+type StrictnessKey = (typeof STRICTNESS_LEVELS)[number]["key"];
+
+function StrictnessControl({
+  value,
+  onChange,
+}: {
+  value: StrictnessKey;
+  onChange: (v: StrictnessKey) => void;
+}) {
+  return (
+    <div className="strictness">
+      <span className="strictness-label" id="strictness-label">
+        Strictness
+      </span>
+      <div className="story-group-tabs" role="radiogroup" aria-labelledby="strictness-label">
+        {STRICTNESS_LEVELS.map((lvl) => (
+          <button
+            key={lvl.key}
+            type="button"
+            role="radio"
+            aria-checked={value === lvl.key}
+            title={lvl.hint}
+            className={`story-group-tab${value === lvl.key ? " is-active" : ""}`}
+            onClick={() => onChange(lvl.key)}
+          >
+            {lvl.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function Stories() {
   const [stories, setStories] = useState<StoryEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -877,12 +919,14 @@ export default function Stories() {
   const [groupBy, setGroupBy] = useState<StoryGroup>("day");
   const [searchInput, setSearchInput] = useState("");
   const [searchQ, setSearchQ] = useState(""); // debounced
-  const [scopePct, setScopePct] = useState<number>(75);
-  const [libraryPct, setLibraryPct] = useState<number>(50);
+  const [strictness, setStrictness] = useState<StrictnessKey>("balanced");
+  const [kept, setKept] = useState<Record<string, boolean>>({});
   const { pathname } = useLocation();
-  // Mode comes from the URL — /curated/* means liked-only. The legacy in-page
-  // "Culling / Curated ♥" toggle was redundant once mode lives in the route.
+  // Mode comes from the URL — /curated/* means keepers only. The legacy in-page
+  // "Culling / Curated" toggle was redundant once mode lives in the route.
   const likedOnly = modeFromPath(pathname) === "curated";
+  const level =
+    STRICTNESS_LEVELS.find((l) => l.key === strictness) ?? STRICTNESS_LEVELS[1];
 
   // Debounce searchInput → searchQ
   useEffect(() => {
@@ -916,160 +960,131 @@ export default function Stories() {
   );
 
   useEffect(() => {
-    fetchStories(searchQ, scopePct, libraryPct, likedOnly);
-  }, [searchQ, scopePct, libraryPct, likedOnly, fetchStories]);
+    fetchStories(searchQ, level.scope, level.library, likedOnly);
+  }, [searchQ, level.scope, level.library, likedOnly, fetchStories]);
 
+  const visibleStories = useMemo(
+    () =>
+      stories.filter((story) => {
+        if (groupBy === "people") return story.day.startsWith("people:");
+        return (
+          !story.day.startsWith("place:") &&
+          !story.day.startsWith("people:") &&
+          !story.day.startsWith("pattern:")
+        );
+      }),
+    [stories, groupBy],
+  );
+
+  // One keep-status request covers every frame on screen, instead of one per
+  // story card.
+  const shaKey = useMemo(
+    () =>
+      Array.from(
+        new Set(visibleStories.flatMap((st) => st.items.map((it) => it.sha256))),
+      ).join(","),
+    [visibleStories],
+  );
+
+  useEffect(() => {
+    if (!shaKey) return;
+    let cancelled = false;
+    getLikedStatus(shaKey.split(","))
+      .then((m) => {
+        if (!cancelled) setKept((prev) => ({ ...prev, ...m }));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [shaKey]);
+
+  const onKeepChange = useCallback((sha: string, isKept: boolean) => {
+    setKept((m) => ({ ...m, [sha]: isKept }));
+  }, []);
+
+  const dayCount = visibleStories.length;
   const statusDetails = loading
     ? "loading…"
     : error
     ? "error loading stories"
     : searchQ
-    ? `${stories.length} stories match "${searchQ}"`
-    : `${stories.length} curated stories`;
+    ? `${dayCount} match "${searchQ}"`
+    : `${dayCount} ${dayCount === 1 ? "story" : "stories"}`;
 
   return (
     <div className="app">
       <Rail />
       <div className="workspace">
-        <Topbar folder="selects" context={likedOnly ? "curated · stories" : "stories"} />
+        <Topbar folder="selects" context="Stories" />
         <ModeViewBar />
         <StatusRow details={statusDetails} />
 
         <div className="stories-wrap" style={{ gridRow: "3 / span 3" }}>
+          <div className="stories-header">
+            <div>
+              <h1>Stories</h1>
+              <div className="sub">
+                {dayCount} {dayCount === 1 ? "day" : "days"} · best shots of each
+                day, one per burst
+              </div>
+            </div>
+            <div className="stories-header-actions">
+              <StoryGroupTabs value={groupBy} onChange={setGroupBy} />
+              <BestOfDropdown />
+            </div>
+          </div>
+
+          <div className="stories-search-row">
+            <input
+              type="search"
+              className="stories-search-input"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              aria-label="Search stories"
+              placeholder="Search stories — e.g. 'monastery courtyard at dusk', 'snowy passes', 'high-altitude lake'"
+            />
+            {searchInput && (
+              <button className="btn btn-text" onClick={() => setSearchInput("")}>
+                Clear
+              </button>
+            )}
+            <StrictnessControl value={strictness} onChange={setStrictness} />
+          </div>
+
           {loading && <SkeletonGrid count={8} />}
 
           {!loading && error && (
             <div className="stories-state">
               <div className="stories-state-title">Stories not yet available</div>
               <div className="stories-state-sub">
-                Run{" "}
-                <code>selects index &lt;folder&gt; --pass story</code>{" "}
-                to build narrative sequences
+                Index this library first — stories are built from the day and
+                place groups the indexer finds.
               </div>
             </div>
           )}
 
-          {!loading && !error && stories.length === 0 && (
+          {!loading && !error && visibleStories.length === 0 && (
             <div className="stories-state">
               <div className="stories-state-title">No stories yet</div>
               <div className="stories-state-sub">
-                Run the story stage to build narrative sequences from your photos.
+                {searchQ
+                  ? "Nothing matches that search — try fewer words."
+                  : "Index this library to group your photos into days and places."}
               </div>
             </div>
           )}
 
-          {!loading && !error && stories.length > 0 && (
-            <>
-              <div className="stories-header">
-                <div>
-                  <h1>Narrative sequences</h1>
-                  <div className="sub">
-                    Aesthetic-curated · {stories.length} stories · top 25% by IQA, burst-deduped
-                  </div>
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <StoryGroupTabs value={groupBy} onChange={setGroupBy} />
-                  <BestOfDropdown />
-                </div>
-              </div>
-
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  padding: "8px 0 4px",
-                }}
-              >
-                <input
-                  type="search"
-                  value={searchInput}
-                  onChange={(e) => setSearchInput(e.target.value)}
-                  placeholder="Search stories — e.g. 'monastery courtyard at dusk', 'snowy passes', 'high-altitude lake'"
-                  style={{
-                    flex: 1,
-                    background: "var(--md-surface-c-low)",
-                    border: "1px solid var(--md-outline-var)",
-                    borderRadius: 999,
-                    padding: "10px 18px",
-                    fontFamily: "inherit",
-                    fontSize: 14,
-                    color: "var(--md-on-surface)",
-                    outline: "none",
-                  }}
-                />
-                {searchInput && (
-                  <button
-                    className="btn btn-text"
-                    onClick={() => setSearchInput("")}
-                    style={{ fontSize: 12 }}
-                  >
-                    Clear
-                  </button>
-                )}
-              </div>
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 16,
-                  fontSize: 11,
-                  color: "var(--md-on-surface-var)",
-                  padding: "6px 0 18px",
-                }}
-              >
-                <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span title="Per-scope percentile gate. Higher = stricter; 75 = top 25% of the day/place/person scope">
-                    Per-scope ≥ p{scopePct}
-                  </span>
-                  <input
-                    type="range"
-                    min={0}
-                    max={95}
-                    step={5}
-                    value={scopePct}
-                    onChange={(e) => setScopePct(Number(e.target.value))}
-                    style={{ width: 160 }}
-                  />
-                </label>
-                <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span title="Library-wide percentile floor. A photo below this percentile in the whole library is dropped regardless of scope">
-                    Library ≥ p{libraryPct}
-                  </span>
-                  <input
-                    type="range"
-                    min={0}
-                    max={95}
-                    step={5}
-                    value={libraryPct}
-                    onChange={(e) => setLibraryPct(Number(e.target.value))}
-                    style={{ width: 160 }}
-                  />
-                </label>
-                <button
-                  className="btn btn-text"
-                  onClick={() => {
-                    setScopePct(75);
-                    setLibraryPct(50);
-                  }}
-                  style={{ fontSize: 11 }}
-                >
-                  Reset
-                </button>
-              </div>
-
-              {stories
-                .filter(story => {
-                  if (groupBy === "people") return story.day.startsWith("people:");
-                  return !story.day.startsWith("place:")
-                      && !story.day.startsWith("people:")
-                      && !story.day.startsWith("pattern:");
-                })
-                .map(story => (
-                  <StoryCard key={story.id} story={story} />
-                ))}
-            </>
-          )}
+          {!loading &&
+            !error &&
+            visibleStories.map((story) => (
+              <StoryCard
+                key={story.id}
+                story={story}
+                kept={kept}
+                onKeepChange={onKeepChange}
+              />
+            ))}
         </div>
       </div>
     </div>

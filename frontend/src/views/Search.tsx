@@ -10,6 +10,7 @@ import {
   type TagEntry,
 } from "../api/search2";
 import KbdFooter from "../components/KbdFooter";
+import { tagLabel } from "../lib/tags";
 import PageHeader from "../components/PageHeader";
 import Rail from "../components/Rail";
 import SkeletonGrid from "../components/SkeletonGrid";
@@ -134,7 +135,11 @@ export default function Search() {
   function addDraftTag() {
     const raw = tagDraft.trim();
     if (!raw) return;
-    const match = tags.find(t => t.tag.toLowerCase() === raw.toLowerCase()) ?? tagMatches[0];
+    const needle = raw.toLowerCase();
+    const match =
+      tags.find(
+        t => t.tag.toLowerCase() === needle || tagLabel(t.tag).toLowerCase() === needle,
+      ) ?? tagMatches[0];
     if (match && !selectedTags.includes(match.tag)) {
       setSelectedTags(prev => [...prev, match.tag]);
     }
@@ -172,7 +177,7 @@ export default function Search() {
         }}
       >
         <PageHeader
-          context="search"
+          context="Search"
           title="Search"
           subtitle={details}
           actions={
@@ -203,7 +208,7 @@ export default function Search() {
                 {selectedTags.length === 0 && !q.trim()
                   ? tags.slice(0, 8).map(t => (
                       <button key={t.tag} className="filter-chip" onClick={() => toggleTag(t.tag)}>
-                        {t.tag}
+                        {tagLabel(t.tag)}
                       </button>
                     ))
                   : selectedTags.map(t => (
@@ -213,7 +218,7 @@ export default function Search() {
                         onClick={() => toggleTag(t)}
                         title="Click to remove"
                       >
-                        {t}
+                        {tagLabel(t)}
                       </button>
                     ))}
               </div>
@@ -235,7 +240,7 @@ export default function Search() {
                 />
                 <datalist id="search-tag-options">
                   {tagMatches.map(t => (
-                    <option key={t.tag} value={t.tag} />
+                    <option key={t.tag} value={t.tag} label={tagLabel(t.tag)} />
                   ))}
                 </datalist>
                 <button className="filter-chip filter-chip--more" type="button" onClick={addDraftTag}>
@@ -319,7 +324,10 @@ export default function Search() {
           )}
 
           {!hasAnyFilter && (
-            <div className="cluster-detail-empty">Search from the header to fill this area with photos.</div>
+            <div className="cluster-detail-empty">
+              Type a place, a scene or a moment. Try “monastery courtyard” or
+              “snow on the pass”.
+            </div>
           )}
 
           <div className="cluster-detail-grid">
@@ -358,7 +366,8 @@ export default function Search() {
           </div>
         </div>
 
-        <KbdFooter variant="browse" />
+        {/* The browse hints only apply while the lightbox is open. */}
+        {lightbox !== null && <KbdFooter variant="browse" />}
       </div>
 
       {lightbox !== null && hits[lightbox] && (

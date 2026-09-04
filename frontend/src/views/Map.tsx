@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
-import KbdFooter from "../components/KbdFooter";
 import PageHeader from "../components/PageHeader";
 import Rail from "../components/Rail";
 
@@ -100,7 +99,7 @@ export default function MapView() {
     });
 
     const bounds = L.latLngBounds(markers.map((m) => [m.lat, m.lon] as [number, number]));
-    mapRef.current.fitBounds(bounds, { padding: [60, 60] });
+    mapRef.current.fitBounds(bounds, { padding: [40, 40] });
 
     return () => {
       // keep map alive across re-renders
@@ -126,14 +125,14 @@ export default function MapView() {
         className="workspace"
         style={{
           display: "grid",
-          gridTemplateRows: "auto 1fr auto",
+          gridTemplateRows: "auto 1fr",
           height: "100vh",
           maxHeight: "100vh",
           overflow: "hidden",
         }}
       >
         <PageHeader
-          context="map"
+          context="Map"
           title="Map"
           subtitle={
             loading
@@ -164,7 +163,6 @@ export default function MapView() {
           </div>
         </div>
 
-        <KbdFooter variant="browse" />
       </div>
     </div>
   );

@@ -3,8 +3,8 @@ import { useNavigate, useLocation } from "react-router-dom";
 /**
  * Two-tab nav for the cull/curated workflow.
  *
- *  Mode  : Cull | Curated  (high-level intent — what photo set to work with)
- *  View  : All  | Clusters | Stories  (slice of that set)
+ *  Mode  : Review | Curated  (high-level intent — what photo set to work with)
+ *  View  : All  | Collections | Stories  (slice of that set)
  *
  * Routes:
  *    /cull           = Cull + All        (BurstCull)
@@ -36,9 +36,9 @@ function routeFor(mode: Mode, view: View): string {
 }
 
 const VIEWS: { key: View; label: string; hint: string }[] = [
-  { key: "all", label: "All", hint: "Single grid · BurstCull (cull) or Liked grid (curated)" },
-  { key: "clusters", label: "Clusters", hint: "By visual theme" },
-  { key: "stories", label: "Stories", hint: "By day / people / place" },
+  { key: "all", label: "All", hint: "One grid — every photo, or just your keepers" },
+  { key: "clusters", label: "Collections", hint: "Grouped by place, scene, day or theme" },
+  { key: "stories", label: "Stories", hint: "The best of each day" },
 ];
 
 export default function ModeViewBar() {
@@ -47,7 +47,7 @@ export default function ModeViewBar() {
   const mode = modeFromPath(pathname);
   const view = viewFromPath(pathname);
 
-  // View switcher stays in the current mode (Sort or Curated). Mode itself
+  // View switcher stays in the current mode (Review or Curated). Mode itself
   // is chosen from the rail, not this bar.
   return (
     <nav className="mode-view-bar" aria-label="View">

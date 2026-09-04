@@ -173,7 +173,7 @@ export default function CalibrateDashboard() {
         }}
       >
         <PageHeader
-          context="calibration dashboard"
+          context="Calibration dashboard"
           title="Calibration dashboard"
           subtitle={`${rows.length} photos · ${ratedCount} rated`}
           actions={

@@ -23,7 +23,7 @@
   display: flex;
   align-items: center;
   gap: 18px;
-  padding: 10px 24px;
+  padding: 6px 24px;
   border-bottom: 1px solid var(--md-outline-var);
   background:
     linear-gradient(180deg, var(--md-surface) 0%, var(--md-surface-c-low) 100%);
@@ -365,6 +365,48 @@ button.rail-item {
 
 .rail-spacer { flex: 1; }
 
+/* Global "an index is running" pill, pinned above Library in the rail. */
+.indexing-pill {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 60px;
+  padding: 6px 2px;
+  border-radius: var(--r-md, 10px);
+  background: color-mix(in srgb, var(--md-primary) 14%, transparent);
+  color: var(--md-primary);
+  text-decoration: none;
+  text-align: center;
+}
+.indexing-pill:hover {
+  background: color-mix(in srgb, var(--md-primary) 22%, transparent);
+}
+.indexing-pill:focus-visible {
+  outline: 2px solid var(--md-primary);
+  outline-offset: 2px;
+}
+.indexing-pill-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: indexing-pulse 1.4s ease-in-out infinite;
+}
+.indexing-pill-label {
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+@keyframes indexing-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .indexing-pill-dot { animation: none; }
+}
+
 .rail-divider {
   width: 28px;
   height: 1px;
@@ -401,17 +443,17 @@ button.rail-item {
   overflow-y: auto;
 }
 
-/* Canonical page header — a fixed-height (170px) shell so EVERY tab's header
+/* Canonical page header — a fixed-height (148px) shell so EVERY tab's header
    lines up, whether it carries a mode bar, a control strip, or neither. The
    Topbar / above-bar / controls take their natural height; the title band
    (.page-header) flexes to fill whatever is left, keeping the total at 170px. */
 .page-shell {
-  /* 170px is a FLOOR, not a fixed height: plain tabs sit at exactly 170 (the
+  /* 148px is a FLOOR, not a fixed height: plain tabs sit at exactly 148 (the
      title band flexes to fill), but content-rich headers (Search with its
      filter strip, Duplicates with its summary tiles) grow past it instead of
      clipping. The workspace grid gives the header an `auto` row, so a taller
      header just shrinks the scrollable content row — the page never scrolls. */
-  min-height: 170px;
+  min-height: 148px;
   display: flex;
   flex-direction: column;
   background: var(--md-surface);
@@ -419,7 +461,7 @@ button.rail-item {
 .page-header {
   flex: 1 1 auto;
   min-height: 0;
-  padding: 12px 24px;
+  padding: 6px 24px;
   border-bottom: 1px solid var(--md-outline-var);
   display: flex;
   align-items: center;
@@ -429,7 +471,8 @@ button.rail-item {
 .page-title {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 32px;
+  font-size: 28px;
+  line-height: 1.15;
   font-weight: 400;
   letter-spacing: -0.01em;
 }
@@ -476,9 +519,16 @@ button.rail-item {
   z-index: 2;
 }
 
+/* The breadcrumb's search shortcut is a 44px hit target elsewhere; in the
+   topbar it sets the whole bar's height, so keep it compact here. */
+.topbar .icon-btn {
+  width: 32px;
+  height: 32px;
+}
+
 .topbar-folder {
   font-family: var(--font-display);
-  font-size: 22px;
+  font-size: 19px;
   font-weight: 500;
   letter-spacing: -0.005em;
   display: flex;
@@ -1233,9 +1283,18 @@ button.rail-item {
 
 .clusters-header {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: stretch;
 }
+
+.clusters-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.clusters-header-row + .sub { margin-top: 6px; }
 
 .clusters-header h1 {
   font-family: var(--font-display);
@@ -1376,6 +1435,47 @@ button.rail-item {
 }
 
 .stories-header .sub { font-size: 14px; color: var(--md-on-surface-var); }
+
+.stories-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Search field + strictness control strip under the Stories title. */
+.stories-search-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0 18px;
+}
+
+.stories-search-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--md-surface-c-low);
+  border: 1px solid var(--md-outline-var);
+  border-radius: 999px;
+  padding: 10px 18px;
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--md-on-surface);
+  outline: none;
+}
+.stories-search-input:focus-visible {
+  border-color: var(--md-primary);
+}
+
+.strictness {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.strictness-label {
+  font-size: 12px;
+  color: var(--md-on-surface-var);
+}
 
 .story-card {
   display: grid;
@@ -3106,6 +3206,16 @@ button.rail-item {
   margin-top: 14px;
   max-width: 720px;
 }
+
+.lib-advanced-link {
+  margin: 0;
+  font-size: 13px;
+}
+.lib-advanced-link a {
+  color: var(--md-on-surface-var);
+  text-decoration: underline;
+}
+.lib-advanced-link a:hover { color: var(--md-primary); }
 
 .lib-path {
   font-family: var(--font-mono);
