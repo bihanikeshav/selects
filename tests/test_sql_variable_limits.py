@@ -302,6 +302,66 @@ def test_edits_status_post_handles_more_shas_than_variables(tmp_path):
     assert post_out == get_out
 
 
+def test_edits_status_post_preserves_shuffled_input_order(tmp_path):
+    """A >~500-sha list spans multiple ``IN (...)`` chunks, each independently
+    ordered by SQLite — the response must still come back in the caller's
+    input order, not chunk-query order."""
+    import random
+
+    from selects.server.schemas import StatusRequest
+
+    cfg, Session, ids = _seed_photos(tmp_path)
+    sha_list = [f"{i:064x}" for i in range(N)]
+    shuffled = sha_list[:]
+    random.Random(0).shuffle(shuffled)
+    assert shuffled != sha_list  # the shuffle actually reordered something
+
+    with sqlite_999_variables(engine_for(cfg.db_path)):
+        out = _endpoint(cfg, "/api/edits/status", method="POST")(
+            payload=StatusRequest(shas=shuffled)
+        )
+    assert list(out.keys()) == shuffled
+
+
+def test_launch_darktable_passes_paths_in_shuffled_input_order(tmp_path, monkeypatch):
+    """/api/edit/darktable hands the external editor a path list built from a
+    chunked sha->path lookup — assert those paths come out in the order the
+    caller passed the shas in, not chunk-query order."""
+    import random
+    import subprocess
+
+    import selects.server.editor_routes as editor_routes
+
+    cfg, Session, ids = _seed_photos(tmp_path)
+    sha_list = [f"{i:064x}" for i in range(N)]
+    shuffled = sha_list[:]
+    random.Random(0).shuffle(shuffled)
+    assert shuffled != sha_list
+
+    monkeypatch.setattr(editor_routes, "_find_darktable", lambda: "darktable")
+    captured_cmd = {}
+
+    class _FakeProc:
+        pass
+
+    def _fake_popen(cmd, **kwargs):
+        captured_cmd["cmd"] = cmd
+        return _FakeProc()
+
+    monkeypatch.setattr(subprocess, "Popen", _fake_popen)
+
+    with sqlite_999_variables(engine_for(cfg.db_path)):
+        handler = _endpoint(cfg, "/api/edit/darktable", method="POST")
+        out = handler(payload={"sha256s": shuffled})
+
+    assert out["opened"] == N
+    expected_paths = [str(tmp_path / f"{i:05d}.jpg") for i in range(N)]
+    by_sha = dict(zip(sha_list, expected_paths))
+    # cmd = [editor_cmd, "--library", str(library_path), *paths]
+    got_paths = captured_cmd["cmd"][3:]
+    assert got_paths == [by_sha[sha] for sha in shuffled]
+
+
 # ── selects/server/export_routes.py ───────────────────────────────────────────
 
 async def test_xmp_preview_resolves_a_story_bigger_than_variables(tmp_path):

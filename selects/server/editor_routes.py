@@ -150,6 +150,23 @@ def _find_named_editor(editor: str) -> Optional[str]:
     return None
 
 
+def _sha_to_path(s, sha_list: list[str]) -> dict[str, str]:
+    """Chunked sha256 -> path lookup, as a dict for order-preserving reuse.
+
+    ``Photo.sha256.in_(chunk)`` does not return rows in the order the caller
+    passed the shas in — and worse, an >~500-sha list spans multiple chunks,
+    each independently ordered by SQLite. Callers that hand paths to an
+    external process (darktable et al.) or echo a status map back to the UI
+    need the caller's input order preserved, so every route builds this map
+    once and then re-walks the caller's own sha list to emit results.
+    """
+    out: dict[str, str] = {}
+    for chunk in chunked(sha_list):
+        for sha, path in s.query(Photo.sha256, Photo.path).filter(Photo.sha256.in_(chunk)).all():
+            out[sha] = path
+    return out
+
+
 def register_editor_routes(app: FastAPI, cfg: FolderConfig) -> None:
     def Session():
         return init_db(cfg.db_path)()
@@ -157,16 +174,17 @@ def register_editor_routes(app: FastAPI, cfg: FolderConfig) -> None:
     def _edits_status(sha_list: Optional[list[str]]) -> dict[str, dict]:
         out: dict[str, dict] = {}
         with session_scope(Session) as s:
-            base_q = s.query(Photo.sha256, Photo.path)
             if sha_list is not None:
                 # Chunked: the client sends one sha per visible photo. An
                 # explicit empty list means "no shas" (returns {}), distinct
                 # from the GET's "no ?shas at all" (returns everything).
-                rows = []
-                for chunk in chunked(sha_list):
-                    rows.extend(base_q.filter(Photo.sha256.in_(chunk)).all())
+                # Walk sha_list itself (not the chunked query rows) so the
+                # response dict is built — and therefore serializes — in the
+                # caller's input order; unknown shas are skipped.
+                path_by_sha = _sha_to_path(s, sha_list)
+                rows = [(sha, path_by_sha[sha]) for sha in sha_list if sha in path_by_sha]
             else:
-                rows = base_q.all()
+                rows = s.query(Photo.sha256, Photo.path).all()
             for sha, path_str in rows:
                 p = Path(path_str)
                 xmp = p.with_suffix(p.suffix + ".xmp")
@@ -231,12 +249,8 @@ def register_editor_routes(app: FastAPI, cfg: FolderConfig) -> None:
             )
 
         with session_scope(Session) as s:
-            paths = []
-            for chunk in chunked(sha256s):
-                paths.extend(
-                    r[0]
-                    for r in s.query(Photo.path).filter(Photo.sha256.in_(chunk)).all()
-                )
+            path_by_sha = _sha_to_path(s, sha256s)
+        paths = [path_by_sha[sha] for sha in sha256s if sha in path_by_sha]
         if not paths:
             raise HTTPException(404, detail="no matching photos")
 
@@ -279,13 +293,8 @@ def register_editor_routes(app: FastAPI, cfg: FolderConfig) -> None:
             )
 
         with session_scope(Session) as s:
-            rows = []
-            for chunk in chunked(sha256s):
-                rows.extend(
-                    s.query(Photo.sha256, Photo.path)
-                    .filter(Photo.sha256.in_(chunk))
-                    .all()
-                )
+            path_by_sha = _sha_to_path(s, sha256s)
+        rows = [(sha, path_by_sha[sha]) for sha in sha256s if sha in path_by_sha]
         if not rows:
             raise HTTPException(404, detail="no matching photos")
 
@@ -354,12 +363,8 @@ def register_editor_routes(app: FastAPI, cfg: FolderConfig) -> None:
             )
 
         with session_scope(Session) as s:
-            paths = []
-            for chunk in chunked(sha256s):
-                paths.extend(
-                    r[0]
-                    for r in s.query(Photo.path).filter(Photo.sha256.in_(chunk)).all()
-                )
+            path_by_sha = _sha_to_path(s, sha256s)
+        paths = [path_by_sha[sha] for sha in sha256s if sha in path_by_sha]
         if not paths:
             raise HTTPException(404, detail="no matching photos")
 

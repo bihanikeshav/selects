@@ -15,19 +15,21 @@ export function useKeepStatus(shas: string[]) {
 
   useEffect(() => {
     if (shas.length === 0) return;
-    let cancelled = false;
+    const controller = new AbortController();
     fetch("/api/likes/status", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ shas }),
+      signal: controller.signal,
     })
       .then((r) => (r.ok ? r.json() : {}))
-      .then((j: Record<string, boolean>) => {
-        if (!cancelled) setKept(j);
-      })
-      .catch(() => undefined);
+      .then((j: Record<string, boolean>) => setKept(j))
+      .catch((err) => {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        // Any other failure (network error, bad JSON) leaves `kept` as-is.
+      });
     return () => {
-      cancelled = true;
+      controller.abort();
     };
     // `key` is the stable, content-based representation of `shas`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
