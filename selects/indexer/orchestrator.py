@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 from typing import Callable, Iterable, Optional
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 
 from selects.config import FolderConfig
 from selects.db import init_db, session_scope
@@ -172,13 +172,18 @@ def prune_missing(cfg: FolderConfig, Session) -> int:
                 ):
                     remaining[person_id] = n
 
+            # A person with no surviving photos is deleted outright — including a
+            # labelled one: if those files come back on a later walk the faces
+            # re-cluster anonymously and the label has to be applied again.
             emptied = [pid for pid in person_ids if pid not in remaining]
             for batch in chunked(emptied):
                 s.execute(delete(Person).where(Person.id.in_(batch)))
+            # One UPDATE per person instead of a SELECT + attribute write per
+            # person: no identity-map round trip, and nothing to flush per row.
             for person_id, n in remaining.items():
-                person = s.get(Person, person_id)
-                if person is not None:
-                    person.photo_count = n
+                s.execute(
+                    update(Person).where(Person.id == person_id).values(photo_count=n)
+                )
             s.flush()
 
         surviving = set(s.scalars(select(Photo.sha256))) | set(s.scalars(select(Video.sha256)))

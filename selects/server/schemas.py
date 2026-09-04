@@ -2,12 +2,16 @@
 from __future__ import annotations
 
 import re
-from typing import Literal, Optional
+from typing import Annotated, Literal, Optional
 
 from fastapi import HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 _SHA256_RE = re.compile(r"[0-9a-f]{64}", re.I)
+
+#: A bare 64-char hex digest (either case). Validated at the edge so a malformed
+#: entry is a 422 from pydantic instead of a silent miss deep inside a query.
+SHA = Annotated[str, Field(pattern=r"^[0-9a-fA-F]{64}$")]
 
 #: The four quick-sort quality buckets ``/api/photos`` and
 #: ``/api/swipes/summary`` accept. Anything else is a 422.
@@ -36,11 +40,12 @@ class StatusRequest(BaseModel):
 
     A GET with the same shas in the query string breaks once the URL grows
     past a browser/proxy length limit, so these accept the sha list as JSON
-    instead. ``shas`` must be a JSON array of strings; anything else (a
-    non-list body, or a non-string entry) is a 422 from pydantic.
+    instead. ``shas`` must be a JSON array of sha256 hex digests; anything else
+    (a non-list body, a non-string entry, a malformed digest, or more than
+    100,000 entries — far past any real library) is a 422 from pydantic.
     """
 
-    shas: list[str] = []
+    shas: list[SHA] = Field(default_factory=list, max_length=100_000)
 
 
 class PhotoOut(BaseModel):

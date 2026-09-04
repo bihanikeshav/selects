@@ -91,6 +91,14 @@ def register_photos_routes(app: FastAPI, cfg: FolderConfig) -> None:
             "taken_at",
             description="'taken_at' (default), 'aesthetic' (CLIP-IQA descending, nulls last), 'iqa', 'random'",
         ),
+        seed: Optional[int] = Query(
+            None,
+            description=(
+                "Only meaningful with sort=random: makes the shuffle deterministic "
+                "so OFFSET paging is stable for the length of a session. Without "
+                "it, every page is re-shuffled and pages overlap."
+            ),
+        ),
         min_aesthetic_pct: float = Query(
             0.0, ge=0.0, le=100.0,
             description="Drop photos whose CLIP-IQA percentile is below this value",
@@ -154,17 +162,30 @@ def register_photos_routes(app: FastAPI, cfg: FolderConfig) -> None:
                 base.with_only_columns(_func.count(_func.distinct(Photo.id)))
             ).scalar_one()
 
+            # Photo.id is the final tiebreaker on every deterministic ordering:
+            # without it, rows with equal scores (or equal taken_at) come back
+            # in whatever order SQLite happens to produce, and OFFSET paging can
+            # then repeat or skip a photo across page boundaries.
             if sort == "aesthetic":
                 base = base.order_by(
                     AestheticScore.ap25_score.desc().nulls_last(),
                     Embedding.aesthetic_iqa.desc().nulls_last(),
+                    Photo.id.asc(),
                 )
             elif sort == "iqa":
-                base = base.order_by(Embedding.aesthetic_iqa.desc())
+                base = base.order_by(Embedding.aesthetic_iqa.desc(), Photo.id.asc())
             elif sort == "random":
-                base = base.order_by(_func.random())
+                if seed is not None:
+                    # A seeded, deterministic shuffle: multiplying the id by the
+                    # seed modulo a large prime scatters ids reproducibly, so the
+                    # client can page through one stable random order.
+                    base = base.order_by(
+                        ((Photo.id * seed) % 2147483647).asc(), Photo.id.asc()
+                    )
+                else:
+                    base = base.order_by(_func.random())
             else:  # taken_at
-                base = base.order_by(Photo.taken_at.asc().nullslast())
+                base = base.order_by(Photo.taken_at.asc().nullslast(), Photo.id.asc())
 
             # Page over DISTINCT photo ids, not over join rows: a photo that is
             # the primary of two moments occupies two rows, and paging those
