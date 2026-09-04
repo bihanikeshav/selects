@@ -325,8 +325,7 @@ export default function Search() {
 
           {!hasAnyFilter && (
             <div className="cluster-detail-empty">
-              Type a place, a scene or a moment. Try “monastery courtyard” or
-              “snow on the pass”.
+              {"Type a place, a scene or a moment. Try 'monastery courtyard' or 'snow on the pass'."}
             </div>
           )}
 
