@@ -20,7 +20,7 @@ dependencies = [
   "pillow>=10.2",
   "pillow-heif>=0.16",
   "rawpy>=0.21",
-  "opencv-python-headless>=4.9",
+  "opencv-python-headless>=4.9,<5",
   "numpy>=1.26",
   "pyexiv2>=2.11",
   "websockets>=12.0",
@@ -41,6 +41,7 @@ ml = [
   "sentencepiece>=0.2",       # SigLIP text tokenizer
   "huggingface-hub>=0.23",    # fetch ONNX weights from the selects-onnx repo
   "insightface>=0.7",         # face detection/recognition (already ONNX-based)
+  "opencv-python>=4.9,<5",    # insightface pulls opencv-python; 4.x required for the Haar cascade fallback (cv2.CascadeClassifier)
   "scikit-learn>=1.4",
   "hdbscan>=0.8.33",
   "umap-learn>=0.5.5",
@@ -50,7 +51,7 @@ dev = [
   "pytest>=8.0",
   "pytest-asyncio>=0.23",
   "httpx>=0.26",
-  "ruff>=0.3",
+  "ruff>=0.15,<0.17",
 ]
 
 [project.scripts]
@@ -72,3 +73,10 @@ addopts = "-ra"
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+# E501 (line-too-long) has ~80 pre-existing hits (mostly aligned inline
+# comments in db/models.py and long test literals) that predate this pin;
+# line-length stays 100 as the target for new code.
+ignore = ["E501"]
