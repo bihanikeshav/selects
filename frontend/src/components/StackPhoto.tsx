@@ -134,11 +134,9 @@ export default function StackPhoto({
     setPulseKey((k) => k + 1);
   }, [activeSha]);
 
-  // Hotkeys when focused
-  useEffect(() => {
-    if (!isFocused || !hotkeysEnabled) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+  // The one place `[` / `] `/ `K` are interpreted for this tile.
+  const handleKey = useCallback(
+    (e: Pick<KeyboardEvent, "key"> & { preventDefault: () => void }) => {
       if (e.key === "[") {
         e.preventDefault();
         cycle(-1);
@@ -149,14 +147,36 @@ export default function StackPhoto({
         e.preventDefault();
         toggleLike();
       }
+    },
+    [cycle, toggleLike],
+  );
+
+  // Hotkeys while this tile is the focused one. The tile is hover-focused as
+  // often as it is keyboard-focused, so the listener is on the window — but a
+  // press that already landed *inside* a stack root was handled by that root's
+  // own onKeyDown, so skip it here and let it be handled exactly once.
+  useEffect(() => {
+    if (!isFocused || !hotkeysEnabled) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.target instanceof Element && e.target.closest('[data-kbd-scope="stack"]')) return;
+      handleKey(e);
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [isFocused, hotkeysEnabled, cycle, toggleLike]);
+  }, [isFocused, hotkeysEnabled, handleKey]);
 
   return (
     <div
       className={className}
+      // This root owns `[` / `]` / `K`; the marker tells the Review keyboard
+      // layer (useCullKeys) to keep its hands off presses that land in here.
+      data-kbd-scope="stack"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (!hotkeysEnabled) return;
+        handleKey(e);
+      }}
       style={{
         position: "relative",
         outline: isFocused ? "2px solid var(--md-primary)" : "none",
@@ -168,6 +188,7 @@ export default function StackPhoto({
         ...style,
       }}
       onMouseEnter={onFocus}
+      onFocus={onFocus}
       onClick={() => onClick?.(activeSha)}
       onDoubleClick={() => onDoubleClick?.(activeSha)}
       title={title}

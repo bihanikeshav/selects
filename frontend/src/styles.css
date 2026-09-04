@@ -386,6 +386,15 @@ button.rail-item {
   outline: 2px solid var(--md-primary);
   outline-offset: 2px;
 }
+/* Auth-rejected variant (socket closed 4401): a notice, not a live run. */
+.indexing-pill.is-auth {
+  background: color-mix(in srgb, var(--g-yellow, #e0a800) 16%, transparent);
+  color: var(--g-yellow, #e0a800);
+  cursor: help;
+}
+.indexing-pill.is-auth .indexing-pill-dot {
+  animation: none;
+}
 .indexing-pill-dot {
   width: 8px;
   height: 8px;

@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { libraryStatus } from "../api/client";
+import { useProgressAuthRejected } from "./ProgressSocketProvider";
 import { useProgressSocket, type ProgressMsg } from "../hooks/useProgressSocket";
 import { STAGE_LABELS } from "../lib/eta";
 
@@ -14,6 +15,7 @@ const END_STAGES = new Set(["done", "cancelled"]);
  * and disappears when the run finishes, is cancelled, or was never running.
  */
 export default function IndexingPill() {
+  const authRejected = useProgressAuthRejected();
   const [msg, setMsg] = useState<ProgressMsg | null>(null);
   const msgRef = useRef<ProgressMsg | null>(null);
   msgRef.current = msg;
@@ -39,6 +41,20 @@ export default function IndexingPill() {
       },
     },
   );
+
+  // The server closed the progress socket with 4401: this browser has no LAN
+  // session. Retrying can only fail the same way, so say what to do instead.
+  if (authRejected) {
+    return (
+      <span
+        className="indexing-pill is-auth"
+        title="This device is not signed in. Open the LAN link Selects printed on the host machine — the one ending in ?token=… — to get access."
+      >
+        <span className="indexing-pill-dot" aria-hidden="true" />
+        <span className="indexing-pill-label">Sign in with the LAN link</span>
+      </span>
+    );
+  }
 
   if (!msg) return null;
 

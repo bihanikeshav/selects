@@ -70,6 +70,21 @@ test("libraries lists the e2e library", async ({ page, consoleErrors }) => {
   await expect(tiles.filter({ hasText: /^selects-e2e-\d+$/ })).toHaveCount(1);
 });
 
+test("libraries opens exactly one progress websocket", async ({ page, consoleErrors }) => {
+  expect(consoleErrors).toEqual([]);
+  // The indexing pill, the models card and the watch card all listen for
+  // progress; they must share the one socket ProgressSocketProvider owns.
+  const sockets: string[] = [];
+  page.on("websocket", (ws) => sockets.push(ws.url()));
+
+  await page.goto("/libraries");
+  await expect(page.locator(".lib-tile-name").first()).toBeVisible();
+  // Give every card time to mount and (wrongly) connect before counting.
+  await page.waitForTimeout(1500);
+
+  expect(sockets.filter((u) => u.includes("/ws/progress"))).toHaveLength(1);
+});
+
 test("search renders its empty state", async ({ page, consoleErrors }) => {
   expect(consoleErrors).toEqual([]);
   await page.goto("/search");

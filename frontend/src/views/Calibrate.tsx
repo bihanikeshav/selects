@@ -32,10 +32,10 @@ type Agreement = {
 
 const AGREEMENT_KEYS = ["iqa", "ap25", "combined", "personal"] as const;
 const AGREEMENT_LABELS: Record<string, string> = {
-  iqa: "IQA",
-  ap25: "AP V2.5",
-  combined: "Ensemble",
-  personal: "Personal",
+  iqa: "Quality score",
+  ap25: "Aesthetic model",
+  combined: "Combined",
+  personal: "Your taste",
 };
 
 function fmtPctile(v: number | null | undefined) {
@@ -198,7 +198,7 @@ export default function Calibrate() {
         <PageHeader
           context="Calibrate"
           title="Calibrate"
-          subtitle="Rescue shots the aesthetic models ranked low — click the ones that are actually good. That trains the personal model. Unclicked = confirmed bad."
+          subtitle="Rescue shots the aesthetic models ranked low — click the ones that are actually good. That trains your taste model. Unclicked = confirmed bad."
           actions={
             <>
               <div style={{ color: "var(--md-on-surface-var)", fontSize: 12, fontFamily: "var(--font-mono)" }}>
@@ -240,7 +240,7 @@ export default function Calibrate() {
                   fontWeight: 500,
                 }}
               >
-                Worst by IQA
+                Lowest quality scores
               </h2>
               <span style={{ fontSize: 12, color: "var(--md-on-surface-var)" }}>
                 {photos.length} photos · {flipped.size} rescued
@@ -314,7 +314,7 @@ export default function Calibrate() {
                           transition: "transform 90ms ease",
                           transform: isFlipped ? "scale(0.97)" : "scale(1)",
                         }}
-                        title={`IQA ${p.scores.iqa?.toFixed(3) ?? "—"} · AP25 ${p.scores.ap25?.toFixed(2) ?? "—"}`}
+                        title={`Quality score (IQA) ${p.scores.iqa?.toFixed(3) ?? "—"} · Aesthetic model (AP-V2.5) ${p.scores.ap25?.toFixed(2) ?? "—"}`}
                       >
                         <img
                           src={p.thumb_url}
@@ -445,7 +445,7 @@ export default function Calibrate() {
                   style={{ marginLeft: "auto" }}
                   onClick={retrain}
                   disabled={retraining}
-                  title="Retrain personal model (R)"
+                  title="Retrain your taste model (R)"
                 >
                   {retraining ? "Training…" : "Retrain"}
                   <span style={{ ...kbdStyle, marginLeft: 4 }}>R</span>
@@ -466,7 +466,7 @@ export default function Calibrate() {
                     <thead>
                       <tr>
                         <th></th>
-                        <th style={thStyle}>median ↑pctile</th>
+                        <th style={thStyle}>Median rank</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -523,7 +523,7 @@ export default function Calibrate() {
                 }}
               >
                 <li>
-                  These are the photos IQA scored lowest. Most are genuinely bad.
+                  These are the photos with the lowest quality scores. Most are genuinely bad.
                 </li>
                 <li>
                   Click any photo that's actually good — it becomes a rescue.
@@ -533,7 +533,7 @@ export default function Calibrate() {
                 </li>
                 <li>
                   Press <span style={kbdStyle}>R</span> after a few batches to retrain.
-                  Personal-model agreement rises as it learns your rescues.
+                  "Your taste" agreement rises as it learns your rescues.
                 </li>
                 <li>
                   Click the ⛶ icon (or double-click) for full-size view with ←/→ nav.
@@ -552,8 +552,8 @@ export default function Calibrate() {
             >
               {toast || (
                 <span style={{ color: "var(--md-on-surface-var)" }}>
-                  Ready. Score top right of each photo = IQA.
-                  Ensemble uses AP-V2.5 when scored. Double-click any thumb to enlarge.
+                  Ready. Score top right of each photo = quality score.
+                  Combined uses the aesthetic model when scored. Double-click any thumb to enlarge.
                 </span>
               )}
             </div>
@@ -617,14 +617,14 @@ export default function Calibrate() {
                   gap: 14,
                 }}
               >
-                <span>
-                  IQA{" "}
+                <span title="Quality score (IQA)">
+                  Quality{" "}
                   <span style={{ color: "#fff" }}>
                     {p.scores.iqa?.toFixed(3) ?? "—"}
                   </span>
                 </span>
-                <span>
-                  ap25{" "}
+                <span title="Aesthetic model (AP-V2.5)">
+                  Aesthetic{" "}
                   <span style={{ color: "#fff" }}>
                     {p.scores.ap25?.toFixed(2) ?? "—"}
                   </span>

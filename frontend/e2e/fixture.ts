@@ -79,13 +79,34 @@ async function waitForServer(child: ChildProcess, log: string[], timeoutMs = 120
   }
 }
 
+/**
+ * Kill the server and everything it spawned. On Windows that is `taskkill /T`;
+ * on POSIX the child is its own process-group leader (`detached: true` below),
+ * so signalling `-pid` reaches uvicorn's workers too — killing only the parent
+ * used to leave an orphan holding port 8765 and breaking the next run. SIGKILL
+ * follows 5s later for anything that ignored the polite request.
+ */
 function stop(child: ChildProcess): void {
   if (child.exitCode !== null || child.pid === undefined) return;
+  const pid = child.pid;
   if (process.platform === "win32") {
-    spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
-  } else {
-    child.kill("SIGTERM");
+    spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore" });
+    return;
   }
+  try {
+    process.kill(-pid, "SIGTERM");
+  } catch {
+    /* group already gone */
+  }
+  const hard = setTimeout(() => {
+    try {
+      process.kill(-pid, "SIGKILL");
+    } catch {
+      /* already gone */
+    }
+  }, 5_000);
+  hard.unref?.();
+  child.once("exit", () => clearTimeout(hard));
 }
 
 /** Resolve once the server process is really gone (or after 10s). */
@@ -125,7 +146,13 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   const child = spawn(
     python(),
     [...CLI, "serve", libDir, "--no-browser", "--no-background", "--port", String(PORT)],
-    { cwd: REPO_ROOT, env, stdio: ["ignore", "pipe", "pipe"] },
+    {
+      cwd: REPO_ROOT,
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+      // POSIX: own process group, so teardown can signal the whole tree.
+      detached: process.platform !== "win32",
+    },
   );
   child.stdout?.on("data", (d) => log.push(String(d)));
   child.stderr?.on("data", (d) => log.push(String(d)));

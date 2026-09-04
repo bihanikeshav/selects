@@ -19,6 +19,10 @@ import { useEffect, useRef } from "react";
  *   E                  -> onEnhance         (auto edit)
  *   S                  -> onStraighten
  *
+ * Events that originate inside an element marked `data-kbd-scope="stack"`
+ * (StackPhoto's focusable root) are ignored entirely: that component binds
+ * `[` / `]` / `K` for its own burst stack, and the press must be handled once.
+ *
  * No other letter is bound. Handlers are read through a ref, so inline
  * closures are fine — the listener itself is attached once.
  */
@@ -41,6 +45,15 @@ export interface CullKeyHandlers {
   onStraighten?: () => void;
 }
 
+/**
+ * True when the event happened inside a component that owns its own keyboard
+ * layer (`data-kbd-scope="stack"` — see StackPhoto). That component handles
+ * `[` / `]` / `K` itself, so this layer must not act on the same press.
+ */
+function isScopedAway(t: EventTarget | null): boolean {
+  return t instanceof Element && t.closest('[data-kbd-scope="stack"]') !== null;
+}
+
 function isEditableTarget(t: EventTarget | null): boolean {
   if (!(t instanceof HTMLElement)) return false;
   const tag = t.tagName;
@@ -61,6 +74,7 @@ export function useCullKeys(handlers: CullKeyHandlers): void {
       const h = ref.current;
       if (h.enabled === false) return;
       if (isEditableTarget(e.target)) return;
+      if (isScopedAway(e.target)) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
 
       switch (e.key) {
