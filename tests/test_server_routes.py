@@ -858,3 +858,80 @@ async def test_person_photos_carry_aesthetic_iqa(tmp_path):
         body = (await client.get(f"/api/persons/{person_id}/photos")).json()
         assert body["total"] == 1
         assert body["items"][0]["aesthetic_iqa"] == pytest.approx(0.75)
+
+
+async def test_likes_status_post_matches_get_and_handles_edge_cases(tmp_path):
+    from selects.db import session_scope
+    from selects.db.models import Photo, Swipe
+
+    cfg = get_folder_config(tmp_path)
+    Session = init_db(cfg.db_path)
+    with session_scope(Session) as s:
+        kept = Photo(path=str(tmp_path / "kept.jpg"), sha256="a" * 64)
+        silver = Photo(path=str(tmp_path / "silver.jpg"), sha256="b" * 64)
+        rejected = Photo(path=str(tmp_path / "rej.jpg"), sha256="c" * 64)
+        s.add_all([kept, silver, rejected])
+        s.flush()
+        s.add(Swipe(photo_id=kept.id, decision="keep"))
+        s.add(Swipe(photo_id=silver.id, decision="silver"))
+        s.add(Swipe(photo_id=rejected.id, decision="reject"))
+
+    shas = ["a" * 64, "b" * 64, "c" * 64]
+    app = build_app(cfg, run_background=False)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        get_r = await client.get(f"/api/likes/status?shas={','.join(shas)}")
+        assert get_r.status_code == 200
+
+        post_r = await client.post("/api/likes/status", json={"shas": shas})
+        assert post_r.status_code == 200
+        assert post_r.json() == get_r.json()
+        assert post_r.json() == {"a" * 64: True, "b" * 64: True, "c" * 64: False}
+
+        empty_r = await client.post("/api/likes/status", json={"shas": []})
+        assert empty_r.status_code == 200
+        assert empty_r.json() == {}
+
+        no_body_r = await client.post("/api/likes/status", json={})
+        assert no_body_r.status_code == 200
+        assert no_body_r.json() == {}
+
+        bad_r = await client.post("/api/likes/status", json={"shas": "not-a-list"})
+        assert bad_r.status_code == 422
+
+        bad_entry_r = await client.post("/api/likes/status", json={"shas": [1, 2, 3]})
+        assert bad_entry_r.status_code == 422
+
+
+async def test_edits_status_post_matches_get_and_handles_edge_cases(tmp_path):
+    from selects.db import session_scope
+    from selects.db.models import Photo
+
+    cfg = get_folder_config(tmp_path)
+    Session = init_db(cfg.db_path)
+    with session_scope(Session) as s:
+        s.add(Photo(path=str(tmp_path / "a.jpg"), sha256="a" * 64))
+        s.add(Photo(path=str(tmp_path / "b.jpg"), sha256="b" * 64))
+
+    shas = ["a" * 64, "b" * 64]
+    app = build_app(cfg, run_background=False)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        get_r = await client.get(f"/api/edits/status?shas={','.join(shas)}")
+        assert get_r.status_code == 200
+
+        post_r = await client.post("/api/edits/status", json={"shas": shas})
+        assert post_r.status_code == 200
+        assert post_r.json() == get_r.json()
+        assert set(post_r.json().keys()) == set(shas)
+        assert all(v["edited"] is False for v in post_r.json().values())
+
+        empty_r = await client.post("/api/edits/status", json={"shas": []})
+        assert empty_r.status_code == 200
+        assert empty_r.json() == {}
+
+        bad_r = await client.post("/api/edits/status", json={"shas": "not-a-list"})
+        assert bad_r.status_code == 422
+
+        bad_entry_r = await client.post("/api/edits/status", json={"shas": [1, 2, 3]})
+        assert bad_entry_r.status_code == 422

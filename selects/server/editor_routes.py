@@ -10,6 +10,7 @@ from fastapi import Body, FastAPI, HTTPException, Query
 from selects.config import FolderConfig
 from selects.db import init_db, session_scope
 from selects.db.models import Photo
+from selects.server.schemas import StatusRequest
 from selects.util import chunked
 
 log = logging.getLogger(__name__)
@@ -153,19 +154,14 @@ def register_editor_routes(app: FastAPI, cfg: FolderConfig) -> None:
     def Session():
         return init_db(cfg.db_path)()
 
-    @app.get("/api/edits/status")
-    def edits_status(shas: str = Query("", description="comma-separated sha256 list")):
-        """Report which of the given photos have an XMP sidecar.
-
-        XMP next to an original = darktable (or any editor) has saved develop
-        instructions for it. The presence of a fresh XMP = "edited".
-        """
-        sha_list = [s for s in shas.split(",") if s.strip()] if shas else None
+    def _edits_status(sha_list: Optional[list[str]]) -> dict[str, dict]:
         out: dict[str, dict] = {}
         with session_scope(Session) as s:
             base_q = s.query(Photo.sha256, Photo.path)
-            if sha_list:
-                # Chunked: the client sends one sha per visible photo.
+            if sha_list is not None:
+                # Chunked: the client sends one sha per visible photo. An
+                # explicit empty list means "no shas" (returns {}), distinct
+                # from the GET's "no ?shas at all" (returns everything).
                 rows = []
                 for chunk in chunked(sha_list):
                     rows.extend(base_q.filter(Photo.sha256.in_(chunk)).all())
@@ -184,6 +180,25 @@ def register_editor_routes(app: FastAPI, cfg: FolderConfig) -> None:
                         break
                 out[sha] = {"edited": edited, "mtime": mtime}
         return out
+
+    @app.get("/api/edits/status")
+    def edits_status(shas: str = Query("", description="comma-separated sha256 list")):
+        """Report which of the given photos have an XMP sidecar.
+
+        XMP next to an original = darktable (or any editor) has saved develop
+        instructions for it. The presence of a fresh XMP = "edited".
+        """
+        sha_list = [s for s in shas.split(",") if s.strip()] if shas else None
+        return _edits_status(sha_list)
+
+    @app.post("/api/edits/status")
+    def edits_status_post(payload: StatusRequest):
+        """Same as GET, but the sha list travels in a JSON body.
+
+        Avoids the URL-length ceiling GET hits once a library-sized sha list
+        is passed in the query string.
+        """
+        return _edits_status(payload.shas)
 
     @app.post("/api/edit/darktable")
     def launch_darktable(payload: dict = Body(...)):

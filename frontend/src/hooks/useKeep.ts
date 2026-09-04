@@ -16,7 +16,11 @@ export function useKeepStatus(shas: string[]) {
   useEffect(() => {
     if (shas.length === 0) return;
     let cancelled = false;
-    fetch(`/api/likes/status?shas=${key}`)
+    fetch("/api/likes/status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ shas }),
+    })
       .then((r) => (r.ok ? r.json() : {}))
       .then((j: Record<string, boolean>) => {
         if (!cancelled) setKept(j);

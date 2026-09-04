@@ -75,17 +75,17 @@ def _seed_photos(tmp_path: Path, n: int = N):
     return cfg, Session, ids
 
 
-def _endpoint(cfg, path: str):
-    """Return the route handler registered at *path*.
+def _endpoint(cfg, path: str, method: str = "GET"):
+    """Return the route handler registered at *path* for *method*.
 
     Used where the request would carry 1,200 sha256s: httpx refuses URLs over
     64 KB, but the handler is still what has to survive the variable cap.
     """
     app = build_app(cfg, run_background=False)
     for route in app.routes:
-        if getattr(route, "path", None) == path:
+        if getattr(route, "path", None) == path and method in getattr(route, "methods", ()):
             return route.endpoint
-    raise AssertionError(f"no route registered at {path}")
+    raise AssertionError(f"no {method} route registered at {path}")
 
 
 async def _get(cfg, url: str):
@@ -284,6 +284,24 @@ def test_edits_status_handles_more_shas_than_variables(tmp_path):
     assert all(v["edited"] is False for v in out.values())
 
 
+def test_edits_status_post_handles_more_shas_than_variables(tmp_path):
+    """The POST body variant must survive the same 999-variable cap, and
+    return exactly what the GET query-string variant returns."""
+    from selects.server.schemas import StatusRequest
+
+    cfg, Session, ids = _seed_photos(tmp_path)
+    sha_list = [f"{i:064x}" for i in range(N)]
+    shas = ",".join(sha_list)
+
+    with sqlite_999_variables(engine_for(cfg.db_path)):
+        get_out = _endpoint(cfg, "/api/edits/status")(shas=shas)
+        post_out = _endpoint(cfg, "/api/edits/status", method="POST")(
+            payload=StatusRequest(shas=sha_list)
+        )
+    assert len(post_out) == N
+    assert post_out == get_out
+
+
 # ── selects/server/export_routes.py ───────────────────────────────────────────
 
 async def test_xmp_preview_resolves_a_story_bigger_than_variables(tmp_path):
@@ -367,6 +385,27 @@ def test_likes_status_handles_more_shas_than_variables(tmp_path):
         out = _endpoint(cfg, "/api/likes/status")(shas=shas)
     assert len(out) == N
     assert all(out.values())
+
+
+def test_likes_status_post_handles_more_shas_than_variables(tmp_path):
+    """The POST body variant must survive the same 999-variable cap, and
+    return exactly what the GET query-string variant returns."""
+    from selects.server.schemas import StatusRequest
+
+    cfg, Session, ids = _seed_photos(tmp_path)
+    with session_scope(Session) as s:
+        s.add_all([Swipe(photo_id=pid, decision="keep", swiped_at=_BASE) for pid in ids])
+    sha_list = [f"{i:064x}" for i in range(N)]
+    shas = ",".join(sha_list)
+
+    with sqlite_999_variables(engine_for(cfg.db_path)):
+        get_out = _endpoint(cfg, "/api/likes/status")(shas=shas)
+        post_out = _endpoint(cfg, "/api/likes/status", method="POST")(
+            payload=StatusRequest(shas=sha_list)
+        )
+    assert len(post_out) == N
+    assert all(post_out.values())
+    assert post_out == get_out
 
 
 # ── selects/server/search2_routes.py ──────────────────────────────────────────

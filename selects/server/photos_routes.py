@@ -13,7 +13,8 @@ from selects.db.models import (
     AestheticScore, ClassicalScore, Embedding, Moment, MomentMember, Photo, PhotoTag,
 )
 from selects.server.schemas import (
-    MomentMemberOut, MomentOut, PhotoList, QualityBucket, photo_out, require_sha256,
+    MomentMemberOut, MomentOut, PhotoList, QualityBucket, StatusRequest, photo_out,
+    require_sha256,
 )
 from selects.util import KEEP_DECISIONS, chunked
 
@@ -387,18 +388,17 @@ def register_photos_routes(app: FastAPI, cfg: FolderConfig) -> None:
                 entries.sort(key=lambda e: e["taken_at"] or "")
         return {"total": len(entries), "photos": entries}
 
-    @app.get("/api/likes/status")
-    def likes_status(shas: str = Query("", description="comma-separated sha256s")):
-        """Return {sha256: kept_bool} for the given list."""
+    def _likes_status(sha_list: Optional[list[str]]) -> dict[str, bool]:
         from selects.db.models import Swipe
-        sha_list = [s for s in shas.split(",") if s.strip()] if shas else None
         out: dict[str, bool] = {}
         with session_scope(Session) as s:
             q = s.query(Photo.sha256, Swipe.decision).join(
                 Swipe, Swipe.photo_id == Photo.id
             )
-            if sha_list:
-                # Chunked: the client sends one sha per visible photo.
+            if sha_list is not None:
+                # Chunked: the client sends one sha per visible photo. An
+                # explicit empty list means "no shas" (returns {}), distinct
+                # from the GET's "no ?shas at all" (returns everything).
                 rows = []
                 for chunk in chunked(sha_list):
                     rows.extend(q.filter(Photo.sha256.in_(chunk)).all())
@@ -407,6 +407,21 @@ def register_photos_routes(app: FastAPI, cfg: FolderConfig) -> None:
             for sha, decision in rows:
                 out[sha] = decision in KEEP_DECISIONS
         return out
+
+    @app.get("/api/likes/status")
+    def likes_status(shas: str = Query("", description="comma-separated sha256s")):
+        """Return {sha256: kept_bool} for the given list."""
+        sha_list = [s for s in shas.split(",") if s.strip()] if shas else None
+        return _likes_status(sha_list)
+
+    @app.post("/api/likes/status")
+    def likes_status_post(payload: StatusRequest):
+        """Same as GET, but the sha list travels in a JSON body.
+
+        Avoids the URL-length ceiling GET hits once a library-sized sha list
+        is passed in the query string.
+        """
+        return _likes_status(payload.shas)
 
     @app.get("/api/swipes/summary")
     def swipes_summary(
