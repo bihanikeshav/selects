@@ -10,16 +10,6 @@ function pct(v: number): string {
   return `${Math.round(v * 100)}%`;
 }
 
-/** Plain-language read on the model's accuracy (AUC) — no jargon on screen. */
-function tasteQuality(auc: number | null): string {
-  if (auc === null) return "learning your taste";
-  if (auc >= 0.9) return "knows your taste really well";
-  if (auc >= 0.8) return "knows your taste well";
-  if (auc >= 0.7) return "getting to know your taste";
-  if (auc >= 0.6) return "still learning your taste";
-  return "just getting started";
-}
-
 /** Compact "Your taste" card: shows how many keep/reject decisions the
  *  personalized taste model was trained on, how much it currently influences
  *  the curated ranking, and a button to (re)train it. */
@@ -67,35 +57,30 @@ export default function TasteCard() {
       <div className="taste-main">
         <div className="taste-head">
           <h2>Your taste</h2>
-          {trained && status && (
-            <span className="taste-sub" title={status.auc !== null ? `AUC ${status.auc.toFixed(2)}` : undefined}>
-              {tasteQuality(status.auc)}
-            </span>
-          )}
         </div>
 
         {err ? (
           <p className="taste-error">{err}</p>
         ) : trained && status ? (
           <p className="taste-line">
-            Trained on <strong>{status.n_samples}</strong> of your keep/skip choices ·{" "}
+            Trained on <strong>{status.n_samples}</strong> decisions ·{" "}
             {status.weight > 0 ? (
-              <>shaping your picks by <strong>{pct(status.weight)}</strong></>
+              <>nudging your picks by up to <strong>{pct(status.weight)}</strong></>
             ) : (
-              <>not shaping your picks yet — keep sorting</>
+              <>not shaping your picks yet</>
             )}
           </p>
         ) : (
           <p className="taste-line">
-            Still warming up · <strong>{labeled}</strong> of {MIN_SAMPLES} choices made
+            Still warming up · <strong>{labeled}</strong> of {MIN_SAMPLES} decisions made
           </p>
         )}
       </div>
 
       <p className="taste-explain">
-        Every photo you keep or skip teaches selects what you like. The more you
-        sort, the more it leans on your taste — but it only ever nudges the order
-        of your picks, never more than 40%, so it can't take over.
+        Every photo you keep or reject teaches selects what you like. The more you
+        review, the more it leans on your taste — but it only ever nudges the
+        order of your picks, never more than 40%, so it can't take over.
       </p>
 
       <button

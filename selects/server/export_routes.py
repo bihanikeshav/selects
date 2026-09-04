@@ -16,17 +16,23 @@ from __future__ import annotations
 import threading
 import uuid
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal
 
-from fastapi import APIRouter, Body, FastAPI, HTTPException, Query
+from fastapi import APIRouter, FastAPI, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy import select
 
 from selects.config import FolderConfig
 from selects.db import init_db, session_scope
 from selects.db.models import Photo, Story, StoryItem, Swipe
-from selects.export import ExportItem, export_photos, preview_xmp_writes, write_xmp_ratings
-
-router = APIRouter()
+from selects.export import (
+    ExportItem,
+    export_photos,
+    preview_xmp_writes,
+    validate_export_target,
+    write_xmp_ratings,
+)
+from selects.util import KEEP_DECISIONS
 
 # decision -> XMP verdict key used by selects.export.VERDICT_RATING
 _DECISION_VERDICT: dict[str, str] = {
@@ -52,13 +58,17 @@ class XmpWriteRequest(BaseModel):
 
 
 def register_export_routes(app: FastAPI, cfg: FolderConfig) -> None:
+    # Per-registration router: a module-level one would accumulate a duplicate
+    # copy of every route each time an app is built in the same process.
+    router = APIRouter()
+
     def Session():
         return init_db(cfg.db_path)()
 
     def _resolve_source(s, source: str) -> list[ExportItem]:
         """Resolve a source spec to a list of ExportItem, in export order."""
         if source in ("curated", "liked"):
-            decisions = ["keep", "silver"] if source == "curated" else ["keep"]
+            decisions = list(KEEP_DECISIONS) if source == "curated" else ["keep"]
             rows = (
                 s.query(Photo, Swipe.swiped_at)
                 .join(Swipe, Swipe.photo_id == Photo.id)
@@ -109,7 +119,7 @@ def register_export_routes(app: FastAPI, cfg: FolderConfig) -> None:
         swiped photo whose decision maps to a verdict, filtered by *source*.
         """
         if source in ("curated", "liked"):
-            decisions = ["keep", "silver"] if source == "curated" else ["keep"]
+            decisions = list(KEEP_DECISIONS) if source == "curated" else ["keep"]
         elif source.startswith("story:"):
             try:
                 story_id = int(source.split(":", 1)[1])
@@ -118,13 +128,14 @@ def register_export_routes(app: FastAPI, cfg: FolderConfig) -> None:
             story = s.get(Story, story_id)
             if not story:
                 raise HTTPException(404, detail="story not found")
-            photo_ids = {
-                pid for (pid,) in s.query(StoryItem.photo_id).filter(StoryItem.story_id == story_id).all()
-            }
+            # Subquery, not a bound id list: a story can hold a whole trip's
+            # worth of photos and SQLite caps bound variables per statement.
             rows = (
                 s.query(Photo, Swipe.decision)
                 .join(Swipe, Swipe.photo_id == Photo.id)
-                .filter(Photo.id.in_(photo_ids))
+                .filter(Photo.id.in_(
+                    select(StoryItem.photo_id).where(StoryItem.story_id == story_id)
+                ))
                 .all()
             )
             return [
@@ -149,6 +160,11 @@ def register_export_routes(app: FastAPI, cfg: FolderConfig) -> None:
 
     @router.post("/api/export")
     def start_export(req: ExportRequest):
+        try:
+            validate_export_target(req.target, req.mode)
+        except ValueError as exc:
+            raise HTTPException(400, detail=str(exc)) from exc
+
         with session_scope(Session) as s:
             items = _resolve_source(s, req.source)
 
@@ -201,7 +217,7 @@ def register_export_routes(app: FastAPI, cfg: FolderConfig) -> None:
     ):
         with session_scope(Session) as s:
             triples = _resolve_ratable(s, source)
-        plans = preview_xmp_writes(triples, force=force)
+        plans = preview_xmp_writes(triples, force=force, library_root=cfg.folder)
         return {
             "total": len(plans),
             "to_write": sum(1 for p in plans if p.action == "write"),
@@ -226,7 +242,7 @@ def register_export_routes(app: FastAPI, cfg: FolderConfig) -> None:
     def write_xmp(req: XmpWriteRequest):
         with session_scope(Session) as s:
             triples = _resolve_ratable(s, req.source)
-        plans = write_xmp_ratings(triples, force=req.force)
+        plans = write_xmp_ratings(triples, force=req.force, library_root=cfg.folder)
         failed = sum(1 for p in plans if p.reason and p.reason.startswith("write failed"))
         written = sum(1 for p in plans if p.action == "write")
         return {

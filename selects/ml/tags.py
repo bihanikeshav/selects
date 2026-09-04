@@ -10,6 +10,7 @@ from selects.config import FolderConfig
 from selects.db import init_db, session_scope
 from selects.db.models import Embedding, PhotoTag, PipelineState
 from selects.ml.trip_data import DEFAULT_TAG_PROMPTS, load_tag_prompts
+from selects.util import chunked
 
 from .embed import encode_text_prompts
 
@@ -113,9 +114,10 @@ def run_tag_stage(
     # the ORM can't address; scoped to source IS NULL so ram/posting/lookback
     # tags from other stages are untouched.
     with session_scope(Session) as s:
-        s.query(PhotoTag).filter(
-            PhotoTag.photo_id.in_(ids), PhotoTag.source.is_(None)
-        ).delete(synchronize_session=False)
+        for chunk in chunked(ids):
+            s.query(PhotoTag).filter(
+                PhotoTag.photo_id.in_(chunk), PhotoTag.source.is_(None)
+            ).delete(synchronize_session=False)
         s.flush()
 
         for k_idx, pid in enumerate(ids):

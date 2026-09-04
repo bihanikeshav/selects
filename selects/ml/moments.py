@@ -35,11 +35,17 @@ def _haversine_deg(a: tuple[float, float], b: tuple[float, float]) -> float:
     return math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2)
 
 
-def _matches(a: dict, b: dict) -> bool:
+def _matches(
+    a: dict,
+    b: dict,
+    *,
+    time_gap_s: float = TIME_GAP_S,
+    visual_sim_thresh: float = VISUAL_SIM_THRESH,
+) -> bool:
     """Return True iff photos a and b belong to the same Moment."""
     # 1) Time guard
     dt = abs((a["taken_at"] - b["taken_at"]).total_seconds())
-    if dt > TIME_GAP_S:
+    if dt > time_gap_s:
         return False
 
     # 2) GPS (only applied when both have coordinates)
@@ -52,7 +58,7 @@ def _matches(a: dict, b: dict) -> bool:
 
     # 3) Visual similarity (SigLIP cosine; embeddings are pre-normalised)
     sim = float(np.dot(a["emb"], b["emb"]))
-    if sim < VISUAL_SIM_THRESH:
+    if sim < visual_sim_thresh:
         return False
 
     # 4) Face identity
@@ -133,6 +139,9 @@ def run_moment_stage(
         log.info("moment: no photos with embeddings, nothing to do")
         return 0
 
+    time_gap_s = float(cfg.burst_window_seconds)
+    visual_sim_thresh = float(cfg.burst_similarity_threshold)
+
     log.info("moment: clustering %d photos", n_photos)
 
     # ------------------------------------------------------------------ #
@@ -153,14 +162,19 @@ def run_moment_stage(
 
     start = 0
     for i in range(n_photos):
-        # Advance start pointer past photos outside the 60 s window
+        # Advance start pointer past photos outside the burst window
         while start < i and (
             photo_records[i]["taken_at"] - photo_records[start]["taken_at"]
-        ).total_seconds() > TIME_GAP_S:
+        ).total_seconds() > time_gap_s:
             start += 1
 
         for j in range(start, i):
-            if _matches(photo_records[i], photo_records[j]):
+            if _matches(
+                photo_records[i],
+                photo_records[j],
+                time_gap_s=time_gap_s,
+                visual_sim_thresh=visual_sim_thresh,
+            ):
                 union(j, i)
 
         if on_progress and i % 100 == 0:

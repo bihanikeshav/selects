@@ -1,14 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { modelsStatus, startModelsDownload } from "../api/client";
 import type { ModelsStatus } from "../api/types";
-
-interface ProgressMsg {
-  stage: string;
-  current: number;
-  total: number;
-  message?: string;
-}
+import { useProgressSocket, type ProgressMsg } from "../hooks/useProgressSocket";
 
 function gb(mb: number): string {
   return (mb / 1024).toFixed(1);
@@ -35,7 +29,7 @@ export default function ModelsCard() {
   const [err, setErr] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState<ProgressMsg | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
+  const [socketOn, setSocketOn] = useState(false);
 
   async function load() {
     try {
@@ -50,42 +44,28 @@ export default function ModelsCard() {
 
   useEffect(() => {
     load();
-    return () => {
-      wsRef.current?.close();
-    };
   }, []);
 
-  function connect() {
-    if (wsRef.current) return;
-    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(`${proto}//${window.location.host}/ws/progress`);
-    wsRef.current = ws;
-    ws.onmessage = (ev) => {
-      try {
-        const msg = JSON.parse(ev.data) as ProgressMsg;
-        // This card only cares about the models stage; ignore everything else
-        // that may be flowing on the shared socket.
-        if (msg.stage !== "models") return;
-        setProgress(msg);
-        if (msg.message === "done") {
-          ws.close();
-          setDownloading(false);
-          setProgress(null);
-          load();
-        }
-      } catch {
-        /* ignore malformed frames */
+  // This card only cares about the models stage; everything else on the shared
+  // socket belongs to the indexing run.
+  useProgressSocket(
+    (msg: ProgressMsg) => {
+      if (msg.stage !== "models") return;
+      setProgress(msg);
+      if (msg.message === "done") {
+        setSocketOn(false);
+        setDownloading(false);
+        setProgress(null);
+        load();
       }
-    };
-    ws.onclose = () => {
-      wsRef.current = null;
-    };
-  }
+    },
+    { enabled: socketOn },
+  );
 
   async function onDownload() {
     setErr(null);
     setDownloading(true);
-    connect();
+    setSocketOn(true);
     try {
       await startModelsDownload();
     } catch (e) {

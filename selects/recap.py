@@ -175,11 +175,10 @@ def generate_recap(
 # ─── scoring & selection ──────────────────────────────────────────────────────
 
 def _photo_score(cfg: FolderConfig, aesc, emb, rank: int) -> float:
-    """Higher is better. Prefers the combined NIMA/AP25 aesthetic score, falls
-    back to the CLIP-IQA score on Embedding, falls back to curation rank
-    (earlier-picked representatives score slightly higher)."""
-    if aesc is not None and aesc.ap25_score is not None and aesc.nima_score is not None:
-        return cfg.ap_weight * aesc.ap25_score + cfg.nima_weight * aesc.nima_score
+    """Higher is better. Prefers CLIP-IQA on Embedding; falls back to
+    curation rank when IQA is missing (earlier-picked representatives score
+    slightly higher). AP25/NIMA are not used."""
+    del cfg, aesc
     if emb is not None and emb.aesthetic_iqa is not None:
         return float(emb.aesthetic_iqa)
     return max(0.0, 1.0 - rank * 0.01)
@@ -400,8 +399,8 @@ def _render_page(
 ) -> str:
     km_stat = f'{stats["km"]:.0f} km' if stats.get("km") is not None else "—"
     stat_blocks = "".join(
-        f'<div class="recap-stat"><span class="recap-stat-num">{v}</span><span class="recap-stat-label">{l}</span></div>'
-        for v, l in [
+        f'<div class="recap-stat"><span class="recap-stat-num">{v}</span><span class="recap-stat-label">{lbl}</span></div>'
+        for v, lbl in [
             (stats["days"], "days"),
             (km_stat, "traveled"),
             (stats["taken"], "photos taken"),

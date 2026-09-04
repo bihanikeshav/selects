@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import {
   activateLibrary,
   createLibrary,
+  libraryStatus,
   listLibraries,
   modelsStatus,
   startIndexing,
@@ -16,31 +17,15 @@ import {
   estimateRemainingSeconds,
   estimateTotalSeconds,
   fmtDuration,
+  STAGE_LABELS,
+  STAGE_SEQUENCE,
   type Backend,
 } from "../lib/eta";
+import { useProgressSocket, type ProgressMsg } from "../hooks/useProgressSocket";
 import FolderPicker from "../components/FolderPicker";
 
-type Stage = "models" | "index" | "classical" | "embed" | "tag" | "story" | "done";
-
-interface ProgressMsg {
-  stage: Stage;
-  current: number;
-  total: number;
-  message?: string;
-}
-
-const STAGE_LABELS: Record<Stage, string> = {
-  models: "Downloading AI models",
-  index: "Indexing files",
-  classical: "Scoring sharpness & exposure",
-  embed: "Understanding each photo",
-  tag: "Tagging scenes & subjects",
-  story: "Grouping into stories",
-  done: "Done",
-};
-
 // Stages shown in the indexing checklist (models is handled as its own gate).
-const STAGE_ORDER: Stage[] = ["index", "classical", "embed", "tag", "story"];
+const STAGE_ORDER = STAGE_SEQUENCE;
 
 const STEPS = [
   {
@@ -56,7 +41,7 @@ const STEPS = [
   {
     n: 3,
     title: "Review the best",
-    body: "Walk through curated stories, keep the keepers and skip the rest in seconds.",
+    body: "Walk through curated stories, keep the keepers and reject the rest in seconds.",
   },
 ];
 
@@ -84,15 +69,26 @@ export default function Onboarding() {
   const [installedCount, setInstalledCount] = useState(0);
   const [installedMb, setInstalledMb] = useState(0);
   const [downloading, setDownloading] = useState(false);
-  const wsRef = useRef<WebSocket | null>(null);
+  const [socketOn, setSocketOn] = useState(false);
   const libIdRef = useRef<string | null>(null);
   const [sys, setSys] = useState<SystemInfo | null>(null);
   const [nPhotos, setNPhotos] = useState(0);
   const [stopping, setStopping] = useState(false);
   const [, setTick] = useState(0);
+  const stageStartRef = useRef<{ stage: string; at: number }>({ stage: "", at: 0 });
+  const doneRef = useRef(false);
+  const stoppingRef = useRef(false);
+  const phaseRef = useRef<Phase>(phase);
+  phaseRef.current = phase;
+  const lastKnownStageIdxRef = useRef(0);
+  // True once at least one indexing frame has arrived, so an "is it still
+  // running?" reconcile on socket open can't fire before the run has begun.
+  const sawIndexProgressRef = useRef(false);
 
   async function stopIndexing() {
+    stoppingRef.current = true;
     setStopping(true);
+    setSocketOn(false);
     try {
       await fetch("/api/libraries/cancel", { method: "POST" });
     } catch {
@@ -101,13 +97,6 @@ export default function Onboarding() {
     // Partial progress is kept; the user lands back in the app and can resume.
     navigate("/");
   }
-  const stageStartRef = useRef<{ stage: string; at: number }>({ stage: "", at: 0 });
-
-  useEffect(() => {
-    return () => {
-      wsRef.current?.close();
-    };
-  }, []);
 
   // Detect CPU vs GPU once so the indexing screen can set expectations.
   // If libraries already exist, this page was opened via "Add library" — offer a
@@ -132,50 +121,106 @@ export default function Onboarding() {
   // Messages are routed by `stage`: "models" frames drive the download gate
   // (and, on their "done" message, hand off to indexing on the same socket);
   // every other stage drives the indexing checklist, ending at stage "done".
-  function connectProgress() {
-    if (wsRef.current) return;
-    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(`${proto}//${window.location.host}/ws/progress`);
-    wsRef.current = ws;
-    ws.onmessage = (ev) => {
-      try {
-        const msg = JSON.parse(ev.data) as ProgressMsg;
-        if (msg.stage === "models") {
-          setModelProgress(msg);
-          if (msg.message === "done") {
-            beginIndexing();
-          }
-          return;
-        }
-        setProgress(msg);
-        // Record when each stage started (for live ETA) and learn the photo
-        // count from the per-photo stages (their total == number of photos).
-        if (stageStartRef.current.stage !== msg.stage) {
-          stageStartRef.current = { stage: msg.stage, at: Date.now() };
-        }
-        if (
-          msg.total > 0 &&
-          (msg.stage === "index" ||
-            msg.stage === "classical" ||
-            msg.stage === "embed" ||
-            msg.stage === "tag")
-        ) {
-          setNPhotos((prev) => Math.max(prev, msg.total));
-        }
-        if (msg.stage === "done") {
-          setPhase("done");
-          ws.close();
-        }
-      } catch {
-        /* ignore malformed frames */
+  useProgressSocket(
+    (msg: ProgressMsg) => {
+      if (msg.stage === "models") {
+        setModelProgress(msg);
+        if (msg.message === "done") beginIndexing();
+        return;
       }
-    };
-    ws.onclose = () => {
-      wsRef.current = null;
-      // If the stream ended after real indexing progress but never sent an
-      // explicit "done", treat that as completion so the user isn't stranded.
-      setPhase((p) => (p === "indexing" ? "done" : p));
-    };
+      if (msg.type === "watch" || msg.stage === "watch" || !msg.stage) return;
+      sawIndexProgressRef.current = true;
+      setProgress(msg);
+      // Record when each stage started (for live ETA) and learn the photo
+      // count from the per-photo stages (their total == number of photos).
+      if (stageStartRef.current.stage !== msg.stage) {
+        stageStartRef.current = { stage: msg.stage, at: Date.now() };
+      }
+      const knownIdx = STAGE_ORDER.indexOf(msg.stage);
+      if (knownIdx >= 0) lastKnownStageIdxRef.current = knownIdx;
+      if (
+        msg.total > 0 &&
+        (msg.stage === "index" ||
+          msg.stage === "video" ||
+          msg.stage === "classical" ||
+          msg.stage === "embed" ||
+          msg.stage === "aesthetic" ||
+          msg.stage === "tag" ||
+          msg.stage === "ram_tag" ||
+          msg.stage === "smart_tag" ||
+          msg.stage === "face_embed")
+      ) {
+        setNPhotos((prev) => Math.max(prev, msg.total));
+      }
+      if (msg.stage === "done") {
+        doneRef.current = true;
+        setPhase("done");
+        setSocketOn(false);
+      }
+    },
+    {
+      enabled: socketOn,
+      onOpen: () => {
+        setErr(null);
+        // The progress bus has no replay: a reconnect can miss the "done"
+        // frame entirely. If we had already seen indexing frames and the
+        // server says nothing is indexing any more, the run is over.
+        if (doneRef.current || stoppingRef.current) return;
+        if (phaseRef.current !== "indexing" || !sawIndexProgressRef.current) return;
+        libraryStatus()
+          .then((st) => {
+            if (st.indexing || doneRef.current || stoppingRef.current) return;
+            if (phaseRef.current !== "indexing") return;
+            doneRef.current = true;
+            setPhase("done");
+            setSocketOn(false);
+          })
+          .catch(() => {});
+      },
+      onClose: () => {
+        if (doneRef.current || stoppingRef.current) return;
+        // A hidden tab does not reconnect until it is shown again, so a close
+        // there is expected — do not accuse the backend of dropping out in a
+        // banner nobody can see (and which would still be up on return).
+        if (document.visibilityState === "hidden") return;
+        const p = phaseRef.current;
+        if (p === "indexing" || p === "models") {
+          setErr("Progress connection lost — reconnecting…");
+        }
+      },
+    },
+  );
+
+  function connectProgress() {
+    setSocketOn(true);
+  }
+
+  /**
+   * Retry after a dropped connection. If the backend says an index is already
+   * running, only reattach the socket — re-POSTing would start a second run.
+   */
+  async function retryProgress() {
+    setErr(null);
+    doneRef.current = false;
+    stoppingRef.current = false;
+    connectProgress();
+    if (phaseRef.current === "indexing") {
+      let running = false;
+      try {
+        running = Boolean((await libraryStatus()).indexing);
+      } catch {
+        /* status unreachable — fall through and try to (re)start */
+      }
+      if (!running) beginIndexing();
+      return;
+    }
+    if (phaseRef.current === "models") {
+      setDownloading(true);
+      startModelsDownload().catch((e) => {
+        setErr(e instanceof Error ? e.message : String(e));
+        setDownloading(false);
+      });
+    }
   }
 
   async function beginIndexing() {
@@ -222,7 +267,7 @@ export default function Onboarding() {
     } catch (e2) {
       setErr(e2 instanceof Error ? e2.message : String(e2));
       setPhase("form");
-      wsRef.current?.close();
+      setSocketOn(false);
     }
   }
 
@@ -354,6 +399,14 @@ export default function Onboarding() {
                 <p className="onb-models-note">
                   Indexing starts automatically once the models are in place.
                 </p>
+                {err && (
+                  <p className="onb-error">
+                    {err}{" "}
+                    <button className="btn btn-text" type="button" onClick={retryProgress}>
+                      Retry
+                    </button>
+                  </p>
+                )}
               </>
             ) : (
               <>
@@ -385,7 +438,14 @@ export default function Onboarding() {
                     {installedCount === 1 ? "" : "s"} ({fmtSize(installedMb)})
                   </p>
                 )}
-                {err && <p className="onb-error">{err}</p>}
+                {err && (
+                  <p className="onb-error">
+                    {err}{" "}
+                    <button className="btn btn-text" type="button" onClick={retryProgress}>
+                      Retry
+                    </button>
+                  </p>
+                )}
                 <div className="onb-models-actions">
                   <button
                     className="btn btn-filled"
@@ -422,7 +482,7 @@ export default function Onboarding() {
             <p className="onb-progress-caption">
               {phase === "done"
                 ? "Indexed, scored and grouped."
-                : `${STAGE_LABELS[activeStage]}${
+                : `${STAGE_LABELS[activeStage] ?? activeStage}${
                     progress && progress.total > 0 ? ` — ${progress.current}/${progress.total}` : "…"
                   }`}
               {progress?.message ? ` · ${progress.message}` : ""}
@@ -455,7 +515,7 @@ export default function Onboarding() {
             )}
 
             {phase === "indexing" && (
-              <div style={{ display: "flex", justifyContent: "center", margin: "4px 0 12px" }}>
+              <div style={{ display: "flex", justifyContent: "center", margin: "4px 0 12px", gap: 8 }}>
                 <button
                   className="btn btn-text"
                   type="button"
@@ -467,30 +527,28 @@ export default function Onboarding() {
               </div>
             )}
 
+            {err && phase !== "done" && (
+              <p className="onb-error">
+                {err}{" "}
+                <button className="btn btn-text" type="button" onClick={retryProgress}>
+                  Retry
+                </button>
+              </p>
+            )}
+
             {phase !== "done" && mode === "cpu" && nPhotos > 0 && (
               <div className="onb-warn">
                 <strong>Heads up:</strong> {nPhotos.toLocaleString()} photos on CPU
-                take about {fmtDuration(estimateTotalSeconds(nPhotos, "cpu"))}. An
-                NVIDIA GPU would cut this to roughly{" "}
-                {fmtDuration(estimateTotalSeconds(nPhotos, "gpu"))}. You can leave
-                this running — it keeps going in the background.
-                <details>
-                  <summary>Have an NVIDIA GPU? Enable it</summary>
-                  <div style={{ marginTop: 6, fontSize: 12.5 }}>
-                    Install a CUDA build of PyTorch, then restart selects — it
-                    detects the GPU automatically on the next launch:
-                    <code>
-                      pip install torch --index-url
-                      https://download.pytorch.org/whl/cu124
-                    </code>
-                  </div>
-                </details>
+                take about {fmtDuration(estimateTotalSeconds(nPhotos, "cpu"))}.
+                SigLIP and RAM++ run on CPU even if DirectML is installed. You can
+                leave this running — it keeps going in the background.
               </div>
             )}
 
             <ol className="onb-stage-list">
               {STAGE_ORDER.map((st) => {
-                const activeIdx = STAGE_ORDER.indexOf(activeStage);
+                const knownIdx = STAGE_ORDER.indexOf(activeStage);
+                const activeIdx = knownIdx >= 0 ? knownIdx : lastKnownStageIdxRef.current;
                 const thisIdx = STAGE_ORDER.indexOf(st);
                 const state =
                   phase === "done" || thisIdx < activeIdx

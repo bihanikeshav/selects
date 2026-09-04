@@ -270,7 +270,6 @@ def test_route_download_and_conflict(monkeypatch):
     assert msgs[-1] == {"stage": "models", "current": 3, "total": 3, "message": "done"}
 
     # Guard cleared -> a fresh download is accepted again.
-    gate2 = threading.Event()
     monkeypatch.setattr(
         model_assets, "download_all",
         lambda publish, only_missing=True, base_models_dir=None: 0,

@@ -18,15 +18,16 @@ from __future__ import annotations
 import json
 import threading
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from fastapi import APIRouter, FastAPI, HTTPException
-from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from selects.config import FolderConfig
 from selects.db import init_db, session_scope
 from selects.db.models import Video
+from selects.pipeline import PipelineCancelled
+from selects.server.schemas import require_sha256
 from selects.video import frames_dir_for, run_video_stage
 
 PublishFn = Callable[[dict], None]
@@ -110,7 +111,15 @@ def register_video_routes(
     app: FastAPI,
     cfg: FolderConfig,
     publish: Optional[PublishFn] = None,
+    manager: Optional[Any] = None,
 ) -> None:
+    """Register the video endpoints.
+
+    *manager* is the :class:`~selects.server.library_manager.LibraryManager`.
+    Video analysis is a library-wide run like indexing, so it takes the same
+    single slot: ``/api/libraries/status.indexing`` is truthful while it runs,
+    and an index and a video pass can never trample each other.
+    """
     # Router is created per-call: a module-level router would accumulate
     # duplicate routes (closing over the first cfg) when build_app is
     # called more than once, e.g. across tests.
@@ -135,6 +144,7 @@ def register_video_routes(
 
     @router.get("/api/videos/{sha256}/frames", response_model=VideoFramesOut)
     def video_frames(sha256: str):
+        require_sha256(sha256)
         Session = init_db(cfg.db_path)
         with session_scope(Session) as s:
             v = s.query(Video).filter(Video.sha256 == sha256).one_or_none()
@@ -159,12 +169,15 @@ def register_video_routes(
 
     @router.get("/api/videos/{sha256}/frames/{index}")
     def video_frame_image(sha256: str, index: int):
+        require_sha256(sha256)
         if index < 0 or index > 999:
             raise HTTPException(404, detail="frame not found")
         path = frames_dir_for(cfg, sha256) / f"{index:02d}.jpg"
         if not path.exists():
             raise HTTPException(404, detail="frame not found")
-        return FileResponse(path, media_type="image/jpeg")
+        from selects.server.http_cache import jpeg_file
+
+        return jpeg_file(path)
 
     @router.post("/api/videos/process")
     def process_videos():
@@ -174,21 +187,54 @@ def register_video_routes(
             state["running"] = True
             state["error"] = None
 
+        # Take the library-wide run slot so /api/libraries/status reports
+        # indexing:true for the duration (and an index can't start underneath).
+        if manager is not None and not manager.begin_indexing():
+            with lock:
+                state["running"] = False
+            raise HTTPException(409, detail="an indexing run is already in progress")
+
         def worker() -> None:
             def cb(i: int, total: int, name: str) -> None:
                 if publish is not None:
                     publish({"stage": "video", "current": i, "total": total, "message": name})
 
             try:
-                run_video_stage(cfg, cb)
+                run_video_stage(
+                    cfg,
+                    cb,
+                    should_cancel=manager.should_cancel if manager is not None else None,
+                )
+            except PipelineCancelled:
+                # Same frame shape the pipeline runner publishes, so the UI's
+                # single "cancelled" handler clears the pill either way. Not an
+                # error: /process/status stays clean.
+                if publish is not None:
+                    publish({
+                        "stage": "cancelled",
+                        "current": 0,
+                        "total": 0,
+                        "message": "Stopped — you can pick up where you left off",
+                    })
             except Exception as e:  # noqa: BLE001 — surfaced via /process/status
                 with lock:
                     state["error"] = str(e)
             finally:
+                if manager is not None:
+                    manager.end_indexing()
                 with lock:
                     state["running"] = False
 
-        threading.Thread(target=worker, daemon=True).start()
+        # If the thread cannot even start, both guards must come back off or
+        # the library is wedged as "indexing" until the process restarts.
+        try:
+            threading.Thread(target=worker, daemon=True).start()
+        except BaseException:
+            if manager is not None:
+                manager.end_indexing()
+            with lock:
+                state["running"] = False
+            raise
         return {"started": True}
 
     @router.get("/api/videos/process/status")

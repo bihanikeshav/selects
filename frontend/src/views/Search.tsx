@@ -4,13 +4,16 @@ import {
   listAllTags,
   listPersonsForFilter,
   search2,
+  searchReady,
   type PersonEntry,
   type Search2Hit,
   type TagEntry,
 } from "../api/search2";
 import KbdFooter from "../components/KbdFooter";
+import { tagLabel } from "../lib/tags";
 import PageHeader from "../components/PageHeader";
 import Rail from "../components/Rail";
+import SkeletonGrid from "../components/SkeletonGrid";
 import Viewer from "../components/Viewer";
 
 const DEBOUNCE_MS = 350;
@@ -33,12 +36,32 @@ export default function Search() {
   const [searched, setSearched] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<number | null>(null);
+  const [engineReady, setEngineReady] = useState(true);
 
   const reqId = useRef(0);
 
   useEffect(() => {
     listPersonsForFilter().then(setPersons).catch(() => setPersons([]));
     listAllTags().then(data => setTags(data.tags)).catch(() => setTags([]));
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: number | undefined;
+    const poll = () => {
+      searchReady()
+        .then(d => {
+          if (cancelled) return;
+          setEngineReady(Boolean(d.ready));
+          if (!d.ready) timer = window.setTimeout(poll, 400);
+        })
+        .catch(() => {});
+    };
+    poll();
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
   }, []);
 
   useEffect(() => {
@@ -69,7 +92,7 @@ export default function Search() {
       tags: selectedTags.length ? selectedTags : undefined,
       person_id: personId === "" ? undefined : personId,
       date_from: dateFrom || undefined,
-      date_to: dateTo || undefined,
+      date_to: dateTo ? `${dateTo}T23:59:59` : undefined,
       min_aesthetic: minAesthetic > 0 ? minAesthetic : undefined,
       limit: 150,
     })
@@ -112,7 +135,11 @@ export default function Search() {
   function addDraftTag() {
     const raw = tagDraft.trim();
     if (!raw) return;
-    const match = tags.find(t => t.tag.toLowerCase() === raw.toLowerCase()) ?? tagMatches[0];
+    const needle = raw.toLowerCase();
+    const match =
+      tags.find(
+        t => t.tag.toLowerCase() === needle || tagLabel(t.tag).toLowerCase() === needle,
+      ) ?? tagMatches[0];
     if (match && !selectedTags.includes(match.tag)) {
       setSelectedTags(prev => [...prev, match.tag]);
     }
@@ -127,7 +154,9 @@ export default function Search() {
   }
 
   const details = loading
-    ? "searching..."
+    ? engineReady
+      ? "searching..."
+      : "starting search engine…"
     : err
     ? err
     : searched
@@ -148,7 +177,7 @@ export default function Search() {
         }}
       >
         <PageHeader
-          context="search"
+          context="Search"
           title="Search"
           subtitle={details}
           actions={
@@ -179,7 +208,7 @@ export default function Search() {
                 {selectedTags.length === 0 && !q.trim()
                   ? tags.slice(0, 8).map(t => (
                       <button key={t.tag} className="filter-chip" onClick={() => toggleTag(t.tag)}>
-                        {t.tag}
+                        {tagLabel(t.tag)}
                       </button>
                     ))
                   : selectedTags.map(t => (
@@ -189,7 +218,7 @@ export default function Search() {
                         onClick={() => toggleTag(t)}
                         title="Click to remove"
                       >
-                        {t}
+                        {tagLabel(t)}
                       </button>
                     ))}
               </div>
@@ -211,7 +240,7 @@ export default function Search() {
                 />
                 <datalist id="search-tag-options">
                   {tagMatches.map(t => (
-                    <option key={t.tag} value={t.tag} />
+                    <option key={t.tag} value={t.tag} label={tagLabel(t.tag)} />
                   ))}
                 </datalist>
                 <button className="filter-chip filter-chip--more" type="button" onClick={addDraftTag}>
@@ -258,12 +287,12 @@ export default function Search() {
                   </label>
 
                   <label className="search-filter-field">
-                    <span className="search-filter-label">Min aesthetic ({minAesthetic.toFixed(1)})</span>
+                    <span className="search-filter-label">Min quality ({minAesthetic.toFixed(2)})</span>
                     <input
                       type="range"
                       min={0}
-                      max={10}
-                      step={0.5}
+                      max={1}
+                      step={0.05}
                       value={minAesthetic}
                       onChange={e => setMinAesthetic(Number(e.target.value))}
                       className="search-filter-range"
@@ -291,11 +320,13 @@ export default function Search() {
           )}
 
           {loading && hits.length === 0 && (
-            <div className="cluster-detail-empty">searching...</div>
+            <SkeletonGrid count={18} />
           )}
 
           {!hasAnyFilter && (
-            <div className="cluster-detail-empty">Search from the header to fill this area with photos.</div>
+            <div className="cluster-detail-empty">
+              {"Type a place, a scene or a moment. Try 'monastery courtyard' or 'snow on the pass'."}
+            </div>
           )}
 
           <div className="cluster-detail-grid">
@@ -307,7 +338,7 @@ export default function Search() {
                 style={{ cursor: "zoom-in" }}
                 title={`rank ${i + 1} - score ${h.score.toFixed(3)}${h.tag_hits ? ` - ${h.tag_hits} tag hit${h.tag_hits === 1 ? "" : "s"}` : ""}`}
               >
-                <img src={h.thumb_url} alt="" loading="lazy" />
+                <img src={h.thumb_url} alt="" loading="lazy" decoding="async" />
                 {/* Only badge meaningful signals — a raw SigLIP cosine (~0.05)
                     rendered as "0.0" on every tile read as broken. Tag matches
                     are the one badge worth showing. */}
@@ -334,7 +365,8 @@ export default function Search() {
           </div>
         </div>
 
-        <KbdFooter />
+        {/* The browse hints only apply while the lightbox is open. */}
+        {lightbox !== null && <KbdFooter variant="browse" />}
       </div>
 
       {lightbox !== null && hits[lightbox] && (

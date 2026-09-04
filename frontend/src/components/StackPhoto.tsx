@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { getPhotoMoment, setMomentPrimary } from "../api/client";
 import type { Moment } from "../api/types";
-import { useToggleLike } from "../hooks/useLikes";
+import { useToggleKeep } from "../hooks/useKeep";
 
 /**
  * A thumbnail that knows about burst-stacks.
@@ -33,10 +33,12 @@ export interface StackPhotoProps {
   style?: React.CSSProperties;
   /** Optional className for the outer cell */
   className?: string;
-  /** Whether this photo is in the curated/liked set */
+  /** Whether this photo is in the curated (kept) set */
   initialLiked?: boolean;
-  /** Called whenever like state toggles, with new liked state */
+  /** Called whenever keep state toggles, with the new kept state */
   onLikeChange?: (sha: string, liked: boolean) => void;
+  /** Set false to suspend [ ] / K while another overlay owns those keys. */
+  hotkeysEnabled?: boolean;
 }
 
 export default function StackPhoto({
@@ -54,6 +56,7 @@ export default function StackPhoto({
   className,
   initialLiked = false,
   onLikeChange,
+  hotkeysEnabled = true,
 }: StackPhotoProps) {
   const hasStack = !!(momentId && momentSize && momentSize > 1);
 
@@ -75,7 +78,7 @@ export default function StackPhoto({
   }, [sha256, thumbUrl, initialLiked]);
 
   // Bridge the boolean `liked` state to the Record-shaped setter that
-  // useToggleLike expects, and forward every update (optimistic set +
+  // useToggleKeep expects, and forward every update (optimistic set +
   // any revert) to the caller via onLikeChange.
   const setLikedRecord = useCallback(
     (updater: (prev: Record<string, boolean>) => Record<string, boolean>) => {
@@ -87,10 +90,10 @@ export default function StackPhoto({
     },
     [activeSha, onLikeChange],
   );
-  const toggleLikeHook = useToggleLike(setLikedRecord);
+  const toggleKeepHook = useToggleKeep(setLikedRecord);
   const toggleLike = useCallback(() => {
-    toggleLikeHook(activeSha, liked);
-  }, [toggleLikeHook, activeSha, liked]);
+    toggleKeepHook(activeSha, liked);
+  }, [toggleKeepHook, activeSha, liked]);
 
   const ensureMoment = useCallback(async () => {
     if (moment || !hasStack) return moment;
@@ -131,29 +134,49 @@ export default function StackPhoto({
     setPulseKey((k) => k + 1);
   }, [activeSha]);
 
-  // Hotkeys when focused
-  useEffect(() => {
-    if (!isFocused) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+  // The one place `[` / `] `/ `K` are interpreted for this tile.
+  const handleKey = useCallback(
+    (e: Pick<KeyboardEvent, "key"> & { preventDefault: () => void }) => {
       if (e.key === "[") {
         e.preventDefault();
         cycle(-1);
       } else if (e.key === "]") {
         e.preventDefault();
         cycle(1);
-      } else if (e.key === "f" || e.key === "F") {
+      } else if (e.key === "k" || e.key === "K") {
         e.preventDefault();
         toggleLike();
       }
+    },
+    [cycle, toggleLike],
+  );
+
+  // Hotkeys while this tile is the focused one. The tile is hover-focused as
+  // often as it is keyboard-focused, so the listener is on the window — but a
+  // press that already landed *inside* a stack root was handled by that root's
+  // own onKeyDown, so skip it here and let it be handled exactly once.
+  useEffect(() => {
+    if (!isFocused || !hotkeysEnabled) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.target instanceof Element && e.target.closest('[data-kbd-scope="stack"]')) return;
+      handleKey(e);
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [isFocused, cycle, toggleLike]);
+  }, [isFocused, hotkeysEnabled, handleKey]);
 
   return (
     <div
       className={className}
+      // This root owns `[` / `]` / `K`; the marker tells the Review keyboard
+      // layer (useCullKeys) to keep its hands off presses that land in here.
+      data-kbd-scope="stack"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (!hotkeysEnabled) return;
+        handleKey(e);
+      }}
       style={{
         position: "relative",
         outline: isFocused ? "2px solid var(--md-primary)" : "none",
@@ -165,6 +188,7 @@ export default function StackPhoto({
         ...style,
       }}
       onMouseEnter={onFocus}
+      onFocus={onFocus}
       onClick={() => onClick?.(activeSha)}
       onDoubleClick={() => onDoubleClick?.(activeSha)}
       title={title}
@@ -227,13 +251,13 @@ export default function StackPhoto({
         </div>
       )}
 
-      {/* Like heart — top-left, glows when liked */}
+      {/* Keep toggle — top-left, filled when kept */}
       <button
         onClick={(e) => {
           e.stopPropagation();
           toggleLike();
         }}
-        title={liked ? "Liked — press F to remove" : "Press F to like"}
+        title={liked ? "Kept — press K to remove" : "Press K to keep"}
         style={{
           position: "absolute",
           top: 6,
@@ -243,7 +267,7 @@ export default function StackPhoto({
           display: "grid",
           placeItems: "center",
           background: liked
-            ? "var(--g-red)"
+            ? "var(--g-green)"
             : "rgba(0,0,0,0.5)",
           color: liked ? "#fff" : "rgba(255,255,255,0.85)",
           border: 0,
@@ -251,7 +275,7 @@ export default function StackPhoto({
           cursor: "pointer",
           padding: 0,
           boxShadow: liked
-            ? "0 0 0 2px color-mix(in srgb, var(--g-red) 35%, transparent), 0 2px 6px rgba(0,0,0,0.4)"
+            ? "0 0 0 2px color-mix(in srgb, var(--g-green) 35%, transparent), 0 2px 6px rgba(0,0,0,0.4)"
             : "0 1px 4px rgba(0,0,0,0.3)",
           transition: "background 120ms ease, transform 120ms ease",
           transform: liked ? "scale(1.08)" : "scale(1)",
@@ -261,13 +285,13 @@ export default function StackPhoto({
           viewBox="0 0 24 24"
           width="14"
           height="14"
-          fill={liked ? "currentColor" : "none"}
+          fill="none"
           stroke="currentColor"
-          strokeWidth="2"
+          strokeWidth="2.6"
           strokeLinecap="round"
           strokeLinejoin="round"
         >
-          <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+          <path d="M20 6 9 17l-5-5"/>
         </svg>
       </button>
 

@@ -28,6 +28,43 @@ def test_doctor_runs_and_reports():
 
 def test_index_command_indexes(populated_folder):
     runner = CliRunner()
-    result = runner.invoke(main, ["index", str(populated_folder)])
+    result = runner.invoke(main, ["index", str(populated_folder), "--pass", "index"])
     assert result.exit_code == 0
-    assert "indexed" in result.output.lower()
+    assert "index:" in result.output.lower()
+
+
+def test_pass_help_includes_persons_and_video():
+    runner = CliRunner()
+    result = runner.invoke(main, ["index", "--help"])
+    assert result.exit_code == 0
+    assert "persons" in result.output
+    assert "video" in result.output
+    assert "category" in result.output
+
+
+def test_lan_bind_refused_helper(monkeypatch: pytest.MonkeyPatch):
+    from selects.cli import lan_bind_refused
+
+    monkeypatch.delenv("SELECTS_ALLOW_LAN", raising=False)
+    assert lan_bind_refused("127.0.0.1") is None
+    assert lan_bind_refused("0.0.0.0") is not None
+    assert lan_bind_refused("::") is not None
+    assert "SELECTS_ALLOW_LAN" in lan_bind_refused("0.0.0.0")
+
+    monkeypatch.setenv("SELECTS_ALLOW_LAN", "1")
+    assert lan_bind_refused("0.0.0.0") is None
+    monkeypatch.setenv("SELECTS_ALLOW_LAN", "true")
+    assert lan_bind_refused("::") is None
+    monkeypatch.setenv("SELECTS_ALLOW_LAN", "yes")
+    assert lan_bind_refused("0.0.0.0") is not None
+
+
+def test_serve_refuses_lan_bind_without_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    monkeypatch.delenv("SELECTS_ALLOW_LAN", raising=False)
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        ["serve", str(tmp_path), "--host", "0.0.0.0", "--no-browser", "--no-background"],
+    )
+    assert result.exit_code != 0
+    assert "SELECTS_ALLOW_LAN" in result.output

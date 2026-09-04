@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 
 from selects.indexer.exif import ExifData, read_exif
 

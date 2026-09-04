@@ -1,7 +1,15 @@
 import { useEffect, useCallback, useMemo, useRef, useState } from "react";
-import { listPhotos, getPhotoMoment, setMomentPrimary } from "../api/client";
-import type { Photo, Moment, MomentMember } from "../api/types";
-import { useLikeStatus, useToggleLike } from "../hooks/useLikes";
+import { Link } from "react-router-dom";
+import {
+  deleteSwipe,
+  getPhotoMoment,
+  listPhotos,
+  recordSwipe,
+  setMomentPrimary,
+  swipeSummary,
+} from "../api/client";
+import type { Photo, Moment, MomentMember, SwipeSummary } from "../api/types";
+import { useKeepStatus } from "../hooks/useKeep";
 import { useCullKeys } from "../hooks/useCullKeys";
 import CompareView from "../components/CompareView";
 import Rail from "../components/Rail";
@@ -11,18 +19,13 @@ import KbdFooter from "../components/KbdFooter";
 import BurstThumb from "../components/BurstThumb";
 import EyesBadge from "../components/EyesBadge";
 import ScoresCard from "../components/ScoresCard";
+import ReviewHeaderControls from "../components/ReviewHeaderControls";
+import type { ReviewQuality, ReviewSortMode } from "../components/ReviewHeaderControls";
 
 type LoadState = "loading" | "error" | "empty" | "loaded";
 
-interface SwipeSummary {
-  total_photos: number;
-  kept: number;
-  rejected: number;
-  skipped: number;
-  undecided: number;
-}
-
-type SortMode = "aesthetic" | "taken_at" | "random";
+/** The only verdicts the Review screen records. */
+type Verdict = "keep" | "reject";
 
 /** Numbered badge shown on thumbs selected for compare (V / shift-click). */
 const compareSelBadgeStyle: React.CSSProperties = {
@@ -46,8 +49,8 @@ const compareSelBadgeStyle: React.CSSProperties = {
 
 interface UndoEntry {
   sha: string;
-  /** Decision this session had previously recorded for the sha, if any. */
-  prevDecision: string | null;
+  /** Verdict this session had previously recorded for the sha, if any. */
+  prevDecision: Verdict | null;
   /** Photo index at the time of the decision, to jump back to on undo. */
   idx: number;
 }
@@ -57,13 +60,26 @@ export default function BurstCull() {
   const [total, setTotal] = useState(0);
   const [idx, setIdx] = useState(0);
   const [loadState, setLoadState] = useState<LoadState>("loading");
-  const [swipeSummary, setSwipeSummary] = useState<SwipeSummary | null>(null);
-  const [sortMode, setSortMode] = useState<SortMode>("aesthetic");
-  // Quick-sort quality filter (the retired Doctor's buckets): restrict the cull
-  // queue to just photos with a given issue so they can be reviewed/rejected fast.
-  const [quality, setQuality] = useState<
-    null | "underexposed" | "overexposed" | "out_of_focus" | "blurry_keepers"
-  >(null);
+  const [summary, setSummary] = useState<SwipeSummary | null>(null);
+  const [sortMode, setSortMode] = useState<ReviewSortMode>("aesthetic");
+  // Quality filter: restrict the review queue to photos with a given issue so
+  // they can be looked at and rejected fast.
+  const [quality, setQuality] = useState<ReviewQuality>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const pagingRef = useRef(false);
+  const exhaustedRef = useRef(false);
+  // Offset the next extra page is fetched at. Tracked separately from
+  // `photos.length` because a page can be entirely duplicates (a photo that is
+  // the primary of two moments), and the walk still has to move forward.
+  const nextOffsetRef = useRef(0);
+  // Bumped when a page yields zero *new* ids, purely to re-fire the paging
+  // effect: without it nothing in its dependency list changes and the loader
+  // stalls one page short of the tail.
+  const [pageAttempt, setPageAttempt] = useState(0);
+  // A Random session walks one seeded shuffle, so `offset` paging can't repeat
+  // or skip photos the way an unseeded `ORDER BY random()` does. A fresh seed is
+  // drawn whenever the query changes, so re-selecting Random re-shuffles.
+  const randomSeedRef = useRef(Math.floor(Math.random() * 2 ** 31));
 
   // Moment state: when a photo has a moment, we may expand it
   const [expandedMoment, setExpandedMoment] = useState<Moment | null>(null);
@@ -71,92 +87,208 @@ export default function BurstCull() {
   // When a moment is expanded, momentIdx selects within the moment members
   const [momentIdx, setMomentIdx] = useState(0);
 
-  // Poll swipe summary
-  useEffect(() => {
-    function refresh() {
-      fetch("/api/swipes/summary")
-        .then((r) => r.json())
-        .then(setSwipeSummary)
-        .catch(() => {});
-    }
-    refresh();
-    const t = setInterval(refresh, 5000);
-    return () => clearInterval(t);
-  }, []);
+  // Verdict tally, refreshed every 15s while the tab is visible.
+  const [summaryTick, setSummaryTick] = useState(0);
+  // Must mirror the list query below, or the tally won't add up to the total.
+  const refreshSummary = useCallback(() => {
+    swipeSummary(quality ? "none" : "moments", quality)
+      .then(setSummary)
+      .catch(() => {});
+  }, [quality]);
 
   useEffect(() => {
     let cancelled = false;
+    let timer: number | null = null;
+
+    function refresh() {
+      if (cancelled) return;
+      refreshSummary();
+    }
+    function stop() {
+      if (timer !== null) {
+        window.clearInterval(timer);
+        timer = null;
+      }
+    }
+    function start() {
+      if (timer !== null) return;
+      timer = window.setInterval(refresh, 15000);
+    }
+    function onVisibility() {
+      if (document.visibilityState === "visible") {
+        refresh();
+        start();
+      } else {
+        stop();
+      }
+    }
+
+    if (document.visibilityState === "visible") {
+      refresh();
+      start();
+    }
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      cancelled = true;
+      stop();
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [refreshSummary]);
+
+  // After a verdict, pull fresh counts without waiting for the next poll.
+  useEffect(() => {
+    if (summaryTick === 0) return;
+    const t = window.setTimeout(refreshSummary, 500);
+    return () => window.clearTimeout(t);
+  }, [summaryTick, refreshSummary]);
+
+  useEffect(() => {
+    let cancelled = false;
+    pagingRef.current = false;
+    exhaustedRef.current = false;
+    nextOffsetRef.current = 0;
+    setPageAttempt(0);
     setLoadState("loading");
+    setLoadError(null);
+    setCompareSel([]);
+    if (sortMode === "random") {
+      randomSeedRef.current = Math.floor(Math.random() * 2 ** 31);
+    }
     // When filtering to a quality bucket, don't collapse moments — we want every
     // matching photo, not just burst primaries.
     listPhotos({
       limit: 200,
       collapse: quality ? "none" : "moments",
       sort: sortMode,
+      seed: sortMode === "random" ? randomSeedRef.current : undefined,
       quality: quality ?? undefined,
     })
       .then((data) => {
         if (cancelled) return;
-        if (data.items.length === 0) {
-          setLoadState("empty");
-        } else {
-          setPhotos(data.items);
-          setTotal(data.total);
-          setIdx(0);
-          setLoadState("loaded");
-        }
+        nextOffsetRef.current = data.items.length;
+        setPhotos(data.items);
+        setTotal(data.total);
+        setIdx(0);
+        setLoadState(data.items.length === 0 ? "empty" : "loaded");
       })
-      .catch(() => {
-        if (!cancelled) setLoadState("error");
+      .catch((e) => {
+        if (cancelled) return;
+        setPhotos([]);
+        setTotal(0);
+        setLoadError(e instanceof Error ? e.message : String(e));
+        setLoadState("error");
       });
     return () => { cancelled = true; };
   }, [sortMode, quality]);
 
-  // Reset moment expansion, per-photo edit toggles and the compare
-  // selection when navigating to a different photo/group.
+  // Reset moment expansion when navigating to a different photo/group.
+  // compareSel is kept across idx so V / shift-click can span nearby frames.
   useEffect(() => {
     setExpandedMoment(null);
     setMomentIdx(0);
-    setBurstLiked({});
-    setCompareSel([]);
+    setBurstKept({});
+    // setBurstKept is a stable setState declared further down this component,
+    // so it cannot be listed here (temporal dead zone) and never changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [idx]);
 
-  // Liked status for every member of the expanded burst — so the badge can
-  // show how many of the stack the user has liked and the pip strip can
-  // highlight liked alternates. Refetches whenever the expanded moment
-  // changes.
-  const { liked: burstLiked, setLiked: setBurstLiked } = useLikeStatus(
+  // Paginate: when within 20 of the loaded tail, append the next page.
+  useEffect(() => {
+    if (loadState !== "loaded") return;
+    if (photos.length === 0) return;
+    if (photos.length >= total) {
+      exhaustedRef.current = true;
+      return;
+    }
+    if (idx < photos.length - 20) return;
+    if (pagingRef.current || exhaustedRef.current) return;
+    pagingRef.current = true;
+    let cancelled = false;
+    const offset = nextOffsetRef.current;
+    if (offset >= total) {
+      exhaustedRef.current = true;
+      pagingRef.current = false;
+      return;
+    }
+    listPhotos({
+      limit: 200,
+      offset,
+      collapse: quality ? "none" : "moments",
+      sort: sortMode,
+      seed: sortMode === "random" ? randomSeedRef.current : undefined,
+      quality: quality ?? undefined,
+    })
+      .then((data) => {
+        if (cancelled) return;
+        setTotal(data.total);
+        if (data.items.length === 0 || offset >= data.total) {
+          exhaustedRef.current = true;
+          return;
+        }
+        // Always walk forward by what the server actually returned, so a page
+        // of pure duplicates doesn't pin the loader to the same offset.
+        nextOffsetRef.current = offset + data.items.length;
+        // Same SHA at two paths is two reviewable rows; dedup extra pages by
+        // id only. Build the seen-id set from `prev` inside the updater, not
+        // from the closed-over `photos`, so a stale closure (this effect ran
+        // before a newer `photos` render committed) can never let a page
+        // re-append an id that's already present.
+        setPhotos((prev) => {
+          const seenId = new Set(prev.map((p) => p.id));
+          const extra = data.items.filter((p) => !seenId.has(p.id));
+          if (extra.length === 0) {
+            // Zero new ids means `prev` will not move, so nothing in this
+            // effect's dependency list changed: bump a counter to re-fire it
+            // at the next offset instead of stalling short of the tail.
+            setPageAttempt((a) => a + 1);
+            return prev;
+          }
+          return [...prev, ...extra];
+        });
+      })
+      .catch(() => {
+        // Leave exhaustedRef false so the next idx tick retries.
+      })
+      .finally(() => {
+        pagingRef.current = false;
+      });
+    return () => {
+      cancelled = true;
+    };
+    // `photos.length` (not `photos`) is enough: the dedup set above is built
+    // from `prev` inside the setPhotos updater, so a `photos` identity change
+    // that doesn't change its length can't cause a stale seenId set, and
+    // omitting the full array here stops unrelated array replacements from
+    // cancelling in-flight page fetches.
+  }, [idx, photos.length, total, sortMode, quality, loadState, pageAttempt]);
+
+  // Keep status for every member of the expanded burst — so the badge can show
+  // how many of the stack are kept and the pip strip can highlight them.
+  const { kept: burstKept, setKept: setBurstKept } = useKeepStatus(
     expandedMoment ? expandedMoment.members.map((m) => m.sha256) : [],
   );
 
-  // The "current" sha whose like state the F key / like button act on —
-  // computed early so it (and the derived liked flag below) are available
-  // to the keyboard-shortcut effect further down.
-  const currentPhotoForLike = photos[idx] ?? null;
-  const activeMemberForLike: MomentMember | null = expandedMoment
+  const currentPhoto = photos[idx] ?? null;
+  const activeMember: MomentMember | null = expandedMoment
     ? (expandedMoment.members[momentIdx] ?? null)
     : null;
-  const activeShaForUrl = activeMemberForLike
-    ? activeMemberForLike.sha256
-    : currentPhotoForLike?.sha256;
+  const activeShaForUrl = activeMember ? activeMember.sha256 : currentPhoto?.sha256;
 
-  // Liked status for the active photo — refetches whenever it changes.
-  const { liked: activeLikedMap, setLiked: setActiveLikedMap } = useLikeStatus(
+  // Keep status for the active photo — refetches whenever it changes.
+  const { kept: activeKeptMap, setKept: setActiveKeptMap } = useKeepStatus(
     activeShaForUrl ? [activeShaForUrl] : [],
   );
-  const activeLiked = Boolean(activeShaForUrl && activeLikedMap[activeShaForUrl]);
+  const activeKept = Boolean(activeShaForUrl && activeKeptMap[activeShaForUrl]);
 
-  // Toggling likes updates both the single active-photo map and the
-  // burst-wide map together, so the badge/pip strip and the like button
-  // stay in sync from a single swipe POST.
-  const setBothLiked = useCallback(
+  // Verdicts update both the single active-photo map and the burst-wide map
+  // together, so the badge/pip strip and the Keep button stay in sync.
+  const setBothKept = useCallback(
     (updater: (prev: Record<string, boolean>) => Record<string, boolean>) => {
-      setActiveLikedMap(updater);
-      setBurstLiked(updater);
+      setActiveKeptMap(updater);
+      setBurstKept(updater);
     },
-    [setActiveLikedMap, setBurstLiked],
+    [setActiveKeptMap, setBurstKept],
   );
-  const toggleLike = useToggleLike(setBothLiked);
 
   const expandMoment = useCallback(async (photo: Photo) => {
     if (!photo.moment_id || !photo.sha256) return;
@@ -195,19 +327,6 @@ export default function BurstCull() {
     }
   }, [expandedMoment, photos.length]);
 
-  // Swipe persistence
-  async function recordSwipe(sha: string, decision: string) {
-    try {
-      await fetch(`/api/swipes/${sha}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ decision }),
-      });
-    } catch {
-      // non-fatal
-    }
-  }
-
   // Stack-cycle within the current burst moment. Lazily expands the moment
   // if not already expanded, then advances / regresses momentIdx, and
   // persists the new top-of-stack to the backend (debounced).
@@ -229,9 +348,9 @@ export default function BurstCull() {
       }
       const n = mom.members.length;
       if (n === 0) return;
-      const next = (momentIdx + delta + n) % n;
-      setMomentIdx(next);
-      const newPrimary = mom.members[next];
+      const nextIdx = (momentIdx + delta + n) % n;
+      setMomentIdx(nextIdx);
+      const newPrimary = mom.members[nextIdx];
       // Debounced persistence
       if (cycleStackTimer.current) window.clearTimeout(cycleStackTimer.current);
       cycleStackTimer.current = window.setTimeout(() => {
@@ -243,37 +362,50 @@ export default function BurstCull() {
     [photos, idx, expandedMoment, momentIdx],
   );
 
-  // ── Session culling state: undo stack + progress ─────────────────────────
+  // ── Session verdict state: undo stack + progress ─────────────────────────
   const [undoStack, setUndoStack] = useState<UndoEntry[]>([]);
-  const [sessionCulled, setSessionCulled] = useState(0);
-  // Decisions made THIS session (sha -> decision), so undo can restore the
-  // previous in-session decision rather than blindly clearing.
-  const sessionDecisions = useRef<Map<string, string>>(new Map());
+  const [sessionDecided, setSessionDecided] = useState(0);
+  // Verdicts made THIS session (sha -> verdict), so undo can restore the
+  // previous in-session verdict rather than blindly clearing.
+  const sessionDecisions = useRef<Map<string, Verdict>>(new Map());
 
   const decide = useCallback(
-    (sha: string, decision: string, advance = true) => {
+    (sha: string, decision: Verdict, advance = true) => {
       const prevDecision = sessionDecisions.current.get(sha) ?? null;
       sessionDecisions.current.set(sha, decision);
       setUndoStack((st) => [...st, { sha, prevDecision, idx }]);
-      setSessionCulled((n) => n + 1);
-      recordSwipe(sha, decision);
+      setSessionDecided((n) => n + 1);
+      recordSwipe(sha, decision).catch(() => {
+        /* non-fatal */
+      });
+      setBothKept((prevMap) => ({ ...prevMap, [sha]: decision === "keep" }));
+      setSummaryTick((t) => t + 1);
       if (advance) next();
     },
-    [idx, next],
+    [idx, next, setBothKept],
   );
 
   const undo = useCallback(() => {
     if (undoStack.length === 0) return;
     const last = undoStack[undoStack.length - 1];
-    // Restore the previous in-session decision; if there was none, reset to
-    // "skip" (the closest server-side representation of "undecided").
-    recordSwipe(last.sha, last.prevDecision ?? "skip");
-    if (last.prevDecision) sessionDecisions.current.set(last.sha, last.prevDecision);
-    else sessionDecisions.current.delete(last.sha);
+    // Restore the previous in-session verdict; if there was none, the photo
+    // goes back to undecided by deleting the swipe row entirely.
+    if (last.prevDecision) {
+      sessionDecisions.current.set(last.sha, last.prevDecision);
+      recordSwipe(last.sha, last.prevDecision).catch(() => {});
+    } else {
+      sessionDecisions.current.delete(last.sha);
+      deleteSwipe(last.sha).catch(() => {});
+    }
     setUndoStack((st) => st.slice(0, -1));
-    setSessionCulled((n) => Math.max(0, n - 1));
+    setSessionDecided((n) => Math.max(0, n - 1));
+    setBothKept((prevMap) => ({
+      ...prevMap,
+      [last.sha]: last.prevDecision === "keep",
+    }));
+    setSummaryTick((t) => t + 1);
     setIdx(last.idx);
-  }, [undoStack]);
+  }, [undoStack, setBothKept]);
 
   // ── Zoom-at-cursor (Z toggles 100%) ──────────────────────────────────────
   const stageImgRef = useRef<HTMLImageElement | null>(null);
@@ -309,7 +441,7 @@ export default function BurstCull() {
     () =>
       compareSel.map((sha, i) => ({
         sha256: sha,
-        previewUrl: `/api/preview/${sha}`,
+        previewUrl: `/api/editor/result/${sha}`,
         label: `${i + 1} · ${sha.slice(0, 8)}`,
       })),
     [compareSel],
@@ -326,10 +458,11 @@ export default function BurstCull() {
     });
   }, [photos, collapseMoment]);
 
-  // Global-in-view keyboard layer: arrows navigate, X/left reject, C/right/
-  // space keep, U undo, Z zoom, Tab next burst, V compare-select, Enter
-  // opens compare when 2+ frames are selected. Suspended while the compare
-  // overlay is open (it handles its own keys).
+  const [enhancedOn, setEnhancedOn] = useState(false);
+  const [straightenOn, setStraightenOn] = useState(false);
+
+  // The one keyboard layer for this view. Suspended while the compare overlay
+  // is open (it handles its own keys).
   useCullKeys({
     enabled: loadState === "loaded" && !compareOpen,
     onPrev: prev,
@@ -343,91 +476,16 @@ export default function BurstCull() {
     onUndo: undo,
     onZoomToggle: toggleZoom,
     onNextGroup: nextGroup,
+    onBurstPrev: () => cycleStack(-1),
+    onBurstNext: () => cycleStack(1),
+    onEnhance: () => setEnhancedOn((v) => !v),
+    onStraighten: () => setStraightenOn((v) => !v),
     onCompareToggle: () => {
       if (activeShaForUrl) toggleCompareSel(activeShaForUrl);
     },
     onCompareOpen:
       compareSel.length >= 2 ? () => setCompareOpen(true) : undefined,
   });
-
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (compareOpen) return;
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-      const sha = (expandedMoment?.members[momentIdx]?.sha256) || photos[idx]?.sha256;
-
-      // Stack-cycle keys stay inside burst view
-      if (e.key === "[") {
-        e.preventDefault();
-        cycleStack(-1);
-        return;
-      }
-      if (e.key === "]") {
-        e.preventDefault();
-        cycleStack(1);
-        return;
-      }
-
-      // Keys that operate on the CURRENT burst alternate without leaving
-      // the burst view. F/E/S all toggle state on the displayed photo and
-      // are core to the multi-like-within-burst workflow. Every key owned
-      // by the useCullKeys layer is also listed so its handlers (which are
-      // burst-aware themselves) don't get pre-empted by a collapse here.
-      const STAY_IN_BURST = [
-        "[", "]", "f", "F", "e", "E", "s", "S",
-        "v", "V", "z", "Z", "u", "U", "x", "X", "c", "C",
-        " ", "Enter", "Tab",
-        "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown",
-      ];
-
-      // Any OTHER key while inside burst view pops us back out first,
-      // then falls through to its normal handler (j/k/l/d/arrows).
-      if (expandedMoment && !STAY_IN_BURST.includes(e.key)) {
-        collapseMoment();
-        if (e.key === "Escape") {
-          e.preventDefault();
-          return;
-        }
-      }
-
-      if (e.key === "j" || e.key === "J") {
-        e.preventDefault();
-        if (sha) decide(sha, "reject");
-        else next();
-      } else if (e.key === "k" || e.key === "K") {
-        e.preventDefault();
-        if (sha) decide(sha, "keep");
-        else next();
-      } else if (e.key === "l" || e.key === "L") {
-        e.preventDefault();
-        if (sha) decide(sha, "silver");
-        else next();
-      } else if (e.key === "f" || e.key === "F") {
-        e.preventDefault();
-        if (sha) toggleLike(sha, activeLiked);
-      } else if (e.key === "e" || e.key === "E") {
-        e.preventDefault();
-        setEnhancedOn((v) => !v);
-      } else if (e.key === "s" || e.key === "S") {
-        e.preventDefault();
-        setStraightenOn((v) => !v);
-      } else if (e.key === "d" || e.key === "D") {
-        e.preventDefault();
-        if (sha) decide(sha, "reject");
-        else next();
-      }
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [next, expandedMoment, collapseMoment, idx, momentIdx, photos, cycleStack, activeLiked, toggleLike, decide, compareOpen]);
-
-  const currentPhoto = currentPhotoForLike;
-
-  // When a moment is expanded, the "current" view is the selected moment member
-  const activeMember = activeMemberForLike;
-
-  const [enhancedOn, setEnhancedOn] = useState(false);
-  const [straightenOn, setStraightenOn] = useState(false);
 
   // Reset enhance/straighten/zoom per photo so each shot is judged fresh
   useEffect(() => {
@@ -436,13 +494,10 @@ export default function BurstCull() {
     setZoom(null);
   }, [activeShaForUrl]);
 
-  const toggleLikeActive = useCallback(() => {
-    if (activeShaForUrl) toggleLike(activeShaForUrl, activeLiked);
-  }, [activeShaForUrl, activeLiked, toggleLike]);
   const activePreviewUrl = activeShaForUrl
     ? (enhancedOn || straightenOn
         ? `/api/enhance/${activeShaForUrl}?preset=film&grade=${enhancedOn ? "true" : "false"}&straighten=${straightenOn ? "true" : "false"}`
-        : `/api/preview/${activeShaForUrl}`)
+        : `/api/editor/result/${activeShaForUrl}`)
     : "";
   const activeFilename = activeMember
     ? activeMember.sha256.slice(0, 8)
@@ -467,58 +522,27 @@ export default function BurstCull() {
         }}
       >
         <PageHeader
-          context={loadState === "loaded" ? `sort · ${idx + 1} of ${total}` : "sort"}
-          title="Sort"
+          context="Review"
+          title="Review"
           subtitle={
             loadState === "loaded"
-              ? swipeSummary
-                ? `${idx + 1} / ${total} · ${swipeSummary.kept} kept · ${swipeSummary.rejected} rejected · ${swipeSummary.undecided} to review`
-                : `${total} photos indexed`
-              : "Decide what's worth keeping — C keep, X reject"
+              ? summary
+                ? `Photo ${idx + 1} of ${total} · ${summary.kept} kept · ${summary.rejected} rejected · ${summary.undecided} to review`
+                : `Photo ${idx + 1} of ${total}`
+              : "Decide what's worth keeping — K keep, X reject"
           }
-          above={
-            <>
-              <ModeViewBar />
-              <div className="sort-quality-chips">
-                {([
-                  [null, "All"],
-                  ["underexposed", "Underexposed"],
-                  ["overexposed", "Overexposed"],
-                  ["out_of_focus", "Out of focus"],
-                  ["blurry_keepers", "Blurry"],
-                ] as const).map(([key, label]) => (
-                  <button
-                    key={label}
-                    className={"dedup-filter-btn" + (quality === key ? " is-active" : "")}
-                    onClick={() => setQuality(key)}
-                    title={key ? `Cull only ${label.toLowerCase()} photos` : "All photos"}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </>
-          }
+          above={<ModeViewBar />}
           actions={
-            <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-              <span style={{ fontSize: 11, color: "var(--md-on-surface-var)", marginRight: 6 }}>
-                Sort:
-              </span>
-              {(["aesthetic", "taken_at", "random"] as const).map((m) => (
-                <button
-                  key={m}
-                  className={`btn ${sortMode === m ? "btn-filled" : "btn-text"}`}
-                  style={{ fontSize: 12, padding: "3px 10px" }}
-                  onClick={() => setSortMode(m)}
-                >
-                  {m === "aesthetic" ? "Best ★" : m === "taken_at" ? "Time" : "Random"}
-                </button>
-              ))}
-            </div>
+            <ReviewHeaderControls
+              quality={quality}
+              onQuality={setQuality}
+              sortMode={sortMode}
+              onSortMode={setSortMode}
+            />
           }
         />
 
-        {/* Cull stage */}
+        {/* Review stage */}
         {loadState === "loaded" && currentPhoto && (
           <section className="cull-stage">
             <div
@@ -540,6 +564,11 @@ export default function BurstCull() {
                 ref={stageImgRef}
                 src={activePreviewUrl}
                 alt={activeFilename}
+                onError={(e) => {
+                  const img = e.currentTarget;
+                  if (!activeShaForUrl || img.src.includes("/api/preview/")) return;
+                  img.src = `/api/preview/${activeShaForUrl}`;
+                }}
                 onMouseMove={(e) => {
                   // Remember the cursor point (fraction of the un-zoomed
                   // image) so Z zooms exactly where the user is looking.
@@ -569,33 +598,16 @@ export default function BurstCull() {
                 }}
               />
 
-              {/* Big burst badge — top-left, bright accent, always visible */}
+              {/* Burst badge — top-left, bright accent, always visible */}
               {hasMoment && (() => {
-                const likedCount = expandedMoment
-                  ? expandedMoment.members.filter((m) => burstLiked[m.sha256]).length
-                  : Object.values(burstLiked).filter(Boolean).length;
+                const keptCount = expandedMoment
+                  ? expandedMoment.members.filter((m) => burstKept[m.sha256]).length
+                  : Object.values(burstKept).filter(Boolean).length;
                 return (
                 <div
-                  style={{
-                    position: "absolute",
-                    top: 12,
-                    left: 12,
-                    zIndex: 2,
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    background: "var(--g-yellow)",
-                    color: "#000",
-                    padding: "7px 12px 7px 10px",
-                    borderRadius: 999,
-                    fontFamily: "var(--font-display)",
-                    fontSize: 13,
-                    fontWeight: 600,
-                    boxShadow: "0 4px 14px rgba(0,0,0,0.35)",
-                    animation: "burst-pulse 1500ms ease-out 1",
-                  }}
+                  className="burst-badge"
                   key={`badge-${activeShaForUrl}`}
-                  title={`Burst of ${currentPhoto.moment_size} — [ ] cycle, F likes each independently`}
+                  title={`Burst of ${currentPhoto.moment_size} — [ ] cycle, K keeps each frame independently`}
                 >
                   <svg
                     viewBox="0 0 24 24"
@@ -610,69 +622,25 @@ export default function BurstCull() {
                     <rect x="3" y="7" width="14" height="14" rx="2" />
                     <rect x="7" y="3" width="14" height="14" rx="2" />
                   </svg>
-                  <span>
-                    <span style={{ fontFamily: "var(--font-mono)" }}>
-                      {(expandedMoment ? momentIdx + 1 : 1)} / {currentPhoto.moment_size}
-                    </span>
+                  <span className="burst-badge-count">
+                    {(expandedMoment ? momentIdx + 1 : 1)} / {currentPhoto.moment_size}
                   </span>
-                  {likedCount > 0 && (
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 3,
-                        background: "var(--g-red)",
-                        color: "#fff",
-                        padding: "2px 8px 2px 6px",
-                        borderRadius: 999,
-                        fontFamily: "var(--font-mono)",
-                        fontSize: 11,
-                        fontWeight: 700,
-                      }}
-                    >
-                      <svg
-                        viewBox="0 0 24 24"
-                        width="11"
-                        height="11"
-                        fill="currentColor"
-                        aria-hidden="true"
-                      >
-                        <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
-                      </svg>
-                      {likedCount}
-                    </span>
+                  {keptCount > 0 && (
+                    <span className="burst-badge-kept">{keptCount} kept</span>
                   )}
                   <button
+                    type="button"
+                    className="burst-badge-step"
                     onClick={() => cycleStack(-1)}
                     title="Previous in stack (key: [)"
-                    style={{
-                      background: "rgba(0,0,0,0.12)",
-                      color: "#000",
-                      border: 0,
-                      borderRadius: 4,
-                      padding: "2px 7px",
-                      cursor: "pointer",
-                      fontFamily: "var(--font-mono)",
-                      fontWeight: 700,
-                      fontSize: 13,
-                    }}
                   >
                     [
                   </button>
                   <button
+                    type="button"
+                    className="burst-badge-step"
                     onClick={() => cycleStack(1)}
                     title="Next in stack (key: ])"
-                    style={{
-                      background: "rgba(0,0,0,0.12)",
-                      color: "#000",
-                      border: 0,
-                      borderRadius: 4,
-                      padding: "2px 7px",
-                      cursor: "pointer",
-                      fontFamily: "var(--font-mono)",
-                      fontWeight: 700,
-                      fontSize: 13,
-                    }}
                   >
                     ]
                   </button>
@@ -680,55 +648,38 @@ export default function BurstCull() {
                 );
               })()}
 
-
-              <div
-                style={{
-                  position: "absolute",
-                  top: 12,
-                  right: 12,
-                  zIndex: 2,
-                  display: "flex",
-                  gap: 6,
-                }}
-              >
+              <div className="cull-actions">
                 <button
-                  onClick={toggleLikeActive}
-                  title={activeLiked ? "Unlike (F)" : "Like — adds to Curated (F)"}
-                  className="cull-action-btn"
-                  style={{
-                    background: activeLiked ? "var(--g-red)" : "rgba(0,0,0,0.55)",
-                    color: "#fff",
-                    boxShadow: activeLiked
-                      ? "0 0 0 2px color-mix(in srgb, var(--g-red) 35%, transparent), 0 2px 8px rgba(0,0,0,0.3)"
-                      : "0 2px 8px rgba(0,0,0,0.3)",
+                  type="button"
+                  onClick={() => {
+                    if (activeShaForUrl) decide(activeShaForUrl, "keep");
                   }}
+                  title="Keep this photo — adds it to Curated (K)"
+                  aria-pressed={activeKept}
+                  className={`cull-action-btn${activeKept ? " is-kept" : ""}`}
                 >
                   <svg
                     viewBox="0 0 24 24"
                     width="13"
                     height="13"
-                    fill={activeLiked ? "currentColor" : "none"}
+                    fill="none"
                     stroke="currentColor"
-                    strokeWidth="2"
+                    strokeWidth="2.4"
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   >
-                    <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+                    <path d="M20 6 9 17l-5-5" />
                   </svg>
-                  {activeLiked ? "Liked" : "Like · F"}
+                  {activeKept ? "Kept" : "Keep · K"}
                 </button>
 
                 <button
+                  type="button"
                   onClick={() => {
                     if (activeShaForUrl) decide(activeShaForUrl, "reject");
                   }}
-                  title="Discard — record a reject and move on (D or X or ←)"
+                  title="Reject this photo and move on (X)"
                   className="cull-action-btn"
-                  style={{
-                    background: "rgba(0,0,0,0.55)",
-                    color: "#fff",
-                    boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
-                  }}
                 >
                   <svg
                     viewBox="0 0 24 24"
@@ -744,30 +695,24 @@ export default function BurstCull() {
                     <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                     <path d="m5 6 1 14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-14" />
                   </svg>
-                  Discard · D
+                  Reject · X
                 </button>
                 <button
+                  type="button"
                   onClick={() => setEnhancedOn((v) => !v)}
-                  title="Auto-edit: stretch exposure, lift shadows, recover highlights, white-balance (E)"
-                  className="cull-action-btn"
-                  style={{
-                    background: enhancedOn ? "var(--md-primary)" : "rgba(0,0,0,0.55)",
-                    color: enhancedOn ? "var(--md-on-primary)" : "#fff",
-                    boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
-                  }}
+                  title="Auto edit: stretch exposure, lift shadows, recover highlights, white-balance (E)"
+                  aria-pressed={enhancedOn}
+                  className={`cull-action-btn${enhancedOn ? " is-on" : ""}`}
                 >
-                  {enhancedOn ? "Auto-edited" : "Auto edit · E"}
+                  {enhancedOn ? "Auto edited" : "Auto edit · E"}
                 </button>
                 <button
+                  type="button"
                   onClick={() => setStraightenOn((v) => !v)}
                   title="Quick auto-straighten (S)"
                   disabled={!activeShaForUrl}
-                  className="cull-action-btn"
-                  style={{
-                    background: straightenOn ? "var(--md-primary)" : "rgba(0,0,0,0.55)",
-                    color: straightenOn ? "var(--md-on-primary)" : "#fff",
-                    boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
-                  }}
+                  aria-pressed={straightenOn}
+                  className={`cull-action-btn${straightenOn ? " is-on" : ""}`}
                 >
                   {straightenOn ? "Straightened" : "Straighten · S"}
                 </button>
@@ -777,55 +722,29 @@ export default function BurstCull() {
                   <div className="filename">{activeFilename}</div>
                   {expandedMoment && (
                     <button
+                      type="button"
+                      className="gold-overlay-back"
                       onClick={collapseMoment}
-                      style={{
-                        marginTop: 4,
-                        background: "rgba(255,255,255,0.15)",
-                        border: "1px solid rgba(255,255,255,0.3)",
-                        borderRadius: 6,
-                        color: "#fff",
-                        fontSize: 12,
-                        padding: "2px 8px",
-                        cursor: "pointer",
-                      }}
                     >
-                      ← back to cull
+                      ← back to review
                     </button>
                   )}
                 </div>
-                <div className="stamp" title="Gold pick of this burst">
-                  <svg viewBox="0 0 24 24" fill="currentColor">
-                    <path d="m12 2 2.6 7.3 7.4.5-5.8 4.7 2 7.5L12 17.7 5.8 22l2-7.5L2 9.8l7.4-.5z"/>
-                  </svg>
-                  {expandedMoment
-                    ? `Moment · ${momentIdx + 1} of ${expandedMoment.size}`
-                    : `Gold pick · photo ${idx + 1}`}
-                </div>
+                {expandedMoment && (
+                  <div className="stamp" title="Position inside this burst">
+                    {`Burst · ${momentIdx + 1} of ${expandedMoment.size}`}
+                  </div>
+                )}
               </div>
 
               {/* Moment badge — shown when collapsed and a moment exists */}
               {!expandedMoment && hasMoment && (
                 <button
+                  type="button"
+                  className="cull-similar-btn"
                   onClick={() => expandMoment(currentPhoto)}
                   disabled={momentLoading}
-                  title={`This photo is part of a moment with ${currentPhoto.moment_size} similar shots. Click to expand.`}
-                  style={{
-                    position: "absolute",
-                    bottom: 48,
-                    right: 12,
-                    background: "rgba(0,0,0,0.65)",
-                    border: "1px solid rgba(255,255,255,0.25)",
-                    borderRadius: 8,
-                    color: "#fff",
-                    fontSize: 12,
-                    fontWeight: 600,
-                    padding: "4px 10px",
-                    cursor: momentLoading ? "wait" : "pointer",
-                    backdropFilter: "blur(4px)",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 4,
-                  }}
+                  title={`This photo is part of a burst of ${currentPhoto.moment_size} similar shots. Click to expand.`}
                 >
                   <svg viewBox="0 0 24 24" fill="currentColor" style={{ width: 14, height: 14 }}>
                     <path d="M4 6h16v2H4zm0 5h16v2H4zm0 5h16v2H4z"/>
@@ -859,9 +778,9 @@ export default function BurstCull() {
                           src={member.thumb_url}
                           badge={String(memberI + 1)}
                           isGold={memberI === momentIdx}
-                          isLiked={burstLiked[member.sha256] === true}
+                          isKept={burstKept[member.sha256] === true}
                           onClick={() => setMomentIdx(memberI)}
-                          alt={`Moment member ${memberI + 1}`}
+                          alt={`Burst frame ${memberI + 1}`}
                         />
                         <EyesBadge sha256={member.sha256} overlay />
                         {selPos >= 0 && (
@@ -908,58 +827,49 @@ export default function BurstCull() {
         )}
 
         {loadState === "loading" && (
-          <section className="cull-stage" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <div style={{ color: "var(--md-on-surface-var)", fontFamily: "var(--font-display)" }}>
-              Loading photos...
+          <section className="cull-stage cull-stage--skeleton" aria-busy="true">
+            <div className="cull-skeleton-hero" />
+            <div className="cull-skeleton-film">
+              {Array.from({ length: 8 }, (_, i) => (
+                <div key={i} className="skeleton-tile" />
+              ))}
             </div>
           </section>
         )}
 
         {loadState === "error" && (
-          <section className="cull-stage" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <div style={{ textAlign: "center", color: "var(--md-on-surface-var)", fontFamily: "var(--font-display)", lineHeight: 1.6 }}>
-              <div style={{ fontSize: 18, fontWeight: 500, color: "var(--md-on-surface)", marginBottom: 8 }}>
-                Indexer not running
-              </div>
-              <div style={{ fontFamily: "var(--font-mono)", fontSize: 13, background: "var(--md-surface-c)", padding: "8px 16px", borderRadius: "var(--r-md)", display: "inline-block" }}>
-                selects serve Z:\Ladakh\Photos
-              </div>
-              <div style={{ marginTop: 8, fontSize: 13 }}>
-                Run that in another terminal, then refresh.
-              </div>
+          <section className="cull-stage cull-stage--message">
+            <div className="cull-message">
+              <div className="cull-message-title">Couldn't load photos</div>
+              <div className="cull-message-detail">{loadError || "no active library"}</div>
             </div>
           </section>
         )}
 
         {loadState === "empty" && (
-          <section className="cull-stage" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <div style={{ textAlign: "center", color: "var(--md-on-surface-var)", fontFamily: "var(--font-display)" }}>
-              <div style={{ fontSize: 18, fontWeight: 500, color: "var(--md-on-surface)", marginBottom: 8 }}>
-                No photos indexed yet
+          <section className="cull-stage cull-stage--message">
+            <div className="cull-message">
+              <div className="cull-message-title">
+                {quality ? "No photos in that bucket" : "No photos indexed yet"}
               </div>
-              <div style={{ fontSize: 13 }}>
-                Point selects at a folder to get started.
+              <div className="cull-message-body">
+                {quality ? (
+                  "Try another option in Show, or All."
+                ) : (
+                  <>
+                    Point selects at a folder to get started —{" "}
+                    <Link to="/libraries">open Libraries</Link>.
+                  </>
+                )}
               </div>
             </div>
           </section>
         )}
 
-        {/* Progress strip: session cull progress + undo depth + compare bar */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 14,
-            padding: "5px 24px",
-            fontSize: 11,
-            fontFamily: "var(--font-mono)",
-            color: "var(--md-on-surface-var)",
-            borderTop: "1px solid var(--md-outline-var)",
-            background: "var(--md-surface-c-low)",
-          }}
-        >
+        {/* Progress strip: session progress + undo depth + compare bar */}
+        <div className="cull-progress-strip">
           <span title="Keep/reject decisions made this session">
-            {sessionCulled} of {total} culled this session
+            {sessionDecided} of {total} decided this session
           </span>
           <span title="Press U to undo the most recent decision">
             undo ×{undoStack.length}
@@ -972,6 +882,7 @@ export default function BurstCull() {
                 {compareSel.length}/4 selected for compare (V / shift-click)
               </span>
               <button
+                type="button"
                 className="btn btn-text"
                 style={{ fontSize: 11, padding: "1px 8px" }}
                 onClick={() => setCompareSel([])}
@@ -979,6 +890,7 @@ export default function BurstCull() {
                 Clear
               </button>
               <button
+                type="button"
                 className="btn btn-filled"
                 style={{ fontSize: 11, padding: "1px 10px" }}
                 onClick={() => setCompareOpen(true)}
@@ -997,7 +909,10 @@ export default function BurstCull() {
       {compareOpen && compareFrames.length >= 2 && (
         <CompareView
           frames={compareFrames}
-          onClose={() => setCompareOpen(false)}
+          onClose={() => {
+            setCompareOpen(false);
+            setCompareSel([]);
+          }}
           onDecision={(sha, d) => decide(sha, d, false)}
         />
       )}

@@ -39,6 +39,23 @@ export interface Moment {
 
 export interface PhotoList { total: number; items: Photo[]; }
 
+/** Query parameters `GET /api/photos` accepts. */
+export interface ListPhotosParams {
+  offset?: number;
+  limit?: number;
+  rejected?: boolean;
+  tag?: string;
+  collapse?: "moments" | "none";
+  sort?: "taken_at" | "aesthetic" | "iqa" | "random";
+  /**
+   * Only meaningful with `sort: "random"`: fixes the shuffle so paging with
+   * `offset` walks one stable order instead of re-shuffling per page.
+   */
+  seed?: number;
+  min_aesthetic_pct?: number;
+  quality?: "underexposed" | "overexposed" | "out_of_focus" | "blurry_keepers";
+}
+
 export interface ClusterEntry {
   tag: string;
   count: number;
@@ -152,8 +169,20 @@ export interface CuratedPhoto {
   thumb_url: string;
   preview_url: string;
   combined: number | null;
+  iqa?: number | null;
   ap25: number | null;
   nima: number | null;
   moment_id?: number | null;
   moment_size?: number | null;
+}
+
+/**
+ * Verdict tally over the same photo set `/api/photos` returns for the given
+ * collapse mode, so `kept + rejected + undecided === total_photos`.
+ */
+export interface SwipeSummary {
+  total_photos: number;
+  kept: number;
+  rejected: number;
+  undecided: number;
 }

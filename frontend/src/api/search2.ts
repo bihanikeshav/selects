@@ -50,6 +50,18 @@ async function detailError(res: Response, fallback: string): Promise<Error> {
   return new Error(`${fallback} ${res.status}`);
 }
 
+export async function warmupSearch(): Promise<{ ready: boolean; started?: boolean }> {
+  const res = await fetch(`${BASE}/search/warmup`, { method: "POST" });
+  if (!res.ok) throw new Error(`warmup ${res.status}`);
+  return res.json();
+}
+
+export async function searchReady(): Promise<{ ready: boolean; error?: string | null }> {
+  const res = await fetch(`${BASE}/search/ready`);
+  if (!res.ok) throw new Error(`searchReady ${res.status}`);
+  return res.json();
+}
+
 export async function search2(opts: Search2Opts): Promise<Search2Result> {
   const params = new URLSearchParams();
   if (opts.q) params.set("q", opts.q);
@@ -84,5 +96,5 @@ export async function listPersonsForFilter(): Promise<PersonEntry[]> {
   const res = await fetch(`${BASE}/persons`);
   if (!res.ok) throw new Error(`listPersonsForFilter ${res.status}`);
   const body = await res.json();
-  return body.persons;
+  return Array.isArray(body.persons) ? body.persons : [];
 }

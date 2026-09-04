@@ -41,14 +41,12 @@ jobs:
             || sudo apt-get install -y gir1.2-webkit2-4.0 \
             || sudo apt-get install -y gir1.2-webkit-6.0 || true
           pip install pygobject pycairo || true
-      - name: Install package (CPU torch) + ML stack + PyInstaller
+      - name: Install package + ML stack + PyInstaller
         run: |
-          # CPU torch first (much smaller than the CUDA wheels); the [ml] extra
-          # then reuses it (torch>=2.2 already satisfied) and adds transformers/
-          # insightface/onnxruntime/sklearn/hdbscan/umap so the bundle can ship
-          # working AI instead of ImportError-ing on first use.
-          pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install ".[ml]" pyinstaller  # non-editable: avoids PEP 660 editable-hook issues
+          # The [ml,desktop] extras add onnxruntime/insightface/sklearn/hdbscan/
+          # umap (working AI instead of ImportError-ing on first use) and
+          # pywebview (the native desktop window).
+          pip install ".[ml,desktop]" pyinstaller  # non-editable: avoids PEP 660 editable-hook issues
       - name: Fetch darktable for bundling (Windows)
         if: runner.os == 'Windows'
         # Silent-installs darktable into vendor/darktable (Inno Setup, no extra

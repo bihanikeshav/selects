@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
-import KbdFooter from "../components/KbdFooter";
 import PageHeader from "../components/PageHeader";
 import Rail from "../components/Rail";
 
@@ -15,15 +14,25 @@ interface MapMarker {
   place: string | null;
 }
 
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function photoIcon(url: string, count: number): L.DivIcon {
+  const src = escapeHtml(url);
   return L.divIcon({
     className: "photo-marker",
     html: `
       <div style="position:relative;width:56px;height:56px;">
-        <img src="${url}" style="width:56px;height:56px;object-fit:cover;border-radius:8px;
+        <img src="${src}" style="width:56px;height:56px;object-fit:cover;border-radius:8px;
           border:3px solid #fff;box-shadow:0 4px 14px rgba(0,0,0,.4);"/>
         <span style="position:absolute;bottom:-4px;right:-4px;background:#1A5DCC;color:#fff;
-          font-family:'Google Sans Code',monospace;font-size:11px;font-weight:700;
+          font-family:ui-monospace,monospace;font-size:11px;font-weight:700;
           padding:2px 6px;border-radius:10px;border:2px solid #fff;">${count}</span>
       </div>
     `,
@@ -35,14 +44,24 @@ function photoIcon(url: string, count: number): L.DivIcon {
 export default function MapView() {
   const [markers, setMarkers] = useState<MapMarker[]>([]);
   const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
   const mapDivRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
 
   useEffect(() => {
     fetch("/api/map/markers?grid_deg=0.01")
-      .then((r) => r.json())
-      .then((d) => { setMarkers(d.markers); setLoading(false); })
-      .catch(() => setLoading(false));
+      .then(async (r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const d = await r.json();
+        setMarkers(Array.isArray(d.markers) ? d.markers : []);
+        setErr(null);
+        setLoading(false);
+      })
+      .catch((e) => {
+        setMarkers([]);
+        setErr(e instanceof Error ? e.message : String(e));
+        setLoading(false);
+      });
   }, []);
 
   // Initialize Leaflet once when markers arrive
@@ -62,15 +81,16 @@ export default function MapView() {
 
     markers.forEach((m) => {
       const marker = L.marker([m.lat, m.lon], { icon: photoIcon(m.cover_url, m.count) }).addTo(mapRef.current!);
-      const place = m.place || "Unnamed location";
+      const place = escapeHtml(m.place || "Unnamed location");
+      const cover = escapeHtml(m.cover_url);
       const clusterLink = m.place
         ? `<a href="/cull/clusters/${encodeURIComponent(m.place)}" style="color:#1A5DCC;font-size:12px;">Open cluster →</a>`
         : "";
       marker.bindPopup(`
         <div style="min-width:160px;">
-          <img src="${m.cover_url}" style="width:100%;border-radius:6px;" alt=""/>
-          <div style="margin-top:6px;font-family:'Google Sans Display',sans-serif;font-weight:500;">${place}</div>
-          <div style="font-family:'Google Sans Code',monospace;font-size:11px;color:#666;">
+          <img src="${cover}" style="width:100%;border-radius:6px;" alt=""/>
+          <div style="margin-top:6px;font-family:system-ui,sans-serif;font-weight:500;">${place}</div>
+          <div style="font-family:ui-monospace,monospace;font-size:11px;color:#666;">
             ${m.count} photo${m.count !== 1 ? "s" : ""} · ${m.lat.toFixed(4)}, ${m.lon.toFixed(4)}
           </div>
           <div style="margin-top:4px;">${clusterLink}</div>
@@ -79,7 +99,7 @@ export default function MapView() {
     });
 
     const bounds = L.latLngBounds(markers.map((m) => [m.lat, m.lon] as [number, number]));
-    mapRef.current.fitBounds(bounds, { padding: [60, 60] });
+    mapRef.current.fitBounds(bounds, { padding: [40, 40] });
 
     return () => {
       // keep map alive across re-renders
@@ -105,18 +125,20 @@ export default function MapView() {
         className="workspace"
         style={{
           display: "grid",
-          gridTemplateRows: "auto 1fr auto",
+          gridTemplateRows: "auto 1fr",
           height: "100vh",
           maxHeight: "100vh",
           overflow: "hidden",
         }}
       >
         <PageHeader
-          context="map"
+          context="Map"
           title="Map"
           subtitle={
             loading
               ? "loading…"
+              : err
+              ? err
               : `${markers.length} locations · ${totalPhotos} photos with GPS · tap a pin to jump to that location's cluster`
           }
         />
@@ -132,15 +154,15 @@ export default function MapView() {
               background: "var(--md-surface-c-low)",
             }}
           >
+            {loading && <div className="cull-skeleton-hero" style={{ height: "100%", minHeight: "100%" }} />}
             {markers.length === 0 && !loading && (
               <div style={{ display: "grid", placeItems: "center", height: "100%", color: "var(--md-on-surface-var)" }}>
-                No photos with GPS metadata yet.
+                {err ?? "No photos with GPS metadata yet."}
               </div>
             )}
           </div>
         </div>
 
-        <KbdFooter />
       </div>
     </div>
   );

@@ -141,6 +141,11 @@ function Pane({ frame, view, quality, decision, zoomAt, panBy, onDecision }: Pan
           src={frame.previewUrl}
           alt={frame.label}
           draggable={false}
+          onError={(e) => {
+            const img = e.currentTarget;
+            if (img.src.includes("/api/preview/")) return;
+            img.src = `/api/preview/${frame.sha256}`;
+          }}
           style={{
             transform: `translate(${view.tx * 100}%, ${view.ty * 100}%) scale(${view.s})`,
           }}

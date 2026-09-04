@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { listAllTags, type TagEntry } from "../api/search2";
+import { tagLabel } from "../lib/tags";
 import "./TagBrowser.css";
 
 interface TagBrowserProps {
@@ -36,7 +37,9 @@ export default function TagBrowser({ selected, onToggle, onClear }: TagBrowserPr
   const filtered = useMemo(() => {
     const f = filter.trim().toLowerCase();
     if (!f) return tags;
-    return tags.filter(t => t.tag.toLowerCase().includes(f));
+    return tags.filter(
+      t => t.tag.toLowerCase().includes(f) || tagLabel(t.tag).toLowerCase().includes(f),
+    );
   }, [tags, filter]);
 
   return (
@@ -77,7 +80,7 @@ export default function TagBrowser({ selected, onToggle, onClear }: TagBrowserPr
                 onClick={() => onToggle(t.tag)}
                 aria-pressed={active}
               >
-                <span className="tag-browser-item-name">{t.tag}</span>
+                <span className="tag-browser-item-name">{tagLabel(t.tag)}</span>
                 <span className="tag-browser-item-count">{t.count}</span>
               </button>
             );

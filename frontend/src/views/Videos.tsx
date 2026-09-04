@@ -9,6 +9,7 @@ import {
 import type { VideoFramesResponse, VideoItem, VideoListResponse } from "../api/videos";
 import PageHeader from "../components/PageHeader";
 import Rail from "../components/Rail";
+import SkeletonGrid from "../components/SkeletonGrid";
 import "../components/Videos.css";
 
 function fmtDuration(sec: number | null): string {
@@ -44,8 +45,15 @@ function VideoCard({ video, onOpen }: { video: VideoItem; onOpen: (v: VideoItem)
         )}
         <span className="video-duration-badge">{fmtDuration(video.duration_sec)}</span>
         {video.dead_footage && (
-          <span className="video-dead-badge" title="Most sampled frames are blurry or dark">
-            Dead footage
+          <span
+            className="video-dead-badge"
+            title={
+              video.highlight_count > 0
+                ? "Most sampled frames look alike — but there are usable moments"
+                : "Most sampled frames are blurry, dark or static"
+            }
+          >
+            {video.highlight_count > 0 ? "Mostly static" : "Dead footage"}
           </span>
         )}
       </div>
@@ -108,7 +116,11 @@ function Filmstrip({
             <h2>{name}</h2>
             <span className="video-strip-sub">
               {fmtDuration(data.duration_sec)}
-              {data.dead_footage ? " · dead footage" : ""}
+              {data.dead_footage
+                ? data.highlights.length > 0
+                  ? " · mostly static"
+                  : " · dead footage"
+                : ""}
               {data.highlights.length > 0
                 ? ` · ${data.highlights.length} highlight${data.highlights.length === 1 ? "" : "s"}`
                 : ""}
@@ -244,13 +256,13 @@ export default function Videos() {
         }}
       >
         <PageHeader
-          context="videos"
+          context="Videos"
           title="Videos"
           subtitle={
             result
               ? `${result.total} video${result.total === 1 ? "" : "s"} · ${result.processed} analysed` +
                 (result.dead_footage_count > 0
-                  ? ` · ${result.dead_footage_count} dead footage`
+                  ? ` · ${result.dead_footage_count} flagged`
                   : "")
               : "Loading…"
           }
@@ -266,6 +278,8 @@ export default function Videos() {
         />
         <div className="videos-wrap">
           {error && <p className="videos-error">{error}</p>}
+
+          {!result && !error && <SkeletonGrid count={8} />}
 
           {result && videos.length === 0 && (
             <p className="videos-empty">
