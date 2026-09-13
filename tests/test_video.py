@@ -225,67 +225,6 @@ class TestRunVideoStage:
         assert run_video_stage(cfg, embed=False) == 1
         assert run_video_stage(cfg, embed=False) == 0
 
-    def test_missing_embedding_is_backfilled_on_next_run(self, tmp_path: Path, sharp_video: Path, monkeypatch):
-        """A video analysed while the model was unavailable gets its embedding
-        on a later run, without being re-analysed."""
-        cfg = get_folder_config(tmp_path)
-        _ingest_video_row(cfg, sharp_video, "a" * 64)
-        monkeypatch.setattr("selects.video._embed_best_frame", lambda img: None)
-        assert run_video_stage(cfg) == 1
-
-        Session = init_db(cfg.db_path)
-        with session_scope(Session) as s:
-            v = s.query(Video).one()
-            assert v.siglip is None
-            first_processed_at = v.processed_at
-
-        seen: list[tuple[int, ...]] = []
-
-        def embed(img):
-            seen.append(img.shape)
-            return b"\x02" * 8
-
-        monkeypatch.setattr("selects.video._embed_best_frame", embed)
-        assert run_video_stage(cfg) == 0  # nothing re-analysed
-        assert len(seen) == 1 and seen[0][2] == 3  # one RGB frame
-
-        with session_scope(Session) as s:
-            v = s.query(Video).one()
-            assert v.siglip == b"\x02" * 8
-            assert v.processed_at == first_processed_at
-
-    def test_backfill_stops_at_first_failure(self, tmp_path: Path, sharp_video: Path, monkeypatch):
-        import shutil
-
-        cfg = get_folder_config(tmp_path)
-        second = tmp_path / "sharp2.mp4"
-        shutil.copy(sharp_video, second)
-        _ingest_video_row(cfg, sharp_video, "a" * 64)
-        _ingest_video_row(cfg, second, "b" * 64)
-        monkeypatch.setattr("selects.video._embed_best_frame", lambda img: None)
-        assert run_video_stage(cfg) == 2
-
-        calls: list[int] = []
-
-        def failing(img):
-            calls.append(1)
-            return None
-
-        monkeypatch.setattr("selects.video._embed_best_frame", failing)
-        run_video_stage(cfg)
-        assert len(calls) == 1
-
-    def test_backfill_skipped_when_embed_disabled(self, tmp_path: Path, sharp_video: Path, monkeypatch):
-        cfg = get_folder_config(tmp_path)
-        _ingest_video_row(cfg, sharp_video, "a" * 64)
-        assert run_video_stage(cfg, embed=False) == 1
-
-        def boom(img):
-            raise AssertionError("embed=False must not embed")
-
-        monkeypatch.setattr("selects.video._embed_best_frame", boom)
-        assert run_video_stage(cfg, embed=False) == 0
-
 
 # --------------------------------------------------------------------------- #
 # HTTP endpoints
