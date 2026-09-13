@@ -336,6 +336,8 @@ def run_video_stage(
     total = len(pending)
     if not total:
         log.info("no videos pending analysis")
+        if embed:
+            _backfill_embeddings(cfg, Session)
         return 0
 
     processed = 0
@@ -399,4 +401,49 @@ def run_video_stage(
         processed += 1
 
     log.info("video analysis done: %d videos", processed)
+    if embed:
+        _backfill_embeddings(cfg, Session)
     return processed
+
+
+def _backfill_embeddings(cfg: FolderConfig, Session) -> int:
+    """Embed analysed videos that are still missing their SigLIP vector.
+
+    The embedding is best-effort, so a video can finish analysis without one —
+    e.g. the model was still downloading on the first run — and it would never
+    be retried, because ``processed_at`` is already set. Its best frame is on
+    disk as the preview, so filling it in needs no re-decode. Stops at the first
+    failure: when the model is unavailable, every other attempt fails the same
+    way. Returns the number of videos embedded.
+    """
+    from PIL import Image
+
+    with session_scope(Session) as s:
+        missing = [
+            (v.id, v.sha256)
+            for v in s.query(Video).filter(
+                Video.processed_at.isnot(None),
+                Video.siglip.is_(None),
+                Video.sha256.isnot(None),
+            ).all()
+        ]
+
+    filled = 0
+    for vid, sha in missing:
+        preview = cfg.previews_dir / f"{sha}.jpg"
+        if not preview.exists():
+            continue  # undecodable video: no best frame to embed
+        with Image.open(preview) as im:
+            img = np.asarray(im.convert("RGB"))
+        blob = _embed_best_frame(img)
+        if blob is None:
+            break
+        with session_scope(Session) as s:
+            v = s.get(Video, vid)
+            if v is not None:
+                v.siglip = blob
+        filled += 1
+
+    if filled:
+        log.info("backfilled SigLIP embeddings for %d video(s)", filled)
+    return filled
