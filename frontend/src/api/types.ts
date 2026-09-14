@@ -151,15 +151,30 @@ export interface FsList {
 export interface ModelInfo {
   id: string;
   name: string;
+  kind: string;
+  ref: string;
   present: boolean;
   approx_size_mb: number;
   required_for: string;
+  cache_path: string;
+}
+
+export interface ModelsRuntime {
+  device: string;
+  installed_providers: string[];
+  selected: string[];
+  cuda_required: boolean;
+  gpu_without_cuda: boolean;
+  using_cuda?: boolean;
+  note?: string;
 }
 
 export interface ModelsStatus {
   models: ModelInfo[];
   total_missing_mb: number;
   downloading: boolean;
+  cache_root?: string;
+  runtime?: ModelsRuntime;
 }
 
 export interface CuratedPhoto {

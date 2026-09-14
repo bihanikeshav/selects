@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { getWatchStatus, updateWatch } from "../api/watch";
 import type { WatchStatus } from "../api/watch";
 import { useProgressSocket, type ProgressMsg } from "../hooks/useProgressSocket";
+import SelectMenu from "./SelectMenu";
 import "./WatchCard.css";
 
 function formatLastRun(iso: string | null): string {
@@ -88,17 +89,19 @@ export default function WatchCard() {
         <div className="watch-card-body">
           <div className="watch-row">
             <span className="watch-label">Check every</span>
-            <select
-              className="watch-select"
-              value={status.interval}
+            <SelectMenu
+              className="watch-select-menu"
+              value={String(status.interval)}
               disabled={busy}
-              onChange={(e) => onIntervalChange(Number(e.target.value))}
-            >
-              <option value={30}>30s</option>
-              <option value={60}>1 min</option>
-              <option value={300}>5 min</option>
-              <option value={900}>15 min</option>
-            </select>
+              onChange={(next) => void onIntervalChange(Number(next))}
+              ariaLabel="Watch folder interval"
+              options={[
+                { value: "30", label: "30s" },
+                { value: "60", label: "1 min" },
+                { value: "300", label: "5 min" },
+                { value: "900", label: "15 min" },
+              ]}
+            />
           </div>
           <div className="watch-row">
             <span className="watch-label">Last checked</span>

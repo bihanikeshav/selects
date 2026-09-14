@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 
 import { modelsStatus, startModelsDownload } from "../api/client";
 import type { ModelsStatus } from "../api/types";
@@ -10,7 +11,7 @@ function gb(mb: number): string {
 
 // Human-readable labels for the average user. The real model names are still
 // shown (muted, underneath) — masked, not hidden.
-const FRIENDLY: Record<string, { title: string; tech: string }> = {
+export const MODEL_LABELS: Record<string, { title: string; tech: string }> = {
   selects_onnx: {
     title: "Photo understanding & enhancement",
     tech: "SigLIP · RAM++ · image restoration",
@@ -18,6 +19,10 @@ const FRIENDLY: Record<string, { title: string; tech: string }> = {
   buffalo_l: {
     title: "Face recognition",
     tech: "InsightFace buffalo_l",
+  },
+  whisper_small_onnx: {
+    title: "Speech transcripts",
+    tech: "Whisper small ONNX",
   },
 };
 
@@ -103,8 +108,8 @@ export default function ModelsCard() {
                 className={"lib-model-dot" + (m.present ? " is-present" : " is-missing")}
                 aria-hidden="true"
               />
-              <span className="lib-model-name">{FRIENDLY[m.id]?.title ?? m.name}</span>
-              <span className="lib-model-for">{FRIENDLY[m.id]?.tech ?? m.required_for}</span>
+              <span className="lib-model-name">{MODEL_LABELS[m.id]?.title ?? m.name}</span>
+              <span className="lib-model-for">{MODEL_LABELS[m.id]?.tech ?? m.required_for}</span>
               <span className="lib-model-size">{gb(m.approx_size_mb)} GB</span>
             </li>
           ))}
@@ -124,11 +129,14 @@ export default function ModelsCard() {
           </p>
         </div>
       ) : (
-        missingCount > 0 && (
-          <button className="btn btn-filled" type="button" onClick={onDownload}>
-            Download missing ({status ? gb(status.total_missing_mb) : "0"} GB)
-          </button>
-        )
+        <>
+          {missingCount > 0 && (
+            <button className="btn btn-filled" type="button" onClick={onDownload}>
+              Download missing ({status ? gb(status.total_missing_mb) : "0"} GB)
+            </button>
+          )}
+          <Link className="lib-advanced-link" to="/models">Open models page</Link>
+        </>
       )}
     </div>
   );

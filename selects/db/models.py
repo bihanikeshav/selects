@@ -83,6 +83,12 @@ class Video(Base):
     highlights_json: Mapped[Optional[str]] = mapped_column(Text)   # [{start,end,frames}]
     siglip: Mapped[Optional[bytes]] = mapped_column(LargeBinary)   # best-frame SigLIP fp16 blob
     processed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    # --- cull v2 summaries (alembic rev c9d0e1f2a3b4) ---------------------- #
+    dead_ratio: Mapped[Optional[float]] = mapped_column(Float)
+    low_activity_ratio: Mapped[Optional[float]] = mapped_column(Float)
+    usable_ratio: Mapped[Optional[float]] = mapped_column(Float)
+    best_score: Mapped[Optional[float]] = mapped_column(Float)
+    analysis_version: Mapped[Optional[str]] = mapped_column(String(64))
 
 
 class VideoKeyframe(Base):
@@ -101,6 +107,9 @@ class VideoKeyframe(Base):
     quality: Mapped[Optional[float]] = mapped_column(Float)
     sharpness: Mapped[Optional[float]] = mapped_column(Float)
     exposure: Mapped[Optional[float]] = mapped_column(Float)
+    iqa: Mapped[Optional[float]] = mapped_column(Float)
+    motion: Mapped[Optional[float]] = mapped_column(Float)
+    face_presence: Mapped[Optional[float]] = mapped_column(Float)
     siglip: Mapped[Optional[bytes]] = mapped_column(LargeBinary)
     source_fingerprint: Mapped[Optional[str]] = mapped_column(String(128), index=True)
     processor_version: Mapped[Optional[str]] = mapped_column(String(64))
@@ -134,6 +143,7 @@ class VideoSegment(Base):
     )
     embedding: Mapped[Optional[bytes]] = mapped_column(LargeBinary)
     ocr_text: Mapped[Optional[str]] = mapped_column(Text)
+    decision: Mapped[Optional[str]] = mapped_column(String(16))  # keep | skip | NULL
     source_fingerprint: Mapped[Optional[str]] = mapped_column(String(128), index=True)
     processor_version: Mapped[Optional[str]] = mapped_column(String(64))
     model_version: Mapped[Optional[str]] = mapped_column(String(128))
@@ -226,6 +236,7 @@ class VideoTranscriptSegment(Base):
     start_ms: Mapped[int] = mapped_column(Integer, nullable=False)
     end_ms: Mapped[int] = mapped_column(Integer, nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
+    words_json: Mapped[Optional[str]] = mapped_column(Text)
     confidence: Mapped[Optional[float]] = mapped_column(Float)
     speaker: Mapped[Optional[str]] = mapped_column(String(128))
     language: Mapped[Optional[str]] = mapped_column(String(16))

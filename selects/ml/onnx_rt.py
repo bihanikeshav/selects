@@ -12,7 +12,6 @@ change — the provider simply appears (or doesn't) and we adapt.
 from __future__ import annotations
 
 import logging
-import os
 import threading
 from pathlib import Path
 from typing import Sequence
@@ -138,18 +137,45 @@ def make_session(onnx_path, prefer: Sequence[str] | None = None, cache: bool = T
 
 
 def _onnx_dir() -> Path:
-    """Flat local dir for the downloaded ONNX files.
+    """Flat local dir for the downloaded ONNX files under the canonical cache."""
+    from selects.ml.model_assets import asset_dir
 
-    We download with ``local_dir`` (real filenames, co-located) rather than the
-    default HF blob cache: an external-data ``.onnx`` references its ``.data`` by
-    bare basename, and ORT resolves that against the graph's directory — which in
-    the blob cache is a hashed ``blobs/`` path where the sibling name doesn't exist.
-    """
-    env = os.environ.get("SELECTS_MODELS_DIR")
-    base = Path(env) if env else Path.home() / ".cache" / "selects" / "models"
-    d = base / "selects-onnx"
+    d = asset_dir("selects_onnx")
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+_PROVIDER_LABELS = {
+    "CUDAExecutionProvider": "NVIDIA CUDA",
+    "DmlExecutionProvider": "DirectML (Windows GPU, no CUDA)",
+    "CoreMLExecutionProvider": "CoreML (Apple GPU, no CUDA)",
+    "CPUExecutionProvider": "CPU",
+}
+
+
+def runtime_info() -> dict:
+    """What this install can run graphs on. CUDA is optional, not required."""
+    try:
+        providers = available_providers()
+        selected = select_providers()
+    except Exception:
+        providers = ["CPUExecutionProvider"]
+        selected = ["CPUExecutionProvider"]
+    primary = selected[0] if selected else "CPUExecutionProvider"
+    return {
+        "installed_providers": providers,
+        "selected": selected,
+        "device": _PROVIDER_LABELS.get(primary, primary),
+        "cuda_required": False,
+        "gpu_without_cuda": primary in {"DmlExecutionProvider", "CoreMLExecutionProvider"},
+        "using_cuda": primary == "CUDAExecutionProvider",
+        "note": (
+            "ONNX Runtime uses DirectML on Windows and CoreML on macOS — those "
+            "are GPU paths that do not need NVIDIA CUDA. CUDA is used only if "
+            "onnxruntime-gpu is installed on an NVIDIA machine. SigLIP/RAM++ "
+            "stay on CPU because those graphs are not DirectML-compatible."
+        ),
+    }
 
 
 _FILE_CACHE: dict[str, str] = {}

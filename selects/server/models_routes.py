@@ -60,3 +60,30 @@ def register_model_routes(
 
         threading.Thread(target=worker, daemon=True).start()
         return {"started": True}
+
+    @app.post("/api/models/download/{asset_id}")
+    def models_download_one(asset_id: str):
+        if not any(item["id"] == asset_id for item in model_assets.MANIFEST):
+            raise HTTPException(404, detail="unknown model asset")
+        with lock:
+            if state["downloading"]:
+                raise HTTPException(409, detail="a model download is already in progress")
+            state["downloading"] = True
+
+        def worker():
+            try:
+                model_assets.download_one(asset_id, publish)
+                publish(
+                    {
+                        "stage": "models",
+                        "current": 1,
+                        "total": 1,
+                        "message": "done",
+                    }
+                )
+            finally:
+                with lock:
+                    state["downloading"] = False
+
+        threading.Thread(target=worker, daemon=True).start()
+        return {"started": True, "id": asset_id}

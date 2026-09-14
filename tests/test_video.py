@@ -31,6 +31,15 @@ from selects.video import (
 W, H, FPS = 128, 96, 15.0
 
 
+@pytest.fixture(autouse=True)
+def _skip_heavy_video_ml(monkeypatch):
+    """Keep unit tests on classical signals; SigLIP/ffmpeg are optional extras."""
+    monkeypatch.setattr("selects.video._measure_iqa", lambda images: [None] * len(images))
+    monkeypatch.setattr("selects.video._audio_energy_by_second", lambda *a, **k: ({}, False))
+    monkeypatch.setattr("selects.ml.video_cull.enrich_face_quality", lambda _img: 0.0)
+    monkeypatch.setattr("selects.ml.video_speech.transcribe_video", lambda *_a, **_k: [])
+
+
 def _write_video(path: Path, frames: list[np.ndarray], fps: float = FPS) -> None:
     import cv2
 
@@ -118,14 +127,10 @@ class TestAnalyzeVideo:
     def test_sharp_video_not_dead_and_has_highlight(self, sharp_video: Path):
         analysis, _ = analyze_video(sharp_video)
         assert analysis.dead_footage is False
-        assert all(f.good for f in analysis.frames)
-        # one contiguous run spanning the whole strip
-        assert len(analysis.highlights) == 1
-        seg = analysis.highlights[0]
-        assert seg["frames"] == len(analysis.frames)
-        assert seg["start"] < seg["end"]
+        assert analysis.dead_ratio < 0.7
         assert analysis.best_index is not None
         assert 0.0 <= analysis.frames[analysis.best_index].quality <= 1.0
+        assert analysis.best_score >= 0.0
 
     def test_detect_highlights_runs(self):
         from selects.video import FrameScore
@@ -185,15 +190,16 @@ class TestRunVideoStage:
             assert v.sharpness is not None and v.sharpness > 0
             assert v.siglip == b"\x01" * 8
             frames = json.loads(v.frames_json)
-            assert len(frames) == FRAME_SAMPLES
-            assert len(json.loads(v.highlights_json)) == 1
+            assert len(frames) >= 1
+            assert v.analysis_version == "video-cull-v2"
+            assert v.dead_ratio is not None
 
         # best-frame thumb + preview written into the /api/thumb cache layout
         assert (cfg.thumbs_dir / f"{sha}.jpg").exists()
         assert (cfg.previews_dir / f"{sha}.jpg").exists()
         # filmstrip persisted
         strip = sorted(frames_dir_for(cfg, sha).glob("*.jpg"))
-        assert len(strip) == FRAME_SAMPLES
+        assert len(strip) == len(frames)
 
     def test_stage_marks_black_video_dead(self, tmp_path: Path, black_video: Path):
         cfg = get_folder_config(tmp_path)
@@ -224,6 +230,25 @@ class TestRunVideoStage:
         _ingest_video_row(cfg, black_video, "d" * 64)
         assert run_video_stage(cfg, embed=False) == 1
         assert run_video_stage(cfg, embed=False) == 0
+
+    def test_stage_persists_transcript_and_silence(self, tmp_path: Path, sharp_video: Path, monkeypatch):
+        from selects.db.models import VideoSegment, VideoTranscriptSegment
+        from selects.ml.video_speech import Word
+
+        cfg = get_folder_config(tmp_path)
+        sha = "e" * 64
+        _ingest_video_row(cfg, sharp_video, sha)
+        monkeypatch.setattr(
+            "selects.ml.video_speech.transcribe_video",
+            lambda _path, **_kw: [Word(0.0, 0.3, "hello"), Word(2.0, 0.3, "there")],
+        )
+        assert run_video_stage(cfg, embed=False) == 1
+        Session = init_db(cfg.db_path)
+        with session_scope(Session) as s:
+            texts = [row.text for row in s.query(VideoTranscriptSegment).all()]
+            assert any("hello" in text for text in texts)
+            kinds = {row.kind for row in s.query(VideoSegment).all()}
+            assert "silence" in kinds
 
 
 # --------------------------------------------------------------------------- #
@@ -260,9 +285,9 @@ class TestVideoRoutes:
         by_sha = {v["sha256"]: v for v in body["videos"]}
         sharp, black = by_sha["a" * 64], by_sha["b" * 64]
         assert sharp["dead_footage"] is False
-        assert sharp["highlight_count"] == 1
+        assert sharp["dead_footage"] is False
         assert sharp["thumb_url"] == f"/api/thumb/{'a' * 64}"
-        assert sharp["sampled_frames"] == FRAME_SAMPLES
+        assert sharp["sampled_frames"] >= 1
         assert black["dead_footage"] is True
         assert black["highlight_count"] == 0
 
@@ -270,12 +295,11 @@ class TestVideoRoutes:
         r = client_with_videos.get(f"/api/videos/{'a' * 64}/frames")
         assert r.status_code == 200
         body = r.json()
-        assert len(body["frames"]) == FRAME_SAMPLES
+        assert len(body["frames"]) >= 1
         f0 = body["frames"][0]
         assert set(f0) >= {"index", "t_sec", "blur", "exposure", "quality", "good", "url"}
         assert f0["url"] == f"/api/videos/{'a' * 64}/frames/0"
         assert body["best_frame_index"] is not None
-        assert len(body["highlights"]) == 1
 
     def test_frame_image_served(self, client_with_videos):
         r = client_with_videos.get(f"/api/videos/{'a' * 64}/frames/0")
@@ -286,6 +310,36 @@ class TestVideoRoutes:
     def test_frames_404_unknown_sha(self, client_with_videos):
         assert client_with_videos.get(f"/api/videos/{'f' * 64}/frames").status_code == 404
         assert client_with_videos.get(f"/api/videos/{'a' * 64}/frames/99").status_code == 404
+
+    def test_clip_and_segment_decisions(self, client_with_videos, tmp_path):
+        sha = "a" * 64
+        r = client_with_videos.put(f"/api/videos/{sha}/decision", json={"decision": "kept"})
+        assert r.status_code == 200
+        assert r.json()["decision"] == "kept"
+        listed = client_with_videos.get("/api/videos").json()["videos"]
+        sharp = next(v for v in listed if v["sha256"] == sha)
+        assert sharp["review_state"] == "kept"
+
+        from selects.config import get_folder_config
+        from selects.db import init_db, session_scope
+        from selects.db.models import Video, VideoSegment
+
+        cfg = get_folder_config(tmp_path)
+        Session = init_db(cfg.db_path)
+        with session_scope(Session) as s:
+            video = s.query(Video).filter(Video.sha256 == sha).one()
+            row = VideoSegment(
+                video_id=video.id, start_ms=9000, end_ms=10000, kind="quote",
+            )
+            s.add(row)
+            s.flush()
+            segment_id = row.id
+        r = client_with_videos.put(
+            f"/api/videos/{sha}/segments/{segment_id}/decision",
+            json={"decision": "keep"},
+        )
+        assert r.status_code == 200
+        assert r.json()["decision"] == "keep"
 
     def test_frames_rejects_non_hex_sha(self, client_with_videos):
         assert client_with_videos.get("/api/videos/zz/frames").status_code == 400

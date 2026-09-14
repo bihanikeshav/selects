@@ -165,6 +165,21 @@ export default function Rail() {
       <IndexingPill />
 
       <NavLink
+        to="/models"
+        className={({ isActive }) => "rail-item" + (isActive ? " is-active" : "")}
+        title="Models — download AI weights"
+      >
+        <span className="icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 3v12" />
+            <path d="m8 11 4 4 4-4" />
+            <path d="M5 19h14" />
+          </svg>
+        </span>
+        Models
+      </NavLink>
+
+      <NavLink
         to="/libraries"
         className={({ isActive }) => "rail-item" + (isActive ? " is-active" : "")}
         title="Libraries — switch or add photo libraries"

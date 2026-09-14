@@ -1,27 +1,17 @@
-"""Video culling analysis: frame sampling, quality scoring, highlights.
+"""Video culling analysis: timeline scoring, highlights, dead footage.
 
-Pipeline stage (``run_video_stage``) that brings videos to parity with the
-photo pipeline:
-
-* samples N evenly-spaced frames per video with ``cv2.VideoCapture`` (no
-  ffmpeg dependency — codecs that OpenCV cannot open degrade gracefully to a
-  "processed but empty" row instead of crashing the stage),
-* scores every sampled frame with the existing classical metrics
-  (:func:`selects.classical.blur.laplacian_variance`,
-  :func:`selects.classical.exposure.exposure_score`),
-* picks the best frame, rewrites the video's thumb/preview JPEGs from it
-  (same ``<sha256>.jpg`` layout served by ``/api/thumb``), and stores a
-  SigLIP embedding of that frame on the ``videos`` row for search,
-* derives highlight segments (contiguous runs of sharp, well-exposed frames)
-  and a dead-footage flag (>70% of sampled frames blurry/dark),
-* persists sampled-frame JPEGs under ``<state>/video_frames/<sha256>/`` so
-  ``GET /api/videos/{sha256}/frames`` can serve a filmstrip.
+Pipeline stage (``run_video_stage``) that scores a cheap temporal pass into
+canonical 1-second bins, flags hard-dead footage, and picks scene-aware
+highlight peaks. Optional SigLIP/IQA, faces, audio, and Whisper sit on the
+same timeline. See ``docs/superpowers/specs/2026-09-14-video-highlights-cull-design.md``.
 """
 from __future__ import annotations
 
 import json
 import logging
-from dataclasses import asdict, dataclass, field
+import math
+from dataclasses import asdict, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -29,7 +19,24 @@ import numpy as np
 
 from selects.config import FolderConfig
 from selects.db import init_db, session_scope
-from selects.db.models import Video
+from selects.db.models import Video, VideoSegment, VideoTag
+from selects.ml.video_cull import (
+    ANALYSIS_VERSION,
+    DEAD_FOOTAGE_RATIO,
+    SecondBin,
+    apply_face_enrichment,
+    build_scenes,
+    combine_score,
+    dead_spans,
+    focus_quality,
+    interpolate_iqa,
+    is_hard_dead_frame,
+    is_low_activity,
+    luma_delta,
+    motion_score,
+    sample_plan,
+    select_highlights,
+)
 from selects.util import utcnow
 
 log = logging.getLogger(__name__)
@@ -38,10 +45,9 @@ log = logging.getLogger(__name__)
 # Tunables
 # ---------------------------------------------------------------------------
 
-FRAME_SAMPLES = 12          # evenly-spaced frames sampled per video
+FRAME_SAMPLES = 12          # filmstrip JPEGs (canonical bins are 1 s)
 BLUR_GOOD = 100.0           # Laplacian variance at/above which a frame is "sharp"
 EXPOSURE_GOOD = 0.35        # exposure score at/above which a frame is "well exposed"
-DEAD_FOOTAGE_RATIO = 0.70   # > this fraction of bad frames => dead footage
 MIN_HIGHLIGHT_FRAMES = 2    # contiguous good frames needed to call it a highlight
 FRAME_STRIP_LONG_EDGE = 512  # saved filmstrip JPEG size
 
@@ -81,9 +87,17 @@ class FrameScore:
 class VideoAnalysis:
     info: VideoInfo
     frames: list[FrameScore] = field(default_factory=list)
+    bins: list[SecondBin] = field(default_factory=list)
+    scenes: list[tuple[float, float]] = field(default_factory=list)
+    dead_spans: list[tuple[float, float]] = field(default_factory=list)
     best_index: Optional[int] = None            # index into `frames`
     dead_footage: Optional[bool] = None         # None when nothing decodable
-    highlights: list[dict] = field(default_factory=list)  # {start, end, frames}
+    dead_ratio: float = 0.0
+    low_activity_ratio: float = 0.0
+    usable_ratio: float = 1.0
+    best_score: float = 0.0
+    highlights: list[dict] = field(default_factory=list)
+    missing_globally: list[str] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -222,20 +236,239 @@ def detect_highlights(frames: list[FrameScore]) -> list[dict]:
     return segments
 
 
-def analyze_video(
-    path: Path, n: int = FRAME_SAMPLES
-) -> tuple[VideoAnalysis, list[np.ndarray]]:
-    """Full per-video analysis. Returns ``(analysis, raw_rgb_frames)``.
+def _face_presence(img: np.ndarray) -> float:
+    """Cheap presence only. InsightFace enrichment runs on highlight candidates."""
+    try:
+        from selects.classical.faces import _detect_haar
 
-    ``raw_rgb_frames`` aligns 1:1 with ``analysis.frames`` so callers can
-    persist the filmstrip / thumbnail without re-decoding.
-    """
-    info, raw = extract_frames(path, n)
+        faces = _detect_haar(img)
+    except Exception:
+        return 0.0
+    return 1.0 if faces else 0.0
+
+
+def _measure_iqa(images: list[np.ndarray]) -> list[float | None]:
+    if not images:
+        return []
+    try:
+        from PIL import Image
+
+        from selects.ml.embed import encode_image_batch
+        from selects.ml.onnx_rt import all_present
+
+        if not all_present():
+            return [None] * len(images)
+        _feats, iqa = encode_image_batch([Image.fromarray(img) for img in images])
+        return [float(value) for value in iqa]
+    except Exception as exc:
+        log.debug("video IQA skipped: %s", exc)
+        return [None] * len(images)
+
+
+def _audio_energy_by_second(path: Path, duration: float) -> tuple[dict[int, float], bool]:
+    try:
+        from selects.media.audio import analyze_audio
+
+        result = analyze_audio(path)
+    except Exception as exc:
+        log.debug("video audio analysis skipped: %s", exc)
+        return {}, False
+    if not result.available:
+        return {}, False
+    by_sec: dict[int, float] = {}
+    for window in result.speech_windows:
+        score = 0.85 if window.speech_like else (0.20 if window.rms < 0.01 else 0.55)
+        start = int(max(0, math.floor(window.start)))
+        end = int(max(start, math.ceil(window.end)))
+        for sec in range(start, end + 1):
+            by_sec[sec] = max(by_sec.get(sec, 0.0), score)
+    if duration and not by_sec:
+        by_sec = {sec: 0.20 for sec in range(int(math.ceil(duration)))}
+    return by_sec, True
+
+
+def analyze_video(
+    path: Path, n: int | None = None, *, use_ml: bool = True
+) -> tuple[VideoAnalysis, list[np.ndarray]]:
+    """Full per-video analysis. Returns ``(analysis, filmstrip_rgb_frames)``."""
+    info = probe_video(path)
+    duration = info.duration_sec or 0.0
+    cheap_fps, cheap_cap, ml_cap = sample_plan(duration)
+    take = n if n is not None else cheap_cap
+    take = max(1, min(take, cheap_cap if duration else take))
+    info, raw = extract_frames(path, n=take)
+
+    missing: set[str] = set()
+    metrics: list[dict] = []
+    previous = None
+    previous_hash = None
+    identical_run = 0
+    from selects.ml.video_search import perceptual_difference, scene_hash
+
+    for frame_idx, t, img in raw:
+        focus, contrast = focus_quality(img)
+        from selects.classical.exposure import exposure_score as _exposure_score
+
+        exp = _exposure_score(img)
+        delta = luma_delta(previous, img) if previous is not None else 0.0
+        scene_delta = perceptual_difference(previous, img) if previous is not None else 0.0
+        digest = scene_hash(img)
+        identical = previous_hash is not None and digest == previous_hash
+        identical_run = identical_run + 1 if identical else 0
+        freeze = identical_run >= 2  # evidence of freeze still requires changing sides later
+        metrics.append(
+            {
+                "frame_index": frame_idx,
+                "t_sec": float(t),
+                "img": img,
+                "focus": focus,
+                "contrast": contrast,
+                "exposure": exp.score,
+                "mean": exp.mean,
+                "clipped_ratio": exp.clipped_ratio,
+                "motion": motion_score(delta),
+                "scene_delta": scene_delta,
+                "face_presence": _face_presence(img),
+                "identical_run": identical_run,
+                "freeze_candidate": freeze,
+            }
+        )
+        previous = img
+        previous_hash = digest
+
+    # Freeze is hard-dead only with changing footage on both sides of a run.
+    for i, row in enumerate(metrics):
+        if not row["freeze_candidate"]:
+            row["freeze"] = False
+            continue
+        left = any(m["identical_run"] == 0 for m in metrics[:i])
+        right = any(m["identical_run"] == 0 for m in metrics[i + 1 :])
+        row["freeze"] = bool(left and right)
+
+    duration = max(duration, metrics[-1]["t_sec"] + 1.0 if metrics else 0.0)
+    times = [m["t_sec"] for m in metrics]
+    deltas = [m["scene_delta"] for m in metrics]
+    scenes = build_scenes(times, deltas) if times else []
+
+    ml_indexes = []
+    if metrics:
+        step = max(1, int(math.floor(len(metrics) / min(ml_cap, len(metrics)))))
+        ml_indexes = list(range(0, len(metrics), step))[:ml_cap]
+    iqa_vals = _measure_iqa([metrics[i]["img"] for i in ml_indexes])
+    if not iqa_vals or all(v is None for v in iqa_vals):
+        missing.add("iqa")
+        iqa_by_t: dict[float, float] = {}
+    else:
+        iqa_by_t = {
+            metrics[i]["t_sec"]: value
+            for i, value in zip(ml_indexes, iqa_vals)
+            if value is not None
+        }
+
+    audio_by_sec, audio_ok = _audio_energy_by_second(path, duration)
+    if not audio_ok:
+        missing.add("audio")
+
+    seconds = int(math.ceil(duration)) if duration else 0
+    bins: list[SecondBin] = []
+    for sec in range(max(seconds, 1) if metrics else 0):
+        group = [m for m in metrics if sec <= m["t_sec"] < sec + 1]
+        if not group:
+            nearest = min(metrics, key=lambda m: abs(m["t_sec"] - sec)) if metrics else None
+            group = [nearest] if nearest is not None else []
+        if not group:
+            continue
+        focus = float(np.mean([m["focus"] for m in group]))
+        contrast = float(np.mean([m["contrast"] for m in group]))
+        exposure = float(np.mean([m["exposure"] for m in group]))
+        mean = float(np.mean([m["mean"] for m in group]))
+        clipped = float(np.mean([m["clipped_ratio"] for m in group]))
+        motion = float(np.mean([m["motion"] for m in group]))
+        scene_delta = float(np.max([m["scene_delta"] for m in group]))
+        face = float(np.max([m["face_presence"] for m in group]))
+        freeze = any(m.get("freeze") for m in group)
+        iqa = iqa_by_t.get(group[0]["t_sec"])
+        iqa_source = "measured" if iqa is not None else "missing"
+        audio = audio_by_sec.get(sec, 0.5 if audio_ok else 0.5)
+        silent = audio_ok and audio <= 0.25
+        low = is_low_activity(silent=silent, motion=motion, face_presence=face)
+        hard = is_hard_dead_frame(
+            focus=focus, contrast=contrast, exposure=exposure,
+            mean=mean, clipped_ratio=clipped, freeze=freeze,
+        )
+        parts = {
+            "iqa": iqa,
+            "focus": focus,
+            "exposure": exposure,
+            "motion": motion,
+            "faces": face,
+            "audio": audio if audio_ok else None,
+        }
+        quality = combine_score(parts, missing_globally=missing, low_activity=low and not hard)
+        bins.append(
+            SecondBin(
+                t_sec=float(sec),
+                sharp=focus,
+                exposure=exposure,
+                motion=motion,
+                scene_delta=scene_delta,
+                iqa=iqa,
+                iqa_source=iqa_source,
+                face_presence=face,
+                audio=audio,
+                quality=quality,
+                hard_dead=hard,
+                low_activity=low and not hard,
+                parts={k: (0.5 if v is None else float(v)) for k, v in parts.items()},
+            )
+        )
+
+    interpolate_iqa(bins, scenes)
+    if "iqa" not in missing:
+        for bin_ in bins:
+            if bin_.iqa is not None:
+                bin_.parts["iqa"] = float(bin_.iqa)
+                bin_.quality = combine_score(
+                    {
+                        "iqa": bin_.iqa,
+                        "focus": bin_.sharp,
+                        "exposure": bin_.exposure,
+                        "motion": bin_.motion,
+                        "faces": bin_.face_presence,
+                        "audio": bin_.audio if "audio" not in missing else None,
+                    },
+                    missing_globally=missing,
+                    low_activity=bin_.low_activity,
+                )
+
+    if use_ml and bins:
+        images_by_sec: dict[int, np.ndarray] = {}
+        for row in metrics:
+            images_by_sec.setdefault(int(row["t_sec"]), row["img"])
+        apply_face_enrichment(bins, images_by_sec, missing_globally=missing)
+
+    dead = dead_spans(bins, scenes)
+    dead_dur = sum(max(0.0, end - start) for start, end in dead)
+    low_dur = sum(1.0 for bin_ in bins if bin_.low_activity)
+    dead_ratio = (dead_dur / duration) if duration else 0.0
+    highlights = select_highlights(bins, scenes)
+
+    strip_n = min(FRAME_SAMPLES, max(1, len(raw)))
+    if len(raw) <= strip_n:
+        strip_raw = raw
+    else:
+        idxs = np.linspace(0, len(raw) - 1, strip_n).round().astype(int)
+        strip_raw = [raw[int(i)] for i in sorted(set(idxs))]
 
     frames: list[FrameScore] = []
     arrays: list[np.ndarray] = []
-    for strip_i, (frame_idx, t, img) in enumerate(raw):
+    for strip_i, (frame_idx, t, img) in enumerate(strip_raw):
+        nearest = min(bins, key=lambda b: abs(b.t_sec - t)) if bins else None
         blur, exp, quality, good = score_frame(img)
+        if nearest is not None:
+            quality = nearest.quality
+            good = not nearest.hard_dead
+            exp = nearest.exposure
         frames.append(
             FrameScore(
                 index=strip_i,
@@ -249,12 +482,32 @@ def analyze_video(
         )
         arrays.append(img)
 
-    analysis = VideoAnalysis(info=info, frames=frames)
-    if frames:
-        bad = sum(1 for f in frames if not f.good)
-        analysis.dead_footage = (bad / len(frames)) > DEAD_FOOTAGE_RATIO
-        analysis.best_index = max(range(len(frames)), key=lambda i: frames[i].quality)
-        analysis.highlights = detect_highlights(frames)
+    analysis = VideoAnalysis(
+        info=info,
+        frames=frames,
+        bins=bins,
+        scenes=scenes,
+        dead_spans=dead,
+        dead_ratio=dead_ratio,
+        low_activity_ratio=(low_dur / duration) if duration else 0.0,
+        usable_ratio=max(0.0, 1.0 - dead_ratio),
+        best_score=max((b.quality for b in bins), default=0.0),
+        missing_globally=sorted(missing),
+        highlights=[
+            {
+                "start": round(h.start, 3),
+                "end": round(h.end, 3),
+                "frames": max(1, int(round(h.end - h.start))),
+                "score": round(h.score, 4),
+                "reason": h.reason,
+            }
+            for h in highlights
+        ],
+    )
+    if bins:
+        analysis.dead_footage = dead_ratio > DEAD_FOOTAGE_RATIO
+        if frames:
+            analysis.best_index = max(range(len(frames)), key=lambda i: frames[i].quality)
     return analysis, arrays
 
 
@@ -286,6 +539,105 @@ def _embed_best_frame(img: np.ndarray) -> Optional[bytes]:
 
 def frames_dir_for(cfg: FolderConfig, sha256: str) -> Path:
     return cfg.state_dir / FRAMES_SUBDIR / sha256
+
+
+def _replace_segments(session, video: Video, analysis: VideoAnalysis) -> None:
+    session.query(VideoSegment).filter(
+        VideoSegment.video_id == video.id,
+        VideoSegment.kind.in_(("scene", "dead", "highlight")),
+    ).delete(synchronize_session=False)
+    fingerprint = f"{video.sha256 or ''}:{ANALYSIS_VERSION}"
+    rows = []
+    for start, end in analysis.scenes:
+        rows.append(
+            VideoSegment(
+                video_id=video.id,
+                start_ms=int(round(start * 1000.0)),
+                end_ms=int(round(end * 1000.0)),
+                kind="scene",
+                source_fingerprint=fingerprint,
+                processor_version=ANALYSIS_VERSION,
+            )
+        )
+    for start, end in analysis.dead_spans:
+        rows.append(
+            VideoSegment(
+                video_id=video.id,
+                start_ms=int(round(start * 1000.0)),
+                end_ms=int(round(end * 1000.0)),
+                kind="dead",
+                source_fingerprint=fingerprint,
+                processor_version=ANALYSIS_VERSION,
+            )
+        )
+    for item in analysis.highlights:
+        rows.append(
+            VideoSegment(
+                video_id=video.id,
+                start_ms=int(round(item["start"] * 1000.0)),
+                end_ms=int(round(item["end"] * 1000.0)),
+                kind="highlight",
+                score=item.get("score"),
+                ocr_text=item.get("reason"),
+                source_fingerprint=fingerprint,
+                processor_version=ANALYSIS_VERSION,
+            )
+        )
+    session.add_all(rows)
+    tags = {row.tag for row in session.query(VideoTag).filter(VideoTag.video_id == video.id).all()}
+    if analysis.dead_footage and not (tags & {"kept", "archived", "review"}):
+        session.add(VideoTag(video_id=video.id, tag="review", source="analysis", score=1.0))
+
+
+def _replace_speech_segments(
+    session,
+    video: Video,
+    *,
+    silence: list[tuple[float, float]],
+    filler: list[tuple[float, float]],
+    topics: list[tuple[float, float, str]],
+) -> None:
+    session.query(VideoSegment).filter(
+        VideoSegment.video_id == video.id,
+        VideoSegment.kind.in_(("silence", "filler", "topic")),
+    ).delete(synchronize_session=False)
+    fingerprint = f"{video.sha256 or ''}:{ANALYSIS_VERSION}"
+    rows = []
+    for start, end in silence:
+        rows.append(
+            VideoSegment(
+                video_id=video.id,
+                start_ms=int(round(start * 1000.0)),
+                end_ms=int(round(end * 1000.0)),
+                kind="silence",
+                source_fingerprint=fingerprint,
+                processor_version=ANALYSIS_VERSION,
+            )
+        )
+    for start, end in filler:
+        rows.append(
+            VideoSegment(
+                video_id=video.id,
+                start_ms=int(round(start * 1000.0)),
+                end_ms=int(round(end * 1000.0)),
+                kind="filler",
+                source_fingerprint=fingerprint,
+                processor_version=ANALYSIS_VERSION,
+            )
+        )
+    for start, end, label in topics:
+        rows.append(
+            VideoSegment(
+                video_id=video.id,
+                start_ms=int(round(start * 1000.0)),
+                end_ms=int(round(end * 1000.0)),
+                kind="topic",
+                ocr_text=label,
+                source_fingerprint=fingerprint,
+                processor_version=ANALYSIS_VERSION,
+            )
+        )
+    session.add_all(rows)
 
 
 def _save_frame_strip(cfg: FolderConfig, sha256: str, arrays: list[np.ndarray]) -> None:
@@ -330,7 +682,8 @@ def run_video_stage(
     with session_scope(Session) as s:
         pending = [
             (v.id, v.path, v.sha256)
-            for v in s.query(Video).filter(Video.processed_at.is_(None)).all()
+            for v in s.query(Video).all()
+            if v.processed_at is None or v.analysis_version != ANALYSIS_VERSION
         ]
 
     total = len(pending)
@@ -347,7 +700,11 @@ def run_video_stage(
         if on_progress:
             on_progress(i, total, name)
         try:
-            analysis, arrays = analyze_video(Path(vpath), n=n_frames)
+            analysis, arrays = analyze_video(
+                Path(vpath),
+                n=n_frames,
+                use_ml=embed and cfg.speed_mode != "fast",
+            )
         except (VideoDecodeError, Exception) as exc:  # noqa: BLE001
             log.warning("video analysis failed for %s: %s", vpath, exc)
             analysis, arrays = VideoAnalysis(info=VideoInfo()), []
@@ -389,14 +746,47 @@ def run_video_stage(
             v.sharpness = best_frame.blur if best_frame else None
             v.exposure = best_frame.exposure if best_frame else None
             v.dead_footage = analysis.dead_footage
+            v.dead_ratio = analysis.dead_ratio
+            v.low_activity_ratio = analysis.low_activity_ratio
+            v.usable_ratio = analysis.usable_ratio
+            v.best_score = analysis.best_score
+            v.analysis_version = ANALYSIS_VERSION
             v.frames_json = json.dumps([asdict(f) for f in analysis.frames])
             v.highlights_json = json.dumps(analysis.highlights)
             if siglip_blob is not None:
                 v.siglip = siglip_blob
             v.processed_at = utcnow()
             s.add(v)
+            _replace_segments(s, v, analysis)
+            if cfg.speed_mode != "fast":
+                from selects.ml import video_speech
 
-        if analysis.frames and sha:
+                words = video_speech.transcribe_video(Path(vpath), cancel=should_cancel)
+                if words:
+                    fingerprint = f"{v.sha256 or ''}:{ANALYSIS_VERSION}"
+                    video_speech.persist_transcript(s, v.id, fingerprint, words)
+                    covered = []
+                    for start, end in analysis.scenes:
+                        dur = max(end - start, 1e-6)
+                        spoken = sum(w.d for w in words if start <= w.t < end)
+                        covered.append(spoken / dur)
+                    silence = video_speech.silence_spans(words, analysis.scenes, covered)
+                    filler = video_speech.filler_spans(words)
+                    topics: list[tuple[float, float, str]] = []
+                    phrases = [(a, b, text) for a, b, text, _group in video_speech.words_to_phrases(words)]
+                    if phrases:
+                        try:
+                            from selects.ml.embed import encode_text_prompts
+
+                            embeddings = encode_text_prompts([text for _a, _b, text in phrases])
+                            topics = video_speech.topic_spans(phrases, list(embeddings))
+                        except Exception:
+                            topics = [(a, b, text) for a, b, text in phrases]
+                    _replace_speech_segments(
+                        s, v, silence=silence, filler=filler, topics=topics
+                    )
+
+        if embed and analysis.frames and sha:
             best_source_index = (
                 analysis.frames[analysis.best_index].frame_index
                 if analysis.best_index is not None

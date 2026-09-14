@@ -1,9 +1,20 @@
 .video-timeline {
-  padding: 14px 18px 12px;
+  padding: 11px 18px 12px;
   border-top: 1px solid var(--md-outline-var);
   background: var(--md-surface-c-low);
   color: var(--md-on-surface-var);
 }
+
+.video-timeline-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 9px;
+}
+
+.video-timeline-heading strong { color: var(--md-on-surface); font-size: 12px; font-weight: 600; }
+.video-timeline-heading span { color: var(--md-outline); font-size: 10px; }
 
 .video-timeline-scale,
 .video-timeline-readout,
@@ -22,7 +33,7 @@
 
 .video-timeline-track {
   position: relative;
-  height: 74px;
+  height: 70px;
   overflow: visible;
   border: 1px solid var(--md-outline-var);
   border-radius: var(--r-sm);
@@ -69,6 +80,8 @@
 .video-timeline-overlays { position: absolute; inset: 0; pointer-events: none; }
 
 .video-timeline-highlight,
+.video-timeline-dead,
+.video-timeline-silence,
 .video-timeline-search-hit,
 .video-timeline-trim-window {
   position: absolute;
@@ -77,6 +90,8 @@
 }
 
 .video-timeline-highlight { background: color-mix(in srgb, var(--g-yellow) 32%, transparent); }
+.video-timeline-dead { background: color-mix(in srgb, var(--g-red, #b42318) 28%, transparent); }
+.video-timeline-silence { top: auto; bottom: 0; height: 6px; background: color-mix(in srgb, var(--md-outline) 55%, transparent); }
 .video-timeline-search-hit { top: auto; bottom: 0; height: 5px; background: var(--g-blue); }
 .video-timeline-trim-window { border: 2px solid var(--md-primary); border-top: 0; border-bottom: 0; }
 
@@ -131,6 +146,8 @@
 .video-timeline-legend span { display: inline-flex; align-items: center; gap: 5px; }
 .video-timeline-legend i { width: 9px; height: 4px; border-radius: 2px; background: var(--md-outline); }
 .video-timeline-legend i.is-highlight { background: var(--g-yellow); }
+.video-timeline-legend i.is-dead { background: var(--g-red, #b42318); }
+.video-timeline-legend i.is-silence { background: var(--md-outline); }
 .video-timeline-legend i.is-search { background: var(--g-blue); }
 .video-timeline-legend i.is-trim { background: var(--md-primary); }
 

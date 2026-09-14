@@ -16,6 +16,8 @@ interface VideoTimelineProps {
   outPoint: number;
   frames: VideoFrame[];
   highlights: VideoHighlight[];
+  deadSpans?: VideoHighlight[];
+  silenceSpans?: VideoHighlight[];
   waveform?: number[];
   searchHits?: VideoSearchHit[];
   onSeek: (seconds: number) => void;
@@ -45,6 +47,8 @@ export default function VideoTimeline({
   outPoint,
   frames,
   highlights,
+  deadSpans = [],
+  silenceSpans = [],
   waveform = [],
   searchHits = [],
   onSeek,
@@ -100,6 +104,10 @@ export default function VideoTimeline({
 
   return (
     <section className="video-timeline" aria-label="Video timeline">
+      <div className="video-timeline-heading">
+        <strong>Timeline</strong>
+        <span>{frames.length > 0 ? `${frames.length} frames` : "No frame strip"}</span>
+      </div>
       <div className="video-timeline-scale" aria-hidden="true">
         <span>0:00</span>
         <span>{timeLabel(safeDuration / 2)}</span>
@@ -130,6 +138,20 @@ export default function VideoTimeline({
           ))}
         </div>
         <div className="video-timeline-overlays" aria-hidden="true">
+          {deadSpans.map((span, index) => (
+            <span
+              className="video-timeline-dead"
+              key={`dead-${index}`}
+              style={{ left: `${percent(span.start, safeDuration)}%`, width: `${percent(span.end - span.start, safeDuration)}%` }}
+            />
+          ))}
+          {silenceSpans.map((span, index) => (
+            <span
+              className="video-timeline-silence"
+              key={`silence-${index}`}
+              style={{ left: `${percent(span.start, safeDuration)}%`, width: `${percent(span.end - span.start, safeDuration)}%` }}
+            />
+          ))}
           {highlights.map((highlight, index) => (
             <span
               className="video-timeline-highlight"
@@ -194,6 +216,8 @@ export default function VideoTimeline({
       </div>
       <div className="video-timeline-legend" aria-hidden="true">
         <span><i className="is-highlight" /> Highlights</span>
+        <span><i className="is-dead" /> Unusable</span>
+        <span><i className="is-silence" /> Silence</span>
         <span><i className="is-search" /> Search hits</span>
         <span><i className="is-trim" /> Export range</span>
       </div>

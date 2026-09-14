@@ -32,7 +32,8 @@ from selects.db.models import (
 
 
 PREVIOUS_HEAD = "b1c2d3e4f5a6"
-CURRENT_HEAD = "f7a8b9c0d1e2"
+CULL_V2_PREVIOUS = "f7a8b9c0d1e2"
+CURRENT_HEAD = "c9d0e1f2a3b4"
 
 
 def _forget_engine(db_path: Path) -> None:
@@ -85,6 +86,9 @@ def test_video_schema_contract_is_additive() -> None:
         "frame_index",
         "timestamp_ms",
         "siglip",
+        "iqa",
+        "motion",
+        "face_presence",
         "source_fingerprint",
         "processor_version",
         "model_version",
@@ -98,8 +102,16 @@ def test_video_schema_contract_is_additive() -> None:
         "end_ms",
         "embedding",
         "ocr_text",
+        "decision",
         "representative_keyframe_id",
     }.issubset(set(Base.metadata.tables["video_segments"].columns.keys()))
+    assert {
+        "dead_ratio",
+        "low_activity_ratio",
+        "usable_ratio",
+        "best_score",
+        "analysis_version",
+    }.issubset(set(Base.metadata.tables["videos"].columns.keys()))
     assert {
         "video_id",
         "audio_present",
@@ -107,7 +119,7 @@ def test_video_schema_contract_is_additive() -> None:
         "silence_segments_json",
         "speech_segments_json",
     }.issubset(set(Base.metadata.tables["video_audio_analysis"].columns.keys()))
-    assert {"video_id", "start_ms", "end_ms", "text", "language"}.issubset(
+    assert {"video_id", "start_ms", "end_ms", "text", "language", "words_json"}.issubset(
         set(Base.metadata.tables["video_transcript_segments"].columns.keys())
     )
     assert {"video_id", "schema_version", "recipe_json", "source_fingerprint"}.issubset(
@@ -258,6 +270,27 @@ def test_migration_adds_video_schema_and_cascade_graph(tmp_path: Path) -> None:
             assert session.query(model).count() == 0, model.__tablename__
         assert session.query(VideoCollection).count() == 1
 
+    assert _read_version(db_path) == CURRENT_HEAD
+
+
+def test_cull_v2_migration_adds_summary_and_decision_columns(tmp_path: Path) -> None:
+    db_path = tmp_path / ".selects" / "index.db"
+    _build_db_at(db_path, CULL_V2_PREVIOUS)
+    _forget_engine(db_path)
+    Session = init_db(db_path)
+    insp = inspect(Session.kw["bind"])
+    video_cols = {c["name"] for c in insp.get_columns("videos")}
+    assert {
+        "dead_ratio",
+        "low_activity_ratio",
+        "usable_ratio",
+        "best_score",
+        "analysis_version",
+    } <= video_cols
+    assert "decision" in {c["name"] for c in insp.get_columns("video_segments")}
+    assert "words_json" in {c["name"] for c in insp.get_columns("video_transcript_segments")}
+    assert "iqa" in {c["name"] for c in insp.get_columns("video_keyframes")}
+    assert "video_transcript_fts" in set(insp.get_table_names())
     assert _read_version(db_path) == CURRENT_HEAD
 
 

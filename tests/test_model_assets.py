@@ -75,6 +75,7 @@ def test_manifest_well_formed():
     ids_present = {a["id"] for a in model_assets.MANIFEST}
     assert "selects_onnx" in ids_present
     assert "buffalo_l" in ids_present
+    assert "whisper_small_onnx" in ids_present
 
 
 # --------------------------------------------------------------------------- #
@@ -176,14 +177,19 @@ def test_status_shape(tmp_path, monkeypatch):
     from selects.ml import onnx_rt
 
     monkeypatch.setattr(model_assets, "_hf_repo_cached", lambda repo_id: False)
-    monkeypatch.setattr(model_assets, "insightface_dir", lambda: tmp_path / "nope")
     monkeypatch.setattr(onnx_rt, "all_present", lambda: False)
+    monkeypatch.setattr("selects.ml.video_speech.whisper_files_present", lambda: False)
 
     st = model_assets.status(base_models_dir=tmp_path)
-    assert set(st) == {"models", "total_missing_mb"}
+    assert {"models", "total_missing_mb", "cache_root", "runtime"} <= set(st)
+    assert st["cache_root"] == str(tmp_path)
+    assert "device" in st["runtime"]
     assert len(st["models"]) == len(model_assets.MANIFEST)
     for m in st["models"]:
-        assert set(m) == {"id", "name", "present", "approx_size_mb", "required_for"}
+        assert {
+            "id", "name", "kind", "ref", "present", "approx_size_mb",
+            "required_for", "cache_path",
+        } <= set(m)
         assert m["present"] is False
     expected = sum(int(a["approx_size_mb"]) for a in model_assets.MANIFEST)
     assert st["total_missing_mb"] == expected
@@ -236,6 +242,57 @@ def test_route_status(monkeypatch):
     assert body["total_missing_mb"] == 42
     assert body["downloading"] is False
     assert body["models"] == [{"id": "siglip"}]
+
+
+def test_standard_cache_layout(tmp_path):
+    buffalo = next(a for a in model_assets.MANIFEST if a["id"] == "buffalo_l")
+    whisper = next(a for a in model_assets.MANIFEST if a["id"] == "whisper_small_onnx")
+    onnx = next(a for a in model_assets.MANIFEST if a["id"] == "selects_onnx")
+    root = model_assets.status(base_models_dir=tmp_path)["cache_root"]
+    assert model_assets.asset_cache_path(onnx, tmp_path) == str(tmp_path / "selects-onnx")
+    assert model_assets.asset_cache_path(whisper, tmp_path) == str(tmp_path / "whisper-small")
+    assert model_assets.asset_cache_path(buffalo, tmp_path) == str(tmp_path / "buffalo_l")
+    assert root == str(tmp_path)
+
+
+def test_runtime_info_does_not_require_cuda():
+    from selects.ml.onnx_rt import runtime_info
+
+    info = runtime_info()
+    assert info["cuda_required"] is False
+    assert "CPUExecutionProvider" in info["installed_providers"] or "CPUExecutionProvider" in info["selected"]
+    assert info["device"]
+
+
+def test_download_one_unknown_raises():
+    with pytest.raises(KeyError):
+        model_assets.download_one("not-a-real-model")
+
+
+def test_download_one_calls_asset(monkeypatch):
+    seen: list[str] = []
+    monkeypatch.setattr(
+        model_assets, "_download_asset",
+        lambda asset, base: seen.append(asset["id"]),
+    )
+    monkeypatch.setattr(model_assets, "asset_present", lambda a, base_models_dir=None: True)
+    out = model_assets.download_one("whisper_small_onnx")
+    assert seen == ["whisper_small_onnx"]
+    assert out == {"id": "whisper_small_onnx", "present": True}
+
+
+def test_route_download_one(monkeypatch):
+    seen: list[str] = []
+    monkeypatch.setattr(
+        model_assets, "download_one",
+        lambda asset_id, publish=None, base_models_dir=None: seen.append(asset_id) or {"id": asset_id, "present": True},
+    )
+    client = TestClient(_app_with_routes(lambda msg: None))
+    r = client.post("/api/models/download/buffalo_l")
+    assert r.status_code == 200
+    assert r.json() == {"started": True, "id": "buffalo_l"}
+    r404 = client.post("/api/models/download/nope")
+    assert r404.status_code == 404
 
 
 def test_route_download_and_conflict(monkeypatch):

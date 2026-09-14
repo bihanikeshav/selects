@@ -62,8 +62,17 @@ MANIFEST: list[dict] = [
         "kind": "insightface",
         "ref": "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip",
         "approx_size_mb": 330,
-        "required_for": "face recognition",
+        "required_for": "face recognition and video highlight faces",
         "sha256": None,  # insightface manages/verifies its own pack
+    },
+    {
+        "id": "whisper_small_onnx",
+        "name": "Whisper small ONNX (word-timed transcript)",
+        "kind": "hf",
+        "ref": "onnx-community/whisper-small",
+        "approx_size_mb": 500,
+        "required_for": "video transcript, silence and filler selects",
+        "sha256": None,
     },
 ]
 
@@ -72,11 +81,23 @@ MANIFEST: list[dict] = [
 # Paths                                                                        #
 # --------------------------------------------------------------------------- #
 
-def models_dir() -> Path:
-    """Shared cache directory for ``kind="url"`` weight files.
+# Every pack lives under models_dir() / <folder>. InsightFace's FaceAnalysis
+# API is {root}/models/{name}, so buffalo_l is models_dir()/buffalo_l with
+# root = models_dir().parent (the default models_dir is named "models").
+_ASSET_FOLDERS = {
+    "selects_onnx": "selects-onnx",
+    "whisper_small_onnx": "whisper-small",
+    "buffalo_l": "buffalo_l",
+}
 
-    Overridable via ``SELECTS_MODELS_DIR`` (used by tests). Defaults to
-    ``~/.cache/selects/models``.
+_LEGACY_INSIGHTFACE = Path.home() / ".insightface" / "models" / "buffalo_l"
+
+
+def models_dir() -> Path:
+    """Canonical weights root. Override with ``SELECTS_MODELS_DIR``.
+
+    Default: ``~/.cache/selects/models``. Every pack is a subdirectory:
+    ``selects-onnx``, ``whisper-small``, ``buffalo_l``.
     """
     env = os.environ.get("SELECTS_MODELS_DIR")
     if env:
@@ -84,9 +105,21 @@ def models_dir() -> Path:
     return Path.home() / ".cache" / "selects" / "models"
 
 
+def asset_dir(asset_id: str, base_models_dir: Optional[Path] = None) -> Path:
+    """Directory for one manifest asset under the canonical cache."""
+    base = Path(base_models_dir) if base_models_dir is not None else models_dir()
+    return base / _ASSET_FOLDERS.get(asset_id, asset_id)
+
+
 def insightface_dir() -> Path:
-    """Root under which insightface stores its model packs."""
-    return Path.home() / ".insightface" / "models"
+    """Directory that contains the buffalo_l pack (canonical cache)."""
+    return asset_dir("buffalo_l")
+
+
+def insightface_root(base_models_dir: Optional[Path] = None) -> Path:
+    """FaceAnalysis ``root`` so ``{root}/models/buffalo_l`` is ``asset_dir('buffalo_l')``."""
+    base = Path(base_models_dir) if base_models_dir is not None else models_dir()
+    return base.parent
 
 
 def _url_target(asset: dict, base: Optional[Path]) -> Path:
@@ -169,6 +202,13 @@ def _hf_repo_cached(repo_id: str) -> bool:
         return False
 
 
+def asset_cache_path(asset: dict, base_models_dir: Optional[Path] = None) -> str:
+    """Directory or file where this asset lives on disk."""
+    if asset["kind"] == "url":
+        return str(_url_target(asset, base_models_dir))
+    return str(asset_dir(asset["id"], base_models_dir))
+
+
 def asset_present(asset: dict, base_models_dir: Optional[Path] = None) -> bool:
     """Return True if *asset* is already available on disk."""
     kind = asset["kind"]
@@ -177,10 +217,19 @@ def asset_present(asset: dict, base_models_dir: Optional[Path] = None) -> bool:
 
         return all_present()
     if kind == "hf":
+        if asset.get("id") == "whisper_small_onnx":
+            from selects.ml.video_speech import whisper_files_present
+
+            return whisper_files_present()
         return _hf_repo_cached(asset["ref"])
     if kind == "insightface":
-        # insightface unpacks the zip into <root>/buffalo_l/
-        return (insightface_dir() / "buffalo_l").is_dir()
+        pack = asset_dir("buffalo_l", base_models_dir)
+        if pack.is_dir() and any(pack.iterdir()):
+            return True
+        # Existing installs that used InsightFace's default home.
+        if base_models_dir is None and _LEGACY_INSIGHTFACE.is_dir():
+            return True
+        return False
     if kind == "url":
         target = _url_target(asset, base_models_dir)
         if not target.exists() or target.stat().st_size <= 0:
@@ -212,12 +261,27 @@ def status(base_models_dir: Optional[Path] = None) -> dict:
             {
                 "id": a["id"],
                 "name": a["name"],
+                "kind": a["kind"],
+                "ref": a["ref"],
                 "present": present,
                 "approx_size_mb": int(a["approx_size_mb"]),
                 "required_for": a["required_for"],
+                "cache_path": asset_cache_path(a, base_models_dir),
             }
         )
-    return {"models": models, "total_missing_mb": total_missing}
+    runtime = {}
+    try:
+        from selects.ml.onnx_rt import runtime_info
+
+        runtime = runtime_info()
+    except Exception:
+        runtime = {"device": "CPU", "cuda_required": False, "gpu_without_cuda": False}
+    return {
+        "models": models,
+        "total_missing_mb": total_missing,
+        "cache_root": str(base_models_dir or models_dir()),
+        "runtime": runtime,
+    }
 
 
 def _download_asset(asset: dict, base_models_dir: Optional[Path]) -> None:
@@ -227,9 +291,14 @@ def _download_asset(asset: dict, base_models_dir: Optional[Path]) -> None:
 
         ensure_all()
     elif kind == "hf":
-        from huggingface_hub import snapshot_download
+        if asset.get("id") == "whisper_small_onnx":
+            from selects.ml.video_speech import _ensure_whisper_files
 
-        snapshot_download(asset["ref"])
+            _ensure_whisper_files()
+        else:
+            from huggingface_hub import snapshot_download
+
+            snapshot_download(asset["ref"])
     elif kind == "url":
         download_file(
             asset["ref"],
@@ -237,14 +306,31 @@ def _download_asset(asset: dict, base_models_dir: Optional[Path]) -> None:
             sha256=asset.get("sha256"),
         )
     elif kind == "insightface":
-        # Mirror classical/faces.py's convention: insightface fetches and
-        # unpacks buffalo_l on first access. ensure_available downloads the zip
-        # from its release URL into ~/.insightface/models/buffalo_l.
         from insightface.utils import storage
 
-        storage.ensure_available("models", "buffalo_l")
+        storage.ensure_available(
+            "models",
+            "buffalo_l",
+            root=str(insightface_root(base_models_dir)),
+        )
     else:
         raise ValueError(f"unknown asset kind: {kind!r}")
+
+
+def download_one(
+    asset_id: str,
+    publish: Optional[Callable[[dict], None]] = None,
+    base_models_dir: Optional[Path] = None,
+) -> dict:
+    """Download a single manifest asset by id. Raises ``KeyError`` if unknown."""
+    asset = next((item for item in MANIFEST if item["id"] == asset_id), None)
+    if asset is None:
+        raise KeyError(asset_id)
+    if publish is not None:
+        publish({"stage": "models", "current": 1, "total": 1, "message": asset["name"]})
+    log.info("downloading model asset %s (%s)", asset["id"], asset["name"])
+    _download_asset(asset, base_models_dir)
+    return {"id": asset_id, "present": asset_present(asset, base_models_dir)}
 
 
 def download_all(

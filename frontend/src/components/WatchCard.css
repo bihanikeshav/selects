@@ -93,11 +93,22 @@
 
 .watch-select {
   font-size: 13px;
-  padding: 4px 8px;
+  padding: 4px 30px 4px 8px;
   border-radius: var(--r-md, 8px);
   border: 1px solid var(--md-outline-var);
-  background: transparent;
+  background-color: transparent;
   color: inherit;
+}
+
+.watch-select-menu {
+  min-width: 92px;
+}
+
+.watch-select-menu .select-menu-trigger {
+  min-height: 30px;
+  padding: 4px 8px;
+  background: transparent;
+  font-size: 13px;
 }
 
 .watch-status-line {

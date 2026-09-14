@@ -1,0 +1,122 @@
+.select-menu {
+  position: relative;
+  display: inline-block;
+  min-width: 0;
+  vertical-align: middle;
+}
+
+.select-menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 10px;
+  border: 1px solid var(--md-outline-var);
+  border-radius: var(--r-sm);
+  background: var(--md-surface-c-lowest);
+  color: var(--md-on-surface);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--dur-short) var(--ease-standard), background-color var(--dur-short) var(--ease-standard), box-shadow var(--dur-short) var(--ease-standard);
+}
+
+.select-menu-trigger:hover {
+  border-color: var(--md-outline);
+  background: var(--md-surface-c);
+}
+
+.select-menu-trigger:focus-visible {
+  border-color: var(--md-primary);
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--md-primary) 20%, transparent);
+}
+
+.select-menu-trigger[aria-expanded="true"] {
+  border-color: var(--md-primary);
+  background: var(--md-surface-c);
+}
+
+.select-menu-trigger:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.select-menu-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.select-menu-chevron {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-right: 1.7px solid currentColor;
+  border-bottom: 1.7px solid currentColor;
+  transform: rotate(45deg) translateY(-2px);
+  transition: transform var(--dur-short) var(--ease-standard);
+}
+
+.select-menu-chevron.is-open {
+  transform: rotate(225deg) translate(-1px, -1px);
+}
+
+.select-menu-popover {
+  position: fixed;
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  max-height: min(320px, calc(100vh - 16px));
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--md-outline-var);
+  border-radius: 8px;
+  background: var(--md-surface-c-lowest);
+  box-shadow: var(--md-elev-3);
+  color: var(--md-on-surface);
+  scrollbar-width: thin;
+  scrollbar-color: var(--md-outline-var) transparent;
+}
+
+.select-menu-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--md-on-surface);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.select-menu-option:hover,
+.select-menu-option.is-active {
+  background: var(--md-secondary-container);
+  color: var(--md-on-secondary-container);
+}
+
+.select-menu-option.is-selected {
+  font-weight: 600;
+}
+
+.select-menu-check {
+  flex: 0 0 auto;
+  color: var(--md-primary);
+  font-size: 14px;
+  line-height: 1;
+}
+
+.select-menu-option.is-active .select-menu-check {
+  color: var(--md-on-secondary-container);
+}

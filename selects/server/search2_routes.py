@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, FastAPI, HTTPException, Query
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, or_, select, text
 
 from selects.config import FolderConfig
 from selects.db import init_db, session_scope
@@ -178,6 +178,17 @@ def build_router(cfg: FolderConfig) -> APIRouter:
                 )
                 for item in video_results
             ]
+            transcript_hits = _transcript_search(cfg, q, limit)
+            by_video = {item["video_id"]: item for item in video_results}
+            for hit in transcript_hits:
+                previous = by_video.get(hit["video_id"])
+                if previous is None or hit["score"] >= previous["score"]:
+                    by_video[hit["video_id"]] = hit
+                elif previous.get("match_start_sec") is None:
+                    previous["match_start_sec"] = hit["match_start_sec"]
+                    previous["match_end_sec"] = hit["match_end_sec"]
+                    previous["match_kind"] = "transcript"
+            video_results = list(by_video.values())
         elif want_videos:
             video_results = [
                 _video_result(video_id, sha, 0.0, 0.0, None, None, "browse")
@@ -242,6 +253,29 @@ def _sort_photos_by_date(Session, results: list[dict]) -> list[dict]:
                 )
             )
     return sorted(results, key=lambda item: taken.get(item["photo_id"]) or datetime.min, reverse=True)
+
+
+def _transcript_search(cfg: FolderConfig, q: str, limit: int) -> list[dict]:
+    Session = init_db(cfg.db_path)
+    try:
+        with session_scope(Session) as s:
+            rows = s.execute(
+                text(
+                    "SELECT s.video_id, v.sha256, s.start_ms, s.end_ms "
+                    "FROM video_transcript_fts AS f "
+                    "JOIN video_transcript_segments AS s ON s.id = f.rowid "
+                    "JOIN videos AS v ON v.id = s.video_id "
+                    "WHERE video_transcript_fts MATCH :q LIMIT :lim"
+                ),
+                {"q": q, "lim": limit},
+            ).fetchall()
+    except Exception:
+        return []
+    return [
+        _video_result(video_id, sha, 1.15, 1.15, start_ms / 1000.0, end_ms / 1000.0, "transcript")
+        for video_id, sha, start_ms, end_ms in rows
+        if sha
+    ]
 
 
 def _video_result(video_id: int, sha: str, score: float, semantic: float, start: float | None, end: float | None, kind: str) -> dict:

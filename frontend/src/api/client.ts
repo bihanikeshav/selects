@@ -186,8 +186,11 @@ export async function modelsStatus(): Promise<ModelsStatus> {
 
 /** Kick off a model download. Resolves `true` if started, `false` on a 409
  *  (a download is already running — the caller should just show progress). */
-export async function startModelsDownload(): Promise<boolean> {
-  const res = await fetch(`${BASE}/models/download`, { method: "POST" });
+export async function startModelsDownload(assetId?: string): Promise<boolean> {
+  const path = assetId
+    ? `${BASE}/models/download/${encodeURIComponent(assetId)}`
+    : `${BASE}/models/download`;
+  const res = await fetch(path, { method: "POST" });
   if (res.status === 409) return false;
   if (!res.ok) throw await detailError(res, "startModelsDownload");
   return true;

@@ -39,12 +39,17 @@ def _get_detector():
 
         from insightface.app import FaceAnalysis
 
-        # NOTE: DirectML cannot run buffalo_l's SCRFD detector (its Reshape ops throw
-        # under DmlExecutionProvider, same limitation as our SigLIP/RAM++ models), so
-        # we deliberately DON'T offer DML here. CUDA accelerates on NVIDIA builds; on
-        # the DirectML/CPU build onnxruntime simply uses CPU (CUDA EP absent).
+        from selects.ml.model_assets import insightface_root
+
+        # DirectML cannot run buffalo_l's SCRFD detector (Reshape ops throw), so
+        # we do not offer DML here. CUDA is used when onnxruntime-gpu is present;
+        # otherwise this is CPU. Weights live under ~/.cache/selects/models/buffalo_l.
         providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
-        app = FaceAnalysis(name="buffalo_l", providers=providers)
+        app = FaceAnalysis(
+            name="buffalo_l",
+            root=str(insightface_root()),
+            providers=providers,
+        )
         # det_size drives small-face recall: at 640x640 distant/small faces vanish.
         # 1280x1280 recovers them (slower). det_thresh 0.4 (< default 0.5) keeps more
         # low-confidence faces. Both overridable via env for tuning.

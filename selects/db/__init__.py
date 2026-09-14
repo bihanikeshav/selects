@@ -76,19 +76,27 @@ def _ensure_schema(engine: Engine) -> None:
             Base.metadata.create_all(conn)
         with engine.connect() as conn:
             command.stamp(_alembic_config(conn), "head")
-        return
-
-    if "alembic_version" not in table_names:
+    elif "alembic_version" not in table_names:
         with engine.connect() as conn:
             cfg = _alembic_config(conn)
             baseline = ScriptDirectory.from_config(cfg).get_base()
             command.stamp(cfg, baseline)
         with engine.connect() as conn:
             command.upgrade(_alembic_config(conn), "head")
-        return
+    else:
+        with engine.connect() as conn:
+            command.upgrade(_alembic_config(conn), "head")
 
-    with engine.connect() as conn:
-        command.upgrade(_alembic_config(conn), "head")
+    _ensure_transcript_fts(engine)
+
+
+def _ensure_transcript_fts(engine: Engine) -> None:
+    """FTS5 is not an ORM table; create it after create_all or upgrade."""
+    with engine.begin() as conn:
+        conn.exec_driver_sql(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS video_transcript_fts "
+            "USING fts5(text, content='', tokenize='porter')"
+        )
 
 
 def init_db(db_path: Path) -> sessionmaker[Session]:

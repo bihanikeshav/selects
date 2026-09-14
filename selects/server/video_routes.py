@@ -31,6 +31,7 @@ from selects.db.models import (
     VideoCollectionItem,
     VideoEdit,
     VideoRating,
+    VideoSegment,
     VideoTag,
 )
 from selects.pipeline import PipelineCancelled
@@ -56,6 +57,9 @@ class VideoOut(BaseModel):
     sharpness: Optional[float]
     exposure: Optional[float]
     dead_footage: Optional[bool]
+    dead_ratio: Optional[float] = None
+    best_score: Optional[float] = None
+    analysis_version: Optional[str] = None
     highlight_count: int
     highlights: list[dict]
     sampled_frames: int
@@ -83,6 +87,15 @@ class VideoFrameOut(BaseModel):
     quality: float
     good: bool
     url: str
+
+
+class DecisionBody(BaseModel):
+    decision: str
+
+
+_CLIP_DECISIONS = {"kept", "archived", "review", "clear"}
+_SEGMENT_DECISIONS = {"keep", "skip", "clear"}
+_CLIP_TAGS = ("kept", "archived", "review")
 
 
 class VideoFramesOut(BaseModel):
@@ -122,6 +135,9 @@ def _video_to_out(
         sharpness=v.sharpness,
         exposure=v.exposure,
         dead_footage=v.dead_footage,
+        dead_ratio=v.dead_ratio,
+        best_score=v.best_score,
+        analysis_version=v.analysis_version,
         highlight_count=len(highlights),
         highlights=highlights,
         sampled_frames=len(frames),
@@ -198,6 +214,40 @@ def register_video_routes(
             processed=sum(1 for v in out if v.processed),
             dead_footage_count=sum(1 for v in out if v.dead_footage),
         )
+
+    @router.put("/api/videos/{sha256}/decision")
+    def set_video_decision(sha256: str, body: DecisionBody):
+        require_sha256(sha256)
+        if body.decision not in _CLIP_DECISIONS:
+            raise HTTPException(400, detail="decision must be kept, archived, review, or clear")
+        Session = init_db(cfg.db_path)
+        with session_scope(Session) as s:
+            v = s.query(Video).filter(Video.sha256 == sha256).one_or_none()
+            if v is None:
+                raise HTTPException(404, detail="video not found")
+            s.query(VideoTag).filter(
+                VideoTag.video_id == v.id,
+                VideoTag.tag.in_(_CLIP_TAGS),
+            ).delete(synchronize_session=False)
+            if body.decision != "clear":
+                s.add(VideoTag(video_id=v.id, tag=body.decision, source="manual", score=1.0))
+        return {"ok": True, "sha256": sha256, "decision": None if body.decision == "clear" else body.decision}
+
+    @router.put("/api/videos/{sha256}/segments/{segment_id}/decision")
+    def set_segment_decision(sha256: str, segment_id: int, body: DecisionBody):
+        require_sha256(sha256)
+        if body.decision not in _SEGMENT_DECISIONS:
+            raise HTTPException(400, detail="decision must be keep, skip, or clear")
+        Session = init_db(cfg.db_path)
+        with session_scope(Session) as s:
+            v = s.query(Video).filter(Video.sha256 == sha256).one_or_none()
+            if v is None:
+                raise HTTPException(404, detail="video not found")
+            row = s.get(VideoSegment, segment_id)
+            if row is None or row.video_id != v.id:
+                raise HTTPException(404, detail="segment not found")
+            row.decision = None if body.decision == "clear" else body.decision
+        return {"ok": True, "id": segment_id, "decision": None if body.decision == "clear" else body.decision}
 
     @router.get("/api/videos/{sha256}/frames", response_model=VideoFramesOut)
     def video_frames(sha256: str):

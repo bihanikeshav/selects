@@ -6,6 +6,8 @@ export type ReviewQuality =
   | "out_of_focus"
   | "blurry_keepers";
 
+import SelectMenu from "./SelectMenu";
+
 const QUALITY_OPTIONS: { value: string; label: string }[] = [
   { value: "", label: "All" },
   { value: "underexposed", label: "Underexposed" },
@@ -42,16 +44,13 @@ export default function ReviewHeaderControls({
     <div className="cull-header-controls">
       <label className="cull-show-filter">
         <span>Show</span>
-        <select
+        <SelectMenu
+          className="cull-show-select-menu"
           value={quality ?? ""}
-          onChange={(e) => onQuality((e.target.value || null) as ReviewQuality)}
-        >
-          {QUALITY_OPTIONS.map((o) => (
-            <option key={o.label} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
+          options={QUALITY_OPTIONS}
+          ariaLabel="Show quality"
+          onChange={(next) => onQuality((next || null) as ReviewQuality)}
+        />
       </label>
       <div className="cull-sort-group" role="group" aria-label="Sort order">
         {SORT_OPTIONS.map((o) => (

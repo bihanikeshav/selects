@@ -48,18 +48,19 @@ def proxy_cache_path(
     source: str | Path,
     cache_dir: str | Path,
     *,
-    preset: str = "veryfast",
-    video_crf: int = 23,
+    preset: str = "ultrafast",
+    video_crf: int = 28,
     audio_bitrate: str = "128k",
+    max_width: int = 1280,
 ) -> Path:
     """Return a stable cache path without touching the source file."""
 
     source_path = Path(source).expanduser().resolve()
     try:
         stat = source_path.stat()
-        identity = f"{source_path}\0{stat.st_size}\0{stat.st_mtime_ns}\0{preset}\0{video_crf}\0{audio_bitrate}"
+        identity = f"{source_path}\0{stat.st_size}\0{stat.st_mtime_ns}\0{preset}\0{video_crf}\0{audio_bitrate}\0{max_width}"
     except OSError:
-        identity = f"{source_path}\0{preset}\0{video_crf}\0{audio_bitrate}"
+        identity = f"{source_path}\0{preset}\0{video_crf}\0{audio_bitrate}\0{max_width}"
     key = hashlib.sha256(identity.encode("utf-8")).hexdigest()
     return Path(cache_dir).expanduser() / f"{key}.mp4"
 
@@ -102,11 +103,16 @@ def generate_proxy(
     cancel: Event | Callable[[], bool] | None = None,
     progress: ProgressCallback | None = None,
     force: bool = False,
-    preset: str = "veryfast",
-    video_crf: int = 23,
+    preset: str = "ultrafast",
+    video_crf: int = 28,
     audio_bitrate: str = "128k",
+    max_width: int = 1280,
 ) -> ProxyResult:
-    """Create an H.264/AAC MP4 proxy, atomically and with progress updates.
+    """Create a fast, bounded-size H.264/AAC editor proxy.
+
+    Editor proxies trade source fidelity for startup speed: the preview is
+    capped at ``max_width`` pixels, uses the ultrafast encoder preset, and is
+    intentionally separate from the user's eventual export.
 
     A completed cache file is returned immediately.  FFmpeg absence, source
     errors, non-zero encoding exits, and cancellation are represented in the
@@ -120,6 +126,7 @@ def generate_proxy(
         preset=preset,
         video_crf=video_crf,
         audio_bitrate=audio_bitrate,
+        max_width=max_width,
     )
     if not force and target.is_file() and target.stat().st_size > 0:
         _emit(progress, ProxyProgress(1.0, status="cached"))
@@ -145,7 +152,8 @@ def generate_proxy(
             "-hide_banner", "-loglevel", "error",
             "-i", source_path,
             "-map", "0:v:0?", "-map", "0:a:0?",
-            "-c:v", "libx264", "-preset", preset, "-crf", video_crf,
+            "-c:v", "libx264", "-preset", preset, "-crf", str(video_crf),
+            "-vf", f"scale={max_width}:-2:force_original_aspect_ratio=decrease",
             "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", audio_bitrate,
             "-movflags", "+faststart", "-progress", "pipe:1", "-nostats", "-y", temp_path,
         ]

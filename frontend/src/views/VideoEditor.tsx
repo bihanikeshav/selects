@@ -12,12 +12,15 @@ import {
   getVideoTimeline,
   listVideos,
   saveVideoEdit,
+  setSegmentDecision,
+  setVideoDecision,
   startVideoExport,
   updateVideoRating,
 } from "../api/videos";
 import type { VideoEditState, VideoExportJob, VideoFrame, VideoFramesResponse, VideoItem, VideoTimelineResponse } from "../api/videos";
 import VideoTimeline from "../components/VideoTimeline";
 import type { VideoSearchHit } from "../components/VideoTimeline";
+import SelectMenu from "../components/SelectMenu";
 import "../editor/VideoEditor.css";
 
 type InspectorTab = "organize" | "adjust" | "info";
@@ -84,6 +87,9 @@ export default function VideoEditor() {
   const [playbackJob, setPlaybackJob] = useState<VideoExportJob | null>(null);
   const [audioJob, setAudioJob] = useState<VideoExportJob | null>(null);
   const [playbackSrc, setPlaybackSrc] = useState<string | null>(null);
+  const [proxyNeeded, setProxyNeeded] = useState(false);
+  const [playbackPreparing, setPlaybackPreparing] = useState(false);
+  const proxyRequestedRef = useRef(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const requestedTime = useMemo(() => {
     const value = Number(searchParams.get("t"));
@@ -98,6 +104,11 @@ export default function VideoEditor() {
     if (!sha) return;
     setLoading(true);
     setError(null);
+    setPlaybackJob(null);
+    setPlaybackSrc(null);
+    setProxyNeeded(false);
+    setPlaybackPreparing(false);
+    proxyRequestedRef.current = false;
     try {
       const [videosResult, framesResult, timelineResult, editResult] = await Promise.allSettled([listVideos(), getVideoFrames(sha), getVideoTimeline(sha), getVideoEdit(sha)]);
       if (videosResult.status === "fulfilled") {
@@ -117,8 +128,14 @@ export default function VideoEditor() {
       try {
         const playback = await getVideoPlayback(sha);
         if (playback.proxy_required && !playback.proxy_ready) {
-          setPlaybackJob(await createVideoProxy(sha));
+          // Try the original range-friendly stream immediately. Browsers with
+          // native HEVC support can play without a proxy; other runtimes start
+          // the fallback only after the video reports a decode error.
+          setPlaybackSrc(playback.source_url);
+          setProxyNeeded(true);
         } else {
+          setProxyNeeded(false);
+          setPlaybackPreparing(false);
           setPlaybackSrc(playback.source_url);
         }
       } catch (playbackError) {
@@ -138,8 +155,12 @@ export default function VideoEditor() {
         setPlaybackJob(next);
         if (next.status === "complete") {
           const playback = await getVideoPlayback(sha);
+          setProxyNeeded(false);
+          setPlaybackPreparing(false);
           setPlaybackSrc(playback.source_url);
         } else if (next.status === "failed") {
+          setProxyNeeded(false);
+          setPlaybackPreparing(false);
           setError(next.error ?? "Could not prepare this video for playback.");
         }
       } catch (e) {
@@ -177,10 +198,35 @@ export default function VideoEditor() {
     const target = event.target as HTMLElement;
     if (["INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(target.tagName)) return;
     const key = event.key.toLowerCase();
-    if (key === "j") seek(currentTime - 5);
-    else if (key === "k" || event.key === " ") { event.preventDefault(); togglePlayback(); }
-    else if (key === "l") seek(currentTime + 5);
-    else if (key === "i") setEdit((current) => ({ ...current, in_sec: currentTime }));
+    const moments = [
+      ...(timeline?.highlights ?? []),
+      ...(timeline?.quotes ?? []),
+      ...(timeline?.silence ?? []),
+      ...(timeline?.filler ?? []),
+    ].filter((item) => item.end > item.start);
+    const focused = moments.reduce((best, item, index) => {
+      if (currentTime >= item.start && currentTime <= item.end) return index;
+      if (best < 0 && item.start > currentTime) return index;
+      return best;
+    }, -1);
+    if (key === "j" || key === "l") seek(currentTime + (key === "j" ? -5 : 5));
+    else if (event.key === " ") { event.preventDefault(); togglePlayback(); }
+    else if (event.key === "[" || event.key === "]") {
+      event.preventDefault();
+      if (!moments.length) return;
+      const delta = event.key === "]" ? 1 : -1;
+      const next = moments[(Math.max(0, focused) + delta + moments.length) % moments.length];
+      seek(next.start);
+    } else if ((key === "k" || key === "x") && event.shiftKey) {
+      event.preventDefault();
+      void setVideoDecision(sha, key === "k" ? "kept" : "archived").catch((err) => setError(err instanceof Error ? err.message : String(err)));
+    } else if ((key === "k" || key === "x") && focused >= 0) {
+      event.preventDefault();
+      const moment = moments[focused];
+      if (moment.id != null) {
+        void setSegmentDecision(sha, moment.id, key === "k" ? "keep" : "skip").then(() => getVideoTimeline(sha).then(setTimeline)).catch((err) => setError(err instanceof Error ? err.message : String(err)));
+      }
+    } else if (key === "i") setEdit((current) => ({ ...current, in_sec: currentTime }));
     else if (key === "o") setEdit((current) => ({ ...current, out_sec: currentTime }));
     else if (event.key === "ArrowLeft") seek(currentTime - (event.shiftKey ? 10 : 1));
     else if (event.key === "ArrowRight") seek(currentTime + (event.shiftKey ? 10 : 1));
@@ -188,7 +234,7 @@ export default function VideoEditor() {
     else if (event.key === "End") seek(duration);
     else return;
     event.preventDefault();
-  }, [currentTime, duration, seek, togglePlayback]);
+  }, [currentTime, duration, seek, sha, timeline, togglePlayback]);
 
   function updateTrim(inPoint: number, out: number) {
     setEdit((current) => ({ ...current, in_sec: Math.max(0, inPoint), out_sec: Math.min(duration, out) }));
@@ -261,24 +307,24 @@ export default function VideoEditor() {
       <header className="video-editor-topbar">
         <button type="button" className="video-editor-back" onClick={() => navigate("/videos")} aria-label="Back to videos"><Icon name="back" /><span>Videos</span></button>
         <div className="video-editor-heading"><strong>{title}</strong><span>{video?.format?.toUpperCase() ?? "VIDEO"} / {formatTime(duration)}</span></div>
-        <div className="video-editor-top-actions"><span className="video-editor-shortcuts">J K L / I O</span><button type="button" className="btn btn-outlined" onClick={() => void saveChanges()} disabled={saving || loading}><Icon name="save" /> {saving ? "Saving..." : saved ? "Saved" : "Save changes"}</button><button type="button" className="btn btn-filled" onClick={() => void beginExport()} disabled={isExporting || loading}><Icon name="download" /> {isExporting ? "Exporting..." : "Export"}</button></div>
+        <div className="video-editor-top-actions"><button type="button" className="btn btn-outlined" onClick={() => void saveChanges()} disabled={saving || loading}><Icon name="save" /> {saving ? "Saving..." : saved ? "Saved" : "Save changes"}</button><button type="button" className="btn btn-filled" onClick={() => void beginExport()} disabled={isExporting || loading}><Icon name="download" /> {isExporting ? "Exporting..." : "Export"}</button></div>
       </header>
       <div className="video-editor-main">
         <section className="video-editor-stage" aria-label="Video preview">
           {loading && <div className="video-editor-loading">Loading video...</div>}
-          {playbackSrc ? <video ref={videoRef} className="video-editor-player" src={playbackSrc} preload="metadata" playsInline aria-label={`Preview ${title}`} onLoadedMetadata={(event) => { if (event.currentTarget.duration && duration === 0) setDuration(event.currentTarget.duration); }} onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onError={() => setError("Playback is not available for this source yet.")} /> : <div className="video-editor-loading">{playbackJob ? "Preparing playback..." : "Loading video..."}</div>}
-          <div className="video-editor-transport"><button type="button" className="icon-btn" onClick={() => seek(currentTime - 5)} aria-label="Seek back five seconds"><Icon name="back" /></button><button type="button" className="video-editor-play" onClick={togglePlayback} aria-label={playing ? "Pause" : "Play"}><Icon name={playing ? "pause" : "play"} /></button><button type="button" className="icon-btn" onClick={() => seek(currentTime + 5)} aria-label="Seek forward five seconds"><Icon name="forward" /></button><span className="video-editor-time">{formatTime(currentTime)} / {formatTime(duration)}</span><span className="video-editor-transport-hint">J / K / L to step and play</span></div>
+          {playbackSrc ? <video ref={videoRef} className="video-editor-player" src={playbackSrc} preload="metadata" playsInline aria-label={`Preview ${title}`} onLoadedMetadata={(event) => { if (event.currentTarget.duration && duration === 0) setDuration(event.currentTarget.duration); }} onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onError={() => { if (proxyNeeded && !proxyRequestedRef.current) { proxyRequestedRef.current = true; setPlaybackSrc(null); setPlaybackPreparing(true); void createVideoProxy(sha).then(setPlaybackJob).catch((playbackError) => { setPlaybackPreparing(false); setProxyNeeded(false); setError(playbackError instanceof Error ? playbackError.message : String(playbackError)); }); return; } if (playbackPreparing || (playbackJob != null && ["queued", "running"].includes(playbackJob.status))) { setPlaybackSrc(null); return; } setError("Playback is not available for this source yet."); }} /> : <div className="video-editor-loading">{playbackJob ? `Preparing playback ${Math.round(playbackJob.progress * 100)}%` : playbackPreparing ? "Preparing playback..." : "Loading video..."}</div>}
+          <div className="video-editor-transport"><button type="button" className="icon-btn" onClick={() => seek(currentTime - 5)} aria-label="Seek back five seconds"><Icon name="back" /></button><button type="button" className="video-editor-play" onClick={togglePlayback} aria-label={playing ? "Pause" : "Play"}><Icon name={playing ? "pause" : "play"} /></button><button type="button" className="icon-btn" onClick={() => seek(currentTime + 5)} aria-label="Seek forward five seconds"><Icon name="forward" /></button><span className="video-editor-time">{formatTime(currentTime)} / {formatTime(duration)}</span></div>
           {error && <div className="video-editor-error" role="alert">{error}</div>}
         </section>
         <aside className="video-editor-inspector" aria-label="Video inspector">
           <div className="video-editor-tabs" role="tablist">{(["organize", "adjust", "info"] as InspectorTab[]).map((tab) => <button type="button" key={tab} role="tab" aria-selected={inspectorTab === tab} className={inspectorTab === tab ? "is-active" : ""} onClick={() => setInspectorTab(tab)}><Icon name={tab === "organize" ? "scissors" : tab === "adjust" ? "sliders" : "info"} /> {tab === "organize" ? "Organize" : tab === "adjust" ? "Adjust" : "Info"}</button>)}</div>
-          {inspectorTab === "organize" && <div className="video-editor-panel"><label className="video-editor-field"><span>Title</span><input value={edit.title} placeholder={video?.name ?? "Untitled video"} onChange={(event) => { setEdit((current) => ({ ...current, title: event.target.value })); setSaved(false); }} /></label><label className="video-editor-field"><span>Tags</span><input value={edit.tags.join(", ")} placeholder="travel, people, moment" onChange={(event) => { setEdit((current) => ({ ...current, tags: tagList(event.target.value) })); setSaved(false); }} /></label><div className="video-editor-field"><span>Rating</span><div className="video-editor-rating" role="group" aria-label="Video rating"><button type="button" className={rating === null ? "is-active" : ""} onClick={() => { setRating(null); setSaved(false); }}>None</button>{[1, 2, 3, 4, 5].map((value) => <button type="button" key={value} className={rating === value ? "is-active" : ""} aria-label={`Rate ${value} out of 5`} aria-pressed={rating === value} onClick={() => { setRating(value); setSaved(false); }}>{value}</button>)}</div></div><label className="video-editor-field"><span>Review status</span><select value={reviewState(edit.tags)} onChange={(event) => { const next = event.target.value; setEdit((current) => ({ ...current, tags: [...current.tags.filter((tag) => !REVIEW_TAGS.has(tag)), ...(next === "new" ? [] : [next])] })); setSaved(false); }}><option value="new">New</option><option value="review">Needs review</option><option value="kept">Kept</option><option value="archived">Archived</option></select></label><div className="video-editor-note">Edits stay non-destructive until you export a new file.</div></div>}
+          {inspectorTab === "organize" && <div className="video-editor-panel"><label className="video-editor-field"><span>Title</span><input value={edit.title} placeholder={video?.name ?? "Untitled video"} onChange={(event) => { setEdit((current) => ({ ...current, title: event.target.value })); setSaved(false); }} /></label><label className="video-editor-field"><span>Tags</span><input value={edit.tags.join(", ")} placeholder="travel, people, moment" onChange={(event) => { setEdit((current) => ({ ...current, tags: tagList(event.target.value) })); setSaved(false); }} /></label><div className="video-editor-field"><span>Rating</span><div className="video-editor-rating" role="group" aria-label="Video rating"><button type="button" className={rating === null ? "is-active" : ""} onClick={() => { setRating(null); setSaved(false); }}>None</button>{[1, 2, 3, 4, 5].map((value) => <button type="button" key={value} className={rating === value ? "is-active" : ""} aria-label={`Rate ${value} out of 5`} aria-pressed={rating === value} onClick={() => { setRating(value); setSaved(false); }}>{value}</button>)}</div></div><label className="video-editor-field"><span>Review status</span><SelectMenu className="video-editor-select-menu" value={reviewState(edit.tags)} onChange={(next) => { setEdit((current) => ({ ...current, tags: [...current.tags.filter((tag) => !REVIEW_TAGS.has(tag)), ...(next === "new" ? [] : [next])] })); setSaved(false); }} ariaLabel="Review status" options={[{ value: "new", label: "New" }, { value: "review", label: "Needs review" }, { value: "kept", label: "Kept" }, { value: "archived", label: "Archived" }]} /></label><div className="video-editor-note">Edits stay non-destructive until you export a new file.</div></div>}
           {inspectorTab === "adjust" && <div className="video-editor-panel"><div className="video-editor-section-title">Sound</div><label className="video-editor-toggle"><input type="checkbox" checked={edit.muted} onChange={(event) => setEdit((current) => ({ ...current, muted: event.target.checked }))} /><span><Icon name={edit.muted ? "mute" : "volume"} /> Mute audio</span></label><label className="video-editor-range"><span>Volume <b>{Math.round(edit.volume * 100)}%</b></span><input type="range" min="0" max="1" step="0.05" value={edit.volume} onChange={(event) => setEdit((current) => ({ ...current, volume: Number(event.target.value) }))} /></label><button type="button" className="btn btn-outlined" onClick={() => void beginAudioAnalysis()} disabled={audioJob != null && ["queued", "running"].includes(audioJob.status)}>{audioJob != null && ["queued", "running"].includes(audioJob.status) ? "Analyzing audio..." : timeline?.audio ? "Refresh audio analysis" : "Analyze audio"}</button><div className="video-editor-section-title">Stabilization</div><label className="video-editor-toggle"><input type="checkbox" checked={edit.stabilization} onChange={(event) => setEdit((current) => ({ ...current, stabilization: event.target.checked }))} /><span><Icon name="check" /> Apply on export</span></label><button type="button" className="btn btn-text video-editor-reset" onClick={() => setEdit((current) => ({ ...current, in_sec: 0, out_sec: duration, stabilization: false, muted: false, volume: 1 }))}>Reset adjustments</button></div>}
           {inspectorTab === "info" && <div className="video-editor-panel"><dl className="video-editor-details"><div><dt>Source</dt><dd>{video?.path ?? frames?.path ?? "Unavailable"}</dd></div><div><dt>Dimensions</dt><dd>{video?.width && video?.height ? `${video.width} x ${video.height}` : "Unknown"}</dd></div><div><dt>Frame rate</dt><dd>{video?.fps ? `${video.fps.toFixed(2)} fps` : "Unknown"}</dd></div><div><dt>Analysis</dt><dd>{frames ? `${frames.frames.length} sampled frames` : "Not available"}</dd></div></dl></div>}
         </aside>
       </div>
-      <VideoTimeline duration={duration} currentTime={currentTime} inPoint={edit.in_sec} outPoint={outPoint} frames={sourceFrames} highlights={timeline?.highlights ?? frames?.highlights ?? []} waveform={timeline?.waveform} searchHits={searchHits} onSeek={seek} onTrimChange={updateTrim} />
-      <footer className="video-editor-footer"><span className="video-editor-footer-copy"><Icon name="scissors" /> {hasChanges ? "Unsaved edit" : "Original range"}</span><span>Trim handles are keyboard accessible. Press I and O to set the export range.</span>{exportJob?.status === "complete" && (exportJob.download_url ? <a className="btn btn-tonal btn-sm" href={exportJob.download_url} download><Icon name="download" /> Download export</a> : <span className="video-editor-export-ready"><Icon name="check" /> Export ready</span>)}{isExporting && <><div className="video-editor-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(exportJob.progress * 100)}><span style={{ width: `${Math.max(4, exportJob.progress * 100)}%` }} /></div><button type="button" className="btn btn-text btn-sm" onClick={() => void stopExport()}>Cancel</button></>}{exportError && <span className="video-editor-export-error">{exportError}</span>}</footer>
+      <VideoTimeline duration={duration} currentTime={currentTime} inPoint={edit.in_sec} outPoint={outPoint} frames={sourceFrames} highlights={timeline?.highlights ?? frames?.highlights ?? []} deadSpans={timeline?.dead ?? []} silenceSpans={[...(timeline?.silence ?? []), ...(timeline?.filler ?? [])]} waveform={timeline?.waveform} searchHits={searchHits} onSeek={seek} onTrimChange={updateTrim} />
+      <footer className="video-editor-footer"><span className="video-editor-footer-copy"><Icon name="scissors" /> {hasChanges ? "Unsaved edit" : "Original range"}</span>{exportJob?.status === "complete" && (exportJob.download_url ? <a className="btn btn-tonal btn-sm" href={exportJob.download_url} download><Icon name="download" /> Download export</a> : <span className="video-editor-export-ready"><Icon name="check" /> Export ready</span>)}{isExporting && <><div className="video-editor-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(exportJob.progress * 100)}><span style={{ width: `${Math.max(4, exportJob.progress * 100)}%` }} /></div><button type="button" className="btn btn-text btn-sm" onClick={() => void stopExport()}>Cancel</button></>}{exportError && <span className="video-editor-export-error">{exportError}</span>}</footer>
     </div>
   );
 }

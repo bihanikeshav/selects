@@ -3,7 +3,11 @@ const BASE = "/api";
 export interface VideoHighlight {
   start: number;
   end: number;
-  frames: number;
+  frames?: number;
+  id?: number;
+  score?: number;
+  reason?: string;
+  decision?: "keep" | "skip" | null;
 }
 
 export interface VideoItem {
@@ -22,6 +26,9 @@ export interface VideoItem {
   sharpness: number | null;
   exposure: number | null;
   dead_footage: boolean | null;
+  dead_ratio?: number | null;
+  best_score?: number | null;
+  analysis_version?: string | null;
   highlight_count: number;
   highlights: VideoHighlight[];
   sampled_frames: number;
@@ -110,6 +117,12 @@ export interface VideoTimelineResponse {
   duration_sec: number | null;
   frames: VideoFrame[];
   highlights: VideoHighlight[];
+  scenes?: VideoHighlight[];
+  dead?: VideoHighlight[];
+  silence?: VideoHighlight[];
+  filler?: VideoHighlight[];
+  topics?: VideoHighlight[];
+  quotes?: VideoHighlight[];
   search_hits?: Array<{ start: number; end: number; label: string }>;
   waveform?: number[];
   audio?: {
@@ -358,6 +371,24 @@ export async function getVideoExportStatus(jobId: string): Promise<VideoExportJo
 export async function cancelVideoExport(jobId: string): Promise<void> {
   const res = await fetch(`${BASE}/media/jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST" });
   if (!res.ok) throw await detailError(res, "cancelVideoExport");
+}
+
+export async function setVideoDecision(sha256: string, decision: "kept" | "archived" | "review" | "clear"): Promise<void> {
+  const res = await fetch(`${BASE}/videos/${encodeURIComponent(sha256)}/decision`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ decision }),
+  });
+  if (!res.ok) throw await detailError(res, "setVideoDecision");
+}
+
+export async function setSegmentDecision(sha256: string, segmentId: number, decision: "keep" | "skip" | "clear"): Promise<void> {
+  const res = await fetch(`${BASE}/videos/${encodeURIComponent(sha256)}/segments/${segmentId}/decision`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ decision }),
+  });
+  if (!res.ok) throw await detailError(res, "setSegmentDecision");
 }
 
 /** Create a named collection for organizing a selection of videos. */

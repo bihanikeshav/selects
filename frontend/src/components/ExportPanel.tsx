@@ -11,6 +11,7 @@ import {
   type XmpPreviewResponse,
 } from "../api/export";
 import FolderPicker from "./FolderPicker";
+import SelectMenu from "./SelectMenu";
 import "./ExportPanel.css";
 
 type Tab = "files" | "xmp";
@@ -160,25 +161,29 @@ export default function ExportPanel({ source, onClose }: Props) {
             <div className="export-row">
               <div className="export-field">
                 <label>Mode</label>
-                <select
-                  className="export-select"
+                <SelectMenu
+                  className="export-select-menu"
                   value={mode}
-                  onChange={(e) => setMode(e.target.value as ExportMode)}
-                >
-                  <option value="copy">Copy files</option>
-                  <option value="zip">Zip archive</option>
-                </select>
+                  onChange={(next) => setMode(next as ExportMode)}
+                  ariaLabel="Export mode"
+                  options={[
+                    { value: "copy", label: "Copy files" },
+                    { value: "zip", label: "Zip archive" },
+                  ]}
+                />
               </div>
               <div className="export-field">
                 <label>Structure</label>
-                <select
-                  className="export-select"
+                <SelectMenu
+                  className="export-select-menu"
                   value={structure}
-                  onChange={(e) => setStructure(e.target.value as ExportStructure)}
-                >
-                  <option value="flat">Flat</option>
-                  <option value="by-day">By day</option>
-                </select>
+                  onChange={(next) => setStructure(next as ExportStructure)}
+                  ariaLabel="Export folder structure"
+                  options={[
+                    { value: "flat", label: "Flat" },
+                    { value: "by-day", label: "By day" },
+                  ]}
+                />
               </div>
             </div>
 

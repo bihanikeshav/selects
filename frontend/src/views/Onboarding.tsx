@@ -463,8 +463,8 @@ export default function Onboarding() {
                   </button>
                 </div>
                 <p className="onb-models-note">
-                  AI scoring, tags and stories need these models — you can
-                  download later from the Libraries page.
+                  AI scoring, tags, faces and video transcripts need these
+                  models — you can download later from the Models page.
                 </p>
               </>
             )}

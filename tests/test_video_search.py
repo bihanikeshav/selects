@@ -195,3 +195,40 @@ def test_search2_media_all_preserves_photo_fields_and_adds_video_shape(tmp_path,
     assert {"photo_id", "sha256", "thumb_url", "preview_url"} <= photo.keys()
     video = next(result for result in results if result["asset_type"] == "video")
     assert {"video_id", "match_start_sec", "match_end_sec", "match_kind"} <= video.keys()
+
+
+def test_search2_returns_transcript_range(tmp_path, monkeypatch):
+    from sqlalchemy import text
+
+    from selects.db.models import VideoTranscriptSegment
+
+    cfg = get_folder_config(tmp_path)
+    Session = init_db(cfg.db_path)
+    vector = np.zeros(1152, dtype=np.float32)
+    vector[0] = 1.0
+    with session_scope(Session) as session:
+        video = Video(path=str(tmp_path / "clip.mp4"), sha256="v" * 64, format="MP4", siglip=_blob(vector))
+        session.add(video)
+        session.flush()
+        row = VideoTranscriptSegment(
+            video_id=video.id,
+            start_ms=12000,
+            end_ms=15000,
+            text="he laughed at the lake",
+            source_fingerprint="src",
+        )
+        session.add(row)
+        session.flush()
+        session.execute(
+            text("INSERT INTO video_transcript_fts(rowid, text) VALUES (:id, :text)"),
+            {"id": row.id, "text": row.text},
+        )
+
+    monkeypatch.setattr("selects.ml.search.embed_query", lambda _query: vector)
+    app = FastAPI()
+    register_search2_routes(app, cfg)
+    response = TestClient(app).get("/api/search2?q=laughed&media=videos")
+    assert response.status_code == 200
+    hit = next(item for item in response.json()["results"] if item["match_kind"] == "transcript")
+    assert hit["match_start_sec"] == 12.0
+    assert hit["match_end_sec"] == 15.0

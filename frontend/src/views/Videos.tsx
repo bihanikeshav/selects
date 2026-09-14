@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { addVideoToCollection, batchOrganizeVideos, createVideoCollection, listVideoCollections, listVideos, processVideos, videoProcessStatus } from "../api/videos";
+import { addVideoToCollection, batchOrganizeVideos, createVideoCollection, listVideoCollections, listVideos, processVideos, setVideoDecision, videoProcessStatus } from "../api/videos";
 import type { VideoCollection, VideoItem, VideoListResponse } from "../api/videos";
 import PageHeader from "../components/PageHeader";
 import Rail from "../components/Rail";
+import SelectMenu from "../components/SelectMenu";
 import SkeletonGrid from "../components/SkeletonGrid";
 import "../components/VideoLibrary.css";
 
 type FilterKey = "all" | "highlights" | "review" | "edited" | "no-audio" | `collection:${string}`;
-type SortKey = "recent" | "name" | "duration" | "highlights";
+type SortKey = "recent" | "name" | "duration" | "highlights" | "score";
 type ViewMode = "grid" | "list";
 
 function Icon({ name }: { name: "play" | "list" | "grid" | "check" | "tag" | "sort" | "refresh" | "close" | "folder" | "plus" }) {
@@ -58,7 +59,7 @@ function VideoCard({ video, selected, list, onOpen, onSelect }: { video: VideoIt
           <span className="video-library-duration">{fmtDuration(video.duration_sec)}</span>
         </button>
         <label className="video-library-check"><input type="checkbox" checked={selected} onChange={() => onSelect(video)} aria-label={`Select ${video.name}`} /><span><Icon name="check" /></span></label>
-        {video.dead_footage && <span className="video-library-status is-warning">Mostly static</span>}
+        {video.dead_footage && <span className="video-library-status is-warning">Mostly unusable</span>}
         {!video.processed && <span className="video-library-status">Needs analysis</span>}
       </div>
       <div className="video-library-card-body">
@@ -83,6 +84,8 @@ export default function Videos() {
   const [collections, setCollections] = useState<VideoCollection[]>([]);
   const [targetCollection, setTargetCollection] = useState("");
   const [collectionDraft, setCollectionDraft] = useState("");
+  const [focusIndex, setFocusIndex] = useState(0);
+  const [undoStack, setUndoStack] = useState<Array<{ sha: string; prev: "kept" | "archived" | "review" | "clear" }>>([]);
   const pollRef = useRef<number | null>(null);
 
   const load = useCallback(async () => {
@@ -127,6 +130,7 @@ export default function Videos() {
       if (sort === "name") return a.name.localeCompare(b.name);
       if (sort === "duration") return (b.duration_sec ?? 0) - (a.duration_sec ?? 0);
       if (sort === "highlights") return b.highlight_count - a.highlight_count;
+      if (sort === "score") return (b.best_score ?? -1) - (a.best_score ?? -1);
       return (b.taken_at ?? "").localeCompare(a.taken_at ?? "");
     });
   }, [filter, result, sort]);
@@ -181,6 +185,47 @@ export default function Videos() {
     finally { setBatchBusy(false); }
   }
 
+  function clipDecision(video: VideoItem): "kept" | "archived" | "review" | "clear" {
+    if (video.review_state === "kept" || video.review_state === "archived" || video.review_state === "review") return video.review_state;
+    return "clear";
+  }
+
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const focused = visibleVideos[focusIndex];
+      if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+        event.preventDefault();
+        setFocusIndex((i) => Math.min(visibleVideos.length - 1, i + 1));
+      } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+        event.preventDefault();
+        setFocusIndex((i) => Math.max(0, i - 1));
+      } else if (event.key === "Enter" && focused?.sha256) {
+        event.preventDefault();
+        navigate(`/videos/${encodeURIComponent(focused.sha256)}`);
+      } else if ((event.key === "k" || event.key === "K" || event.key === "x" || event.key === "X") && focused?.sha256) {
+        event.preventDefault();
+        const next = event.key.toLowerCase() === "k" ? "kept" : "archived";
+        const prev = clipDecision(focused);
+        void setVideoDecision(focused.sha256, next).then(() => {
+          setUndoStack((stack) => [...stack, { sha: focused.sha256 as string, prev }]);
+          void load();
+        }).catch((err) => setError(err instanceof Error ? err.message : String(err)));
+      } else if ((event.key === "u" || event.key === "U") && undoStack.length > 0) {
+        event.preventDefault();
+        const last = undoStack[undoStack.length - 1];
+        void setVideoDecision(last.sha, last.prev).then(() => {
+          setUndoStack((stack) => stack.slice(0, -1));
+          void load();
+        }).catch((err) => setError(err instanceof Error ? err.message : String(err)));
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [focusIndex, load, navigate, undoStack, visibleVideos]);
+
   const pending = result ? result.total - result.processed : 0;
   const allVisibleSelected = visibleVideos.length > 0 && visibleVideos.every((video) => selected.has(videoKey(video)));
   const filterLabels: Array<[FilterKey, string]> = [["all", "All"], ["highlights", "Highlights"], ["review", "Needs review"], ["edited", "Edited"], ["no-audio", "No audio"]];
@@ -194,14 +239,14 @@ export default function Videos() {
           title="Videos"
           subtitle={result ? `${result.total} videos / ${result.processed} analysed${result.dead_footage_count > 0 ? ` / ${result.dead_footage_count} flagged` : ""}` : "Loading..."}
           actions={<><button type="button" className="btn btn-outlined" onClick={() => void load()} disabled={!result}><Icon name="refresh" /> Refresh</button><button type="button" className="btn btn-filled" onClick={() => void onAnalyse()} disabled={analysing || (result != null && pending === 0)}>{analysing ? "Analysing..." : pending > 0 ? `Analyse ${pending}` : "All analysed"}</button></>}
-          controls={<div className="video-library-controls"><div className="video-library-filter-tabs" role="tablist" aria-label="Video filters">{filterLabels.map(([key, label]) => <button type="button" key={key} role="tab" aria-selected={filter === key} className={`video-library-filter${filter === key ? " is-active" : ""}`} onClick={() => setFilter(key)}>{label}</button>)}{collections.map((collection) => <button type="button" key={collection.id} role="tab" aria-selected={filter === `collection:${collection.id}`} className={`video-library-filter${filter === `collection:${collection.id}` ? " is-active" : ""}`} onClick={() => setFilter(`collection:${collection.id}`)}><Icon name="folder" /> {collection.name}</button>)}</div><div className="video-library-control-spacer" /><label className="video-library-sort"><Icon name="sort" /><span>Sort</span><select value={sort} onChange={(e) => setSort(e.target.value as SortKey)} aria-label="Sort videos"><option value="recent">Recent</option><option value="name">Name</option><option value="duration">Duration</option><option value="highlights">Highlights</option></select></label><div className="video-library-view-toggle" role="group" aria-label="View mode"><button type="button" className={`icon-btn${viewMode === "grid" ? " is-active" : ""}`} onClick={() => setViewMode("grid")} aria-label="Grid view" aria-pressed={viewMode === "grid"}><Icon name="grid" /></button><button type="button" className={`icon-btn${viewMode === "list" ? " is-active" : ""}`} onClick={() => setViewMode("list")} aria-label="List view" aria-pressed={viewMode === "list"}><Icon name="list" /></button></div></div>}
+          controls={<div className="video-library-controls"><div className="video-library-filter-tabs" role="tablist" aria-label="Video filters">{filterLabels.map(([key, label]) => <button type="button" key={key} role="tab" aria-selected={filter === key} className={`video-library-filter${filter === key ? " is-active" : ""}`} onClick={() => setFilter(key)}>{label}</button>)}{collections.map((collection) => <button type="button" key={collection.id} role="tab" aria-selected={filter === `collection:${collection.id}`} className={`video-library-filter${filter === `collection:${collection.id}` ? " is-active" : ""}`} onClick={() => setFilter(`collection:${collection.id}`)}><Icon name="folder" /> {collection.name}</button>)}</div><div className="video-library-control-spacer" /><label className="video-library-sort"><Icon name="sort" /><span>Sort</span><SelectMenu className="video-library-sort-menu" value={sort} onChange={(next) => setSort(next as SortKey)} ariaLabel="Sort videos" options={[{ value: "recent", label: "Recent" }, { value: "name", label: "Name" }, { value: "duration", label: "Duration" }, { value: "highlights", label: "Highlights" }, { value: "score", label: "Best score" }]} /></label><div className="video-library-view-toggle" role="group" aria-label="View mode"><button type="button" className={`icon-btn${viewMode === "grid" ? " is-active" : ""}`} onClick={() => setViewMode("grid")} aria-label="Grid view" aria-pressed={viewMode === "grid"}><Icon name="grid" /></button><button type="button" className={`icon-btn${viewMode === "list" ? " is-active" : ""}`} onClick={() => setViewMode("list")} aria-label="List view" aria-pressed={viewMode === "list"}><Icon name="list" /></button></div></div>}
         />
         <div className="videos-wrap video-library-wrap">
           {error && <div className="videos-error" role="alert">{error}</div>}
-          {result && visibleVideos.length > 0 && <div className="video-library-selection-bar"><label><input type="checkbox" checked={allVisibleSelected} onChange={selectVisible} /> Select visible</label><span>{selected.size} selected</span><div className="video-library-collection-tools"><input value={collectionDraft} onChange={(event) => setCollectionDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void makeCollection(); }} placeholder="New collection" aria-label="New collection name" /><button type="button" className="icon-btn" onClick={() => void makeCollection()} disabled={batchBusy || !collectionDraft.trim()} aria-label="Create collection" title="Create collection"><Icon name="plus" /></button><select value={targetCollection} onChange={(event) => setTargetCollection(event.target.value)} aria-label="Collection"><option value="">Add to collection...</option>{collections.map((collection) => <option key={collection.id} value={collection.id}>{collection.name}</option>)}</select><button type="button" className="btn btn-tonal btn-sm" onClick={() => void addSelectedToCollection()} disabled={batchBusy || selected.size === 0 || !targetCollection}><Icon name="folder" /> Add</button></div><div className="video-library-selection-actions"><button type="button" className="btn btn-tonal btn-sm" onClick={() => void markSelectedForReview()} disabled={batchBusy || selected.size === 0}><Icon name="tag" /> {batchBusy ? "Updating..." : "Mark for review"}</button>{selected.size > 0 && <button type="button" className="btn btn-text btn-sm" onClick={() => setSelected(new Set())}><Icon name="close" /> Clear</button>}</div></div>}
+          {result && visibleVideos.length > 0 && <div className={`video-library-selection-bar${selected.size > 0 ? " is-active" : ""}`}><label><input type="checkbox" checked={allVisibleSelected} onChange={selectVisible} /> Select visible</label>{selected.size === 0 ? <span className="video-library-selection-hint">Select videos to organize</span> : <><span>{selected.size} selected</span><div className="video-library-collection-tools"><input value={collectionDraft} onChange={(event) => setCollectionDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void makeCollection(); }} placeholder="New collection" aria-label="New collection name" /><button type="button" className="icon-btn" onClick={() => void makeCollection()} disabled={batchBusy || !collectionDraft.trim()} aria-label="Create collection" title="Create collection"><Icon name="plus" /></button><SelectMenu className="video-library-collection-select-menu" value={targetCollection} onChange={setTargetCollection} ariaLabel="Add selected videos to collection" options={[{ value: "", label: "Add to collection..." }, ...collections.map((collection) => ({ value: String(collection.id), label: collection.name }))]} /><button type="button" className="btn btn-tonal btn-sm" onClick={() => void addSelectedToCollection()} disabled={batchBusy || !targetCollection}><Icon name="folder" /> Add</button></div><div className="video-library-selection-actions"><button type="button" className="btn btn-tonal btn-sm" onClick={() => void markSelectedForReview()} disabled={batchBusy}><Icon name="tag" /> {batchBusy ? "Updating..." : "Mark for review"}</button><button type="button" className="btn btn-text btn-sm" onClick={() => setSelected(new Set())}><Icon name="close" /> Clear</button></div></>}</div>}
           {!result && !error && <SkeletonGrid count={8} />}
           {result && visibleVideos.length === 0 && <div className="video-library-empty"><div className="video-library-empty-mark"><Icon name="play" /></div><h2>{result.videos.length === 0 ? "No videos yet" : "Nothing in this view"}</h2><p>{result.videos.length === 0 ? "Add video files to the watched folder, then re-index the library." : "Try another filter or clear the current view."}</p><button type="button" className="btn btn-outlined" onClick={() => setFilter("all")}>Show all videos</button></div>}
-          {visibleVideos.length > 0 && <div className={`video-library-items${viewMode === "list" ? " is-list" : ""}`}>{visibleVideos.map((video) => <VideoCard key={videoKey(video)} video={video} selected={selected.has(videoKey(video))} list={viewMode === "list"} onOpen={(item) => item.sha256 && navigate(`/videos/${encodeURIComponent(item.sha256)}`)} onSelect={toggleSelected} />)}</div>}
+          {visibleVideos.length > 0 && <div className={`video-library-items${viewMode === "list" ? " is-list" : ""}`}>{visibleVideos.map((video, index) => <VideoCard key={videoKey(video)} video={video} selected={selected.has(videoKey(video)) || index === focusIndex} list={viewMode === "list"} onOpen={(item) => item.sha256 && navigate(`/videos/${encodeURIComponent(item.sha256)}`)} onSelect={toggleSelected} />)}</div>}
         </div>
       </div>
     </div>

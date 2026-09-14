@@ -14,6 +14,7 @@ import KbdFooter from "../components/KbdFooter";
 import { tagLabel } from "../lib/tags";
 import PageHeader from "../components/PageHeader";
 import Rail from "../components/Rail";
+import SelectMenu from "../components/SelectMenu";
 import SkeletonGrid from "../components/SkeletonGrid";
 import Viewer from "../components/Viewer";
 
@@ -271,18 +272,19 @@ export default function Search() {
                 <div className="search-filter-strip">
                   <label className="search-filter-field">
                     <span className="search-filter-label">Person</span>
-                    <select
-                      value={personId}
-                      onChange={e => setPersonId(e.target.value ? Number(e.target.value) : "")}
-                      className="search-filter-input"
-                    >
-                      <option value="">Anyone</option>
-                      {persons.map(p => (
-                        <option key={p.id} value={p.id}>
-                          {p.label || `Person ${p.id}`} ({p.photo_count})
-                        </option>
-                      ))}
-                    </select>
+                    <SelectMenu
+                      className="search-filter-select-menu"
+                      value={String(personId)}
+                      onChange={next => setPersonId(next ? Number(next) : "")}
+                      ariaLabel="Filter by person"
+                      options={[
+                        { value: "", label: "Anyone" },
+                        ...persons.map(p => ({
+                          value: String(p.id),
+                          label: `${p.label || `Person ${p.id}`} (${p.photo_count})`,
+                        })),
+                      ]}
+                    />
                   </label>
 
                   <label className="search-filter-field">

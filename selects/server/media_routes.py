@@ -48,7 +48,7 @@ from selects.util import utcnow
 
 PublishFn = Callable[[dict], None]
 _AUDIO_VERSION = "audio-energy-v1"
-_PROXY_VERSION = "proxy-h264-v1"
+_PROXY_VERSION = "proxy-h264-preview-v2"
 _EDIT_VERSION = "video-edit-v1"
 
 
@@ -236,7 +236,12 @@ def register_media_routes(
             video = video_for_sha(session, sha256)
             proxy = (
                 session.query(VideoProxy)
-                .filter(VideoProxy.video_id == video.id, VideoProxy.status == "ready")
+                .filter(
+                    VideoProxy.video_id == video.id,
+                    VideoProxy.status == "ready",
+                    VideoProxy.source_fingerprint == _source_fingerprint(video),
+                    VideoProxy.processor_version == _PROXY_VERSION,
+                )
                 .order_by(VideoProxy.updated_at.desc())
                 .first()
             )
@@ -252,7 +257,12 @@ def register_media_routes(
             source = Path(video.path)
             ready_proxy = (
                 session.query(VideoProxy)
-                .filter(VideoProxy.video_id == video.id, VideoProxy.status == "ready")
+                .filter(
+                    VideoProxy.video_id == video.id,
+                    VideoProxy.status == "ready",
+                    VideoProxy.source_fingerprint == _source_fingerprint(video),
+                    VideoProxy.processor_version == _PROXY_VERSION,
+                )
                 .order_by(VideoProxy.updated_at.desc())
                 .first()
             )
@@ -355,6 +365,23 @@ def register_media_routes(
                     waveform = json.loads(zlib.decompress(audio.waveform_blob))
                 except (zlib.error, json.JSONDecodeError, TypeError):
                     waveform = []
+            def _seg(kind: str) -> list[dict]:
+                return [
+                    {
+                        "id": row.id,
+                        "start": row.start_ms / 1000.0,
+                        "end": row.end_ms / 1000.0,
+                        "start_sec": row.start_ms / 1000.0,
+                        "end_sec": row.end_ms / 1000.0,
+                        "kind": row.kind,
+                        "score": row.score,
+                        "reason": row.ocr_text,
+                        "decision": row.decision,
+                    }
+                    for row in segments
+                    if row.kind == kind
+                ]
+
             return {
                 "sha256": sha256,
                 "duration_sec": video.duration_sec,
@@ -365,7 +392,13 @@ def register_media_routes(
                     }
                     for index, frame in enumerate(frames)
                 ],
-                "highlights": highlights,
+                "highlights": _seg("highlight") or highlights,
+                "scenes": _seg("scene"),
+                "dead": _seg("dead"),
+                "silence": _seg("silence"),
+                "filler": _seg("filler"),
+                "topics": _seg("topic"),
+                "quotes": _seg("quote"),
                 "keyframes": [
                     {
                         "id": row.id,
