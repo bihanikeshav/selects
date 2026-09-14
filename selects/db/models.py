@@ -14,6 +14,7 @@ from sqlalchemy import (
     LargeBinary,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -82,6 +83,288 @@ class Video(Base):
     highlights_json: Mapped[Optional[str]] = mapped_column(Text)   # [{start,end,frames}]
     siglip: Mapped[Optional[bytes]] = mapped_column(LargeBinary)   # best-frame SigLIP fp16 blob
     processed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+
+class VideoKeyframe(Base):
+    """Cached representative frame and optional visual embedding for a video."""
+
+    __tablename__ = "video_keyframes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    video_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("videos.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    frame_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    timestamp_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False, default="scene")
+    image_path: Mapped[Optional[str]] = mapped_column(String(4096))
+    quality: Mapped[Optional[float]] = mapped_column(Float)
+    sharpness: Mapped[Optional[float]] = mapped_column(Float)
+    exposure: Mapped[Optional[float]] = mapped_column(Float)
+    siglip: Mapped[Optional[bytes]] = mapped_column(LargeBinary)
+    source_fingerprint: Mapped[Optional[str]] = mapped_column(String(128), index=True)
+    processor_version: Mapped[Optional[str]] = mapped_column(String(64))
+    model_version: Mapped[Optional[str]] = mapped_column(String(128))
+    index_version: Mapped[Optional[str]] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("video_id", "frame_index", name="uq_video_keyframes_video_frame"),
+        Index("ix_video_keyframes_video_time", "video_id", "timestamp_ms"),
+        Index("ix_video_keyframes_video_kind", "video_id", "kind"),
+    )
+
+
+class VideoSegment(Base):
+    """Time range used for highlights, scenes, and pooled semantic search."""
+
+    __tablename__ = "video_segments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    video_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("videos.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    start_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    end_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False, default="scene")
+    score: Mapped[Optional[float]] = mapped_column(Float)
+    representative_keyframe_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("video_keyframes.id", ondelete="CASCADE")
+    )
+    embedding: Mapped[Optional[bytes]] = mapped_column(LargeBinary)
+    ocr_text: Mapped[Optional[str]] = mapped_column(Text)
+    source_fingerprint: Mapped[Optional[str]] = mapped_column(String(128), index=True)
+    processor_version: Mapped[Optional[str]] = mapped_column(String(64))
+    model_version: Mapped[Optional[str]] = mapped_column(String(128))
+    index_version: Mapped[Optional[str]] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "video_id", "start_ms", "end_ms", "kind", name="uq_video_segments_range"
+        ),
+        Index("ix_video_segments_video_time", "video_id", "start_ms", "end_ms"),
+        Index("ix_video_segments_video_kind", "video_id", "kind"),
+    )
+
+
+class VideoProxy(Base):
+    """A cached, playback-friendly derivative of a source video."""
+
+    __tablename__ = "video_proxies"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    video_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("videos.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    preset: Mapped[str] = mapped_column(String(32), nullable=False)
+    path: Mapped[str] = mapped_column(String(4096), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="ready")
+    format: Mapped[Optional[str]] = mapped_column(String(16))
+    codec: Mapped[Optional[str]] = mapped_column(String(32))
+    width: Mapped[Optional[int]] = mapped_column(Integer)
+    height: Mapped[Optional[int]] = mapped_column(Integer)
+    duration_ms: Mapped[Optional[int]] = mapped_column(Integer)
+    size_bytes: Mapped[Optional[int]] = mapped_column(Integer)
+    source_fingerprint: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    processor_version: Mapped[Optional[str]] = mapped_column(String(64))
+    model_version: Mapped[Optional[str]] = mapped_column(String(128))
+    index_version: Mapped[Optional[str]] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("video_id", "preset", "source_fingerprint", name="uq_video_proxies_key"),
+        Index("ix_video_proxies_status", "status"),
+    )
+
+
+class VideoAudioAnalysis(Base):
+    """Cached low-rate audio features and compressed timeline artifacts."""
+
+    __tablename__ = "video_audio_analysis"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    video_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("videos.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    source_fingerprint: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    audio_present: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    channels: Mapped[Optional[int]] = mapped_column(Integer)
+    sample_rate: Mapped[Optional[int]] = mapped_column(Integer)
+    duration_ms: Mapped[Optional[int]] = mapped_column(Integer)
+    integrated_lufs: Mapped[Optional[float]] = mapped_column(Float)
+    true_peak_db: Mapped[Optional[float]] = mapped_column(Float)
+    silence_ratio: Mapped[Optional[float]] = mapped_column(Float)
+    speech_ratio: Mapped[Optional[float]] = mapped_column(Float)
+    waveform_blob: Mapped[Optional[bytes]] = mapped_column(LargeBinary)
+    silence_segments_json: Mapped[Optional[str]] = mapped_column(Text)
+    speech_segments_json: Mapped[Optional[str]] = mapped_column(Text)
+    processor_version: Mapped[Optional[str]] = mapped_column(String(64))
+    model_version: Mapped[Optional[str]] = mapped_column(String(128))
+    index_version: Mapped[Optional[str]] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("video_id", "source_fingerprint", name="uq_video_audio_source"),
+        Index("ix_video_audio_video_source", "video_id", "source_fingerprint"),
+    )
+
+
+class VideoTranscriptSegment(Base):
+    """Timestamped optional transcript text, kept separate for FTS indexing."""
+
+    __tablename__ = "video_transcript_segments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    video_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("videos.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    start_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    end_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    confidence: Mapped[Optional[float]] = mapped_column(Float)
+    speaker: Mapped[Optional[str]] = mapped_column(String(128))
+    language: Mapped[Optional[str]] = mapped_column(String(16))
+    source_fingerprint: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    processor_version: Mapped[Optional[str]] = mapped_column(String(64))
+    model_version: Mapped[Optional[str]] = mapped_column(String(128))
+    index_version: Mapped[Optional[str]] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        Index("ix_video_transcript_video_time", "video_id", "start_ms", "end_ms"),
+        Index("ix_video_transcript_video_source", "video_id", "source_fingerprint"),
+    )
+
+
+class VideoEdit(Base):
+    """A non-destructive edit recipe; rendered output belongs to a job/export."""
+
+    __tablename__ = "video_edits"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    video_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("videos.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[Optional[str]] = mapped_column(String(256))
+    schema_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    recipe_json: Mapped[str] = mapped_column(Text, nullable=False)
+    source_fingerprint: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    processor_version: Mapped[Optional[str]] = mapped_column(String(64))
+    model_version: Mapped[Optional[str]] = mapped_column(String(128))
+    index_version: Mapped[Optional[str]] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        Index("ix_video_edits_video_updated", "video_id", "updated_at"),
+    )
+
+
+class VideoRating(Base):
+    """User rating for a video; uses the same -1/0/+1 vocabulary as PhotoRating."""
+
+    __tablename__ = "video_ratings"
+
+    video_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("videos.id", ondelete="CASCADE"), primary_key=True
+    )
+    rating: Mapped[int] = mapped_column(Integer, nullable=False)
+    rated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class VideoTag(Base):
+    """Tag attached to a video, with optional automatic confidence and source."""
+
+    __tablename__ = "video_tags"
+
+    video_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("videos.id", ondelete="CASCADE"), primary_key=True
+    )
+    tag: Mapped[str] = mapped_column(String(128), primary_key=True)
+    source: Mapped[Optional[str]] = mapped_column(String(32), primary_key=True, nullable=True)
+    score: Mapped[Optional[float]] = mapped_column(Float)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        Index("ix_video_tags_tag", "tag"),
+        Index("ix_video_tags_source", "source"),
+    )
+
+
+class VideoCollection(Base):
+    """Named manual or smart collection of videos."""
+
+    __tablename__ = "video_collections"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(256), nullable=False, unique=True)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False, default="manual")
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    query_json: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class VideoCollectionItem(Base):
+    """Ordered membership link between a collection and a video."""
+
+    __tablename__ = "video_collection_items"
+
+    collection_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("video_collections.id", ondelete="CASCADE"), primary_key=True
+    )
+    video_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("videos.id", ondelete="CASCADE"), primary_key=True
+    )
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    added_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        Index("ix_video_collection_items_order", "collection_id", "position"),
+        Index("ix_video_collection_items_video", "video_id"),
+    )
+
+
+class MediaJob(Base):
+    """Durable job record for video analysis, proxy, edit, and export work."""
+
+    __tablename__ = "media_jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    video_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("videos.id", ondelete="CASCADE"), index=True
+    )
+    job_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="queued")
+    progress: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    payload_json: Mapped[Optional[str]] = mapped_column(Text)
+    output_path: Mapped[Optional[str]] = mapped_column(String(4096))
+    error_text: Mapped[Optional[str]] = mapped_column(Text)
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    source_fingerprint: Mapped[Optional[str]] = mapped_column(String(128), index=True)
+    processor_version: Mapped[Optional[str]] = mapped_column(String(64))
+    model_version: Mapped[Optional[str]] = mapped_column(String(128))
+    index_version: Mapped[Optional[str]] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        Index("ix_media_jobs_status_created", "status", "created_at"),
+        Index("ix_media_jobs_video_status", "video_id", "status"),
+    )
 
 
 class ClassicalScore(Base):

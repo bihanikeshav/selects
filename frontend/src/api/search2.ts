@@ -4,8 +4,7 @@
 
 const BASE = "/api";
 
-export interface Search2Hit {
-  photo_id: number;
+interface Search2HitBase {
   sha256: string;
   score: number;
   semantic_score: number;
@@ -14,8 +13,24 @@ export interface Search2Hit {
   preview_url: string;
 }
 
+export interface PhotoSearchHit extends Search2HitBase {
+  asset_type: "photo";
+  photo_id: number;
+}
+
+export interface VideoSearchHit extends Search2HitBase {
+  asset_type: "video";
+  video_id: number;
+  match_start_sec: number | null;
+  match_end_sec: number | null;
+  match_kind: "segment" | "best-frame" | "browse" | string;
+}
+
+export type Search2Hit = PhotoSearchHit | VideoSearchHit;
+
 export interface Search2Result {
   query: string | null;
+  media: "all" | "photos" | "videos";
   total: number;
   results: Search2Hit[];
 }
@@ -37,6 +52,7 @@ export interface Search2Opts {
   date_to?: string;
   min_aesthetic?: number;
   limit?: number;
+  media?: "all" | "photos" | "videos";
 }
 
 /** Parse a `{detail}` error body, falling back to the HTTP status. */
@@ -71,6 +87,7 @@ export async function search2(opts: Search2Opts): Promise<Search2Result> {
   if (opts.date_to) params.set("date_to", opts.date_to);
   if (opts.min_aesthetic !== undefined) params.set("min_aesthetic", String(opts.min_aesthetic));
   if (opts.limit !== undefined) params.set("limit", String(opts.limit));
+  if (opts.media) params.set("media", opts.media);
 
   const res = await fetch(`${BASE}/search2?${params}`);
   if (!res.ok) throw await detailError(res, "search2");

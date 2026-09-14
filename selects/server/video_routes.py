@@ -21,11 +21,18 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from fastapi import APIRouter, FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from selects.config import FolderConfig
 from selects.db import init_db, session_scope
-from selects.db.models import Video
+from selects.db.models import (
+    Video,
+    VideoAudioAnalysis,
+    VideoCollectionItem,
+    VideoEdit,
+    VideoRating,
+    VideoTag,
+)
 from selects.pipeline import PipelineCancelled
 from selects.server.schemas import require_sha256
 from selects.video import frames_dir_for, run_video_stage
@@ -52,6 +59,12 @@ class VideoOut(BaseModel):
     highlight_count: int
     highlights: list[dict]
     sampled_frames: int
+    has_audio: Optional[bool] = None
+    edited: bool = False
+    review_state: Optional[str] = None
+    tags: list[str] = Field(default_factory=list)
+    rating: Optional[int] = None
+    collection_ids: list[int] = Field(default_factory=list)
 
 
 class VideoListOut(BaseModel):
@@ -82,7 +95,15 @@ class VideoFramesOut(BaseModel):
     frames: list[VideoFrameOut]
 
 
-def _video_to_out(v: Video) -> VideoOut:
+def _video_to_out(
+    v: Video,
+    *,
+    has_audio: Optional[bool] = None,
+    edited: bool = False,
+    tags: Optional[list[str]] = None,
+    rating: Optional[int] = None,
+    collection_ids: Optional[list[int]] = None,
+) -> VideoOut:
     highlights = json.loads(v.highlights_json) if v.highlights_json else []
     frames = json.loads(v.frames_json) if v.frames_json else []
     return VideoOut(
@@ -104,6 +125,12 @@ def _video_to_out(v: Video) -> VideoOut:
         highlight_count=len(highlights),
         highlights=highlights,
         sampled_frames=len(frames),
+        has_audio=has_audio,
+        edited=edited,
+        review_state=next((state for state in ("review", "kept", "archived") if tags and state in tags), "new"),
+        tags=tags or [],
+        rating=rating,
+        collection_ids=collection_ids or [],
     )
 
 
@@ -134,7 +161,37 @@ def register_video_routes(
         Session = init_db(cfg.db_path)
         with session_scope(Session) as s:
             rows = s.query(Video).order_by(Video.taken_at.is_(None), Video.taken_at, Video.path).all()
-            out = [_video_to_out(v) for v in rows]
+            ids = [v.id for v in rows]
+            ratings = dict(s.query(VideoRating.video_id, VideoRating.rating).filter(VideoRating.video_id.in_(ids)).all()) if ids else {}
+            edited_ids = {row[0] for row in s.query(VideoEdit.video_id).filter(VideoEdit.video_id.in_(ids)).distinct()} if ids else set()
+            audio_rows = (
+                s.query(VideoAudioAnalysis.video_id, VideoAudioAnalysis.audio_present)
+                .filter(VideoAudioAnalysis.video_id.in_(ids))
+                .order_by(VideoAudioAnalysis.updated_at)
+                .all()
+            ) if ids else []
+            audio = dict(audio_rows)
+            tags_by_id: dict[int, list[str]] = {}
+            collections_by_id: dict[int, list[int]] = {}
+            if ids:
+                for video_id, tag in s.query(VideoTag.video_id, VideoTag.tag).filter(VideoTag.video_id.in_(ids)).all():
+                    tags_by_id.setdefault(video_id, []).append(tag)
+                for video_id, collection_id in s.query(
+                    VideoCollectionItem.video_id,
+                    VideoCollectionItem.collection_id,
+                ).filter(VideoCollectionItem.video_id.in_(ids)).all():
+                    collections_by_id.setdefault(video_id, []).append(collection_id)
+            out = [
+                _video_to_out(
+                    v,
+                    has_audio=audio.get(v.id),
+                    edited=v.id in edited_ids,
+                    tags=tags_by_id.get(v.id, []),
+                    rating=ratings.get(v.id),
+                    collection_ids=collections_by_id.get(v.id, []),
+                )
+                for v in rows
+            ]
         return VideoListOut(
             videos=out,
             total=len(out),

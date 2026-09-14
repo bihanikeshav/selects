@@ -31,6 +31,11 @@ dependencies = [
 desktop = [
   "pywebview>=5.0",
 ]
+media = [
+  # Provides a platform-specific ffmpeg fallback for packaging. It does not
+  # provide ffprobe; use vendor/ffmpeg or SELECTS_FFPROBE_PATH for that binary.
+  "imageio-ffmpeg>=0.6",
+]
 ml = [
   # All models run on ONNX Runtime — no torch, transformers, or the
   # recognize-anything package. RAM++ is the ONNX graph in selects-onnx.

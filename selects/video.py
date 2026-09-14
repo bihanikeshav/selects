@@ -396,6 +396,27 @@ def run_video_stage(
             v.processed_at = utcnow()
             s.add(v)
 
+        if analysis.frames and sha:
+            best_source_index = (
+                analysis.frames[analysis.best_index].frame_index
+                if analysis.best_index is not None
+                else None
+            )
+            try:
+                from selects.ml.video_search import persist_index
+
+                persist_index(
+                    cfg,
+                    vid,
+                    sha,
+                    Path(vpath),
+                    analysis.info.duration_sec,
+                    embed=embed,
+                    best_frame_index=best_source_index,
+                )
+            except Exception as exc:  # noqa: BLE001 — sparse indexing is best-effort.
+                log.warning("failed to persist sparse video search index for %s: %s", vpath, exc)
+
         processed += 1
 
     log.info("video analysis done: %d videos", processed)

@@ -14,6 +14,7 @@ PyInstaller onedir. This mirrors what ``packaging/selects.spec`` bundles:
 
 Usage:
     python packaging/build_nuitka.py [--no-frontend] [--ml] [--onefile]
+        [--ffmpeg-dir vendor/ffmpeg | --ffmpeg PATH --ffprobe PATH]
 
 Cross-platform notes:
   * Nuitka cannot cross-compile — run this ON each target OS (see the
@@ -25,6 +26,8 @@ Cross-platform notes:
 from __future__ import annotations
 
 import argparse
+import importlib.util
+import os
 import shutil
 import subprocess
 import sys
@@ -80,6 +83,103 @@ DEAD_PACKAGES = ["torch", "torchvision", "torchcodec", "transformers", "ram"]
 NONML_EXTRA_EXCLUDES = ["scipy", "pandas", "matplotlib", "IPython", "notebook"]
 
 
+def _truthy(value: str | None, default: bool = False) -> bool:
+    if value is None:
+        return default
+    return value.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _binary_name(stem: str) -> str:
+    return stem + ".exe" if IS_WIN else stem
+
+
+def _existing_file(value: Path | None) -> Path | None:
+    if value is None:
+        return None
+    path = value.expanduser().resolve()
+    if not path.is_file():
+        raise ValueError(f"media runtime file does not exist: {path}")
+    return path
+
+
+def _from_directory(directory: Path | None, stem: str) -> Path | None:
+    if directory is None:
+        return None
+    directory = directory.expanduser().resolve()
+    for name in (_binary_name(stem), stem, stem + ".exe"):
+        candidate = directory / name
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _imageio_ffmpeg_path() -> Path | None:
+    """Return the optional imageio-ffmpeg binary without searching PATH."""
+    if importlib.util.find_spec("imageio_ffmpeg") is None:
+        return None
+    try:
+        import imageio_ffmpeg
+        path = Path(imageio_ffmpeg.get_ffmpeg_exe()).resolve()
+    except Exception as exc:
+        print(f"[nuitka] imageio-ffmpeg unavailable: {exc}")
+        return None
+    return path if path.is_file() else None
+
+
+def resolve_media_binaries(
+    ffmpeg_dir: Path | None = None,
+    ffmpeg_path: Path | None = None,
+    ffprobe_path: Path | None = None,
+    disabled: bool = False,
+) -> list[tuple[Path, str]]:
+    """Return approved media binaries as (source, bundle-relative destination)."""
+    if disabled:
+        print("[nuitka] media runtime disabled by --no-ffmpeg.")
+        return []
+    env_dir = Path(os.environ["SELECTS_FFMPEG_DIR"]) if os.environ.get("SELECTS_FFMPEG_DIR") else None
+    env_ffmpeg = Path(os.environ["SELECTS_FFMPEG_PATH"]) if os.environ.get("SELECTS_FFMPEG_PATH") else None
+    env_ffprobe = Path(os.environ["SELECTS_FFPROBE_PATH"]) if os.environ.get("SELECTS_FFPROBE_PATH") else None
+    enabled = _truthy(os.environ.get("SELECTS_BUNDLE_FFMPEG"), default=True)
+    if not enabled and not any((ffmpeg_path, ffprobe_path, ffmpeg_dir, env_ffmpeg, env_ffprobe, env_dir)):
+        print("[nuitka] media runtime disabled.")
+        return []
+
+    vendor_dir = REPO_ROOT / "vendor" / "ffmpeg"
+    source_dir = ffmpeg_dir or env_dir or (vendor_dir if vendor_dir.is_dir() else None)
+    ffmpeg = _existing_file(ffmpeg_path or env_ffmpeg)
+    ffprobe = _existing_file(ffprobe_path or env_ffprobe)
+    if ffmpeg is None:
+        ffmpeg = _from_directory(source_dir, "ffmpeg")
+    if ffprobe is None:
+        ffprobe = _from_directory(source_dir, "ffprobe")
+    explicit_source = ffmpeg_path or env_ffmpeg or ffmpeg_dir or env_dir
+    if ffmpeg is None and not explicit_source:
+        ffmpeg = _imageio_ffmpeg_path()
+        if ffmpeg:
+            print(f"[nuitka] using imageio-ffmpeg binary: {ffmpeg}")
+
+    resolved: list[tuple[Path, str]] = []
+    if ffmpeg:
+        resolved.append((ffmpeg, _binary_name("ffmpeg")))
+    elif explicit_source:
+        raise ValueError(f"ffmpeg not found in approved source: {explicit_source}")
+    if ffprobe:
+        resolved.append((ffprobe, _binary_name("ffprobe")))
+    elif ffprobe_path or env_ffprobe:
+        raise ValueError(f"ffprobe not found: {ffprobe_path or env_ffprobe}")
+
+    if resolved:
+        print("[nuitka] bundling media runtime beside selects executable: "
+              + ", ".join(source.name for source, _ in resolved))
+    else:
+        print("[nuitka] no approved ffmpeg/ffprobe source found; "
+              "video code will use its OpenCV fallback.")
+    if ffmpeg and not ffprobe:
+        print("[nuitka] WARNING: ffprobe was not bundled; imageio-ffmpeg supplies "
+              "ffmpeg only. Provide --ffprobe or vendor/ffmpeg/ffprobe.")
+    return resolved
+
+
 def _which(name: str) -> str | None:
     return shutil.which(name) or shutil.which(name + ".cmd")
 
@@ -129,7 +229,8 @@ def _installed(mod: str) -> bool:
         return False
 
 
-def nuitka_args(bundle_ml: bool, onefile: bool) -> list[str]:
+def nuitka_args(bundle_ml: bool, onefile: bool,
+                media_binaries: list[tuple[Path, str]] | None = None) -> list[str]:
     args = [
         sys.executable, "-m", "nuitka",
         "--standalone",
@@ -162,6 +263,8 @@ def nuitka_args(bundle_ml: bool, onefile: bool) -> list[str]:
     for p in DATA_PACKAGES:
         if _installed(p):
             args.append(f"--include-package-data={p}")
+    for source, destination in media_binaries or []:
+        args.append(f"--include-data-files={source}={destination}")
 
     # Windowed (no console) + icon, per OS.
     if IS_WIN:
@@ -221,13 +324,28 @@ def main() -> None:
     ap.add_argument("--ml", action="store_true", help="Bundle the ML stack (large, slow).")
     ap.add_argument("--onefile", action="store_true",
                     help="Produce a single-file exe (slower first launch; splash on Windows).")
+    ap.add_argument("--ffmpeg-dir", type=Path,
+                    help="Directory containing approved ffmpeg and optionally ffprobe binaries.")
+    ap.add_argument("--ffmpeg", dest="ffmpeg_path", type=Path,
+                    help="Explicit ffmpeg binary to bundle; never searches PATH.")
+    ap.add_argument("--ffprobe", dest="ffprobe_path", type=Path,
+                    help="Explicit ffprobe binary to bundle; never searches PATH.")
+    ap.add_argument("--no-ffmpeg", action="store_true",
+                    help="Do not bundle ffmpeg/ffprobe or the imageio-ffmpeg fallback.")
     args = ap.parse_args()
 
     if not args.no_frontend:
         build_frontend()
     copy_static()
 
-    cmd = nuitka_args(bundle_ml=args.ml, onefile=args.onefile)
+    media_binaries = resolve_media_binaries(
+        ffmpeg_dir=args.ffmpeg_dir,
+        ffmpeg_path=args.ffmpeg_path,
+        ffprobe_path=args.ffprobe_path,
+        disabled=args.no_ffmpeg,
+    )
+    cmd = nuitka_args(bundle_ml=args.ml, onefile=args.onefile,
+                      media_binaries=media_binaries)
     print("[nuitka] running:\n  " + " ".join(cmd))
     subprocess.run(cmd, cwd=REPO_ROOT, check=True)
     report()

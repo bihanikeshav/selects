@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 import {
   listAllTags,
@@ -17,8 +18,16 @@ import SkeletonGrid from "../components/SkeletonGrid";
 import Viewer from "../components/Viewer";
 
 const DEBOUNCE_MS = 350;
+type MediaScope = "all" | "photos" | "videos";
+
+function formatMatchTime(seconds: number | null): string {
+  if (seconds == null) return "Best frame";
+  const safe = Math.max(0, Math.floor(seconds));
+  return `${Math.floor(safe / 60)}:${String(safe % 60).padStart(2, "0")}`;
+}
 
 export default function Search() {
+  const navigate = useNavigate();
   const [q, setQ] = useState("");
   const [debouncedQ, setDebouncedQ] = useState("");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -30,6 +39,7 @@ export default function Search() {
   const [dateTo, setDateTo] = useState("");
   const [minAesthetic, setMinAesthetic] = useState<number>(0);
   const [showFilters, setShowFilters] = useState(false);
+  const [media, setMedia] = useState<MediaScope>("all");
 
   const [hits, setHits] = useState<Search2Hit[]>([]);
   const [loading, setLoading] = useState(false);
@@ -95,6 +105,7 @@ export default function Search() {
       date_to: dateTo ? `${dateTo}T23:59:59` : undefined,
       min_aesthetic: minAesthetic > 0 ? minAesthetic : undefined,
       limit: 150,
+      media,
     })
       .then(data => {
         if (myReq !== reqId.current) return;
@@ -109,7 +120,7 @@ export default function Search() {
       .finally(() => {
         if (myReq === reqId.current) setLoading(false);
       });
-  }, [debouncedQ, selectedTags, personId, dateFrom, dateTo, minAesthetic, hasAnyFilter]);
+  }, [debouncedQ, selectedTags, personId, dateFrom, dateTo, minAesthetic, hasAnyFilter, media]);
 
   function toggleTag(tag: string) {
     setSelectedTags(prev => (prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]));
@@ -162,6 +173,7 @@ export default function Search() {
     : searched
     ? `${hits.length} result${hits.length === 1 ? "" : "s"}`
     : "type a query, pick a tag, or set a filter";
+  const photoHits = useMemo(() => hits.filter((hit) => hit.asset_type === "photo"), [hits]);
 
   return (
     <div className="app">
@@ -204,6 +216,13 @@ export default function Search() {
           }
           controls={
             <div className="search-header-controls">
+              <div className="search-media-toggle" role="group" aria-label="Search media type">
+                {(["all", "photos", "videos"] as MediaScope[]).map((scope) => (
+                  <button type="button" key={scope} className={media === scope ? "is-active" : ""} aria-pressed={media === scope} onClick={() => setMedia(scope)}>
+                    {scope[0].toUpperCase() + scope.slice(1)}
+                  </button>
+                ))}
+              </div>
               <div className="search-chip-row">
                 {selectedTags.length === 0 && !q.trim()
                   ? tags.slice(0, 8).map(t => (
@@ -316,7 +335,7 @@ export default function Search() {
 
         <div className="search-results-pane">
           {hasAnyFilter && !loading && !err && hits.length === 0 && (
-            <div className="cluster-detail-empty">No photos match this search.</div>
+            <div className="cluster-detail-empty">No photos or videos match this search.</div>
           )}
 
           {loading && hits.length === 0 && (
@@ -332,13 +351,20 @@ export default function Search() {
           <div className="cluster-detail-grid">
             {hits.map((h, i) => (
               <button
-                key={h.sha256}
-                className="cluster-photo"
-                onClick={() => setLightbox(i)}
-                style={{ cursor: "zoom-in" }}
+                key={`${h.asset_type}-${h.sha256}`}
+                className={`cluster-photo${h.asset_type === "video" ? " search-video-result" : ""}`}
+                onClick={() => h.asset_type === "video"
+                  ? navigate(`/videos/${encodeURIComponent(h.sha256)}${h.match_start_sec != null ? `?t=${h.match_start_sec.toFixed(3)}` : ""}`)
+                  : setLightbox(photoHits.findIndex((photo) => photo.sha256 === h.sha256))}
+                style={{ cursor: h.asset_type === "video" ? "pointer" : "zoom-in" }}
                 title={`rank ${i + 1} - score ${h.score.toFixed(3)}${h.tag_hits ? ` - ${h.tag_hits} tag hit${h.tag_hits === 1 ? "" : "s"}` : ""}`}
               >
                 <img src={h.thumb_url} alt="" loading="lazy" decoding="async" />
+                {h.asset_type === "video" && (
+                  <span className="search-video-badge">
+                    <span aria-hidden="true">&#9654;</span> {formatMatchTime(h.match_start_sec)}
+                  </span>
+                )}
                 {/* Only badge meaningful signals — a raw SigLIP cosine (~0.05)
                     rendered as "0.0" on every tile read as broken. Tag matches
                     are the one badge worth showing. */}
@@ -369,9 +395,9 @@ export default function Search() {
         {lightbox !== null && <KbdFooter variant="browse" />}
       </div>
 
-      {lightbox !== null && hits[lightbox] && (
+      {lightbox !== null && photoHits[lightbox] && (
         <Viewer
-          items={hits.map((h) => ({ sha256: h.sha256 }))}
+          items={photoHits.map((h) => ({ sha256: h.sha256 }))}
           index={lightbox}
           onIndex={setLightbox}
           onClose={() => setLightbox(null)}

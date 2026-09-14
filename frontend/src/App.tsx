@@ -22,6 +22,7 @@ const PersonDetail = lazy(() => import("./views/PersonDetail"));
 const Search = lazy(() => import("./views/Search"));
 const Stories = lazy(() => import("./views/Stories"));
 const Videos = lazy(() => import("./views/Videos"));
+const VideoEditor = lazy(() => import("./views/VideoEditor"));
 
 /**
  * Ask the backend whether any library exists. If none does, bounce the user
@@ -123,6 +124,7 @@ export default function App() {
         <Route path="/search" element={<Search />} />
         <Route path="/duplicates" element={<Dedup />} />
         <Route path="/videos" element={<Videos />} />
+        <Route path="/videos/:sha" element={<VideoEditor />} />
         <Route path="/best/:facet/:value" element={<BestOf />} />
         <Route path="/calibrate" element={<Calibrate />} />
         <Route path="/calibrate/dashboard" element={<CalibrateDashboard />} />

@@ -15,6 +15,9 @@ ML bundling is opt-in and degrades gracefully:
 """
 import os
 import sys
+import importlib.util
+import shutil
+import tempfile
 
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
@@ -34,6 +37,111 @@ ICON = ICON if os.path.isfile(ICON) else None
 binaries = []
 datas = []
 hiddenimports = []
+_MEDIA_STAGE = tempfile.TemporaryDirectory(prefix="selects-media-runtime-")
+
+
+def _truthy(value, default=False):
+    if value is None:
+        return default
+    return value.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _binary_name(stem):
+    return stem + ".exe" if sys.platform == "win32" else stem
+
+
+def _first_file(candidates):
+    for candidate in candidates:
+        path = os.path.abspath(os.path.expandvars(os.path.expanduser(candidate)))
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+def _from_directory(directory, stem):
+    if not directory:
+        return None
+    directory = os.path.abspath(os.path.expandvars(os.path.expanduser(directory)))
+    return _first_file([
+        os.path.join(directory, _binary_name(stem)),
+        os.path.join(directory, stem),
+        os.path.join(directory, stem + ".exe"),
+    ])
+
+
+def _imageio_ffmpeg():
+    """Return imageio-ffmpeg's pinned binary, if the optional extra exists."""
+    if importlib.util.find_spec("imageio_ffmpeg") is None:
+        return None
+    try:
+        import imageio_ffmpeg
+        path = imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception as exc:
+        print(f"[selects.spec] imageio-ffmpeg unavailable: {exc}")
+        return None
+    return path if os.path.isfile(path) else None
+
+
+def _media_binaries():
+    """Resolve only explicitly approved media runtimes for the bundle.
+
+    We intentionally never call shutil.which here: a machine's arbitrary
+    system/GPL build must not silently enter a distributable artifact.
+    """
+    enabled = _truthy(os.environ.get("SELECTS_BUNDLE_FFMPEG"), default=True)
+    explicit_file = os.environ.get("SELECTS_FFMPEG_PATH")
+    explicit_probe = os.environ.get("SELECTS_FFPROBE_PATH")
+    explicit_dir = os.environ.get("SELECTS_FFMPEG_DIR")
+    vendor_dir = os.path.join(REPO_ROOT, "vendor", "ffmpeg")
+
+    if not enabled and not any((explicit_file, explicit_probe, explicit_dir)):
+        print("[selects.spec] media runtime disabled (SELECTS_BUNDLE_FFMPEG=0).")
+        return []
+
+    ffmpeg = _first_file([explicit_file]) if explicit_file else None
+    ffprobe = _first_file([explicit_probe]) if explicit_probe else None
+    source_dir = explicit_dir or (vendor_dir if os.path.isdir(vendor_dir) else None)
+    if not ffmpeg:
+        ffmpeg = _from_directory(source_dir, "ffmpeg")
+    if not ffprobe:
+        ffprobe = _from_directory(source_dir, "ffprobe")
+
+    explicit_source = explicit_file or explicit_dir
+    if not ffmpeg and not explicit_source:
+        ffmpeg = _imageio_ffmpeg()
+        if ffmpeg:
+            print(f"[selects.spec] using imageio-ffmpeg binary: {ffmpeg}")
+
+    resolved = []
+    if ffmpeg:
+        staged = os.path.join(_MEDIA_STAGE.name, _binary_name("ffmpeg"))
+        shutil.copy2(ffmpeg, staged)
+        resolved.append((staged, "."))
+    elif explicit_source:
+        raise SystemExit(f"[selects.spec] ffmpeg not found in approved source: {explicit_source}")
+    if ffprobe:
+        staged = os.path.join(_MEDIA_STAGE.name, _binary_name("ffprobe"))
+        shutil.copy2(ffprobe, staged)
+        resolved.append((staged, "."))
+    elif explicit_probe:
+        raise SystemExit(f"[selects.spec] ffprobe not found: {explicit_probe}")
+
+    if resolved:
+        names = ", ".join(os.path.basename(source) for source, _ in resolved)
+        print(f"[selects.spec] bundling media runtime beside selects executable: {names}")
+    else:
+        print("[selects.spec] no approved ffmpeg/ffprobe source found; "
+              "video code will use its OpenCV fallback.")
+    if ffmpeg and not ffprobe:
+        print("[selects.spec] WARNING: ffprobe was not bundled; imageio-ffmpeg "
+              "supplies ffmpeg only. Provide SELECTS_FFPROBE_PATH or vendor/ffmpeg/ffprobe.")
+    return resolved
+
+
+# Keep the binaries at the application root. Windows resolves bare subprocess
+# names from the executable directory, so the current decoder works without a
+# PATH mutation. The source is still deterministic and legally reviewable.
+binaries.extend(_media_binaries())
 
 # Bundle the built frontend so FastAPI can serve it from the package.
 if os.path.isdir(STATIC_DIR):

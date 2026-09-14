@@ -23,6 +23,7 @@ from .fs_routes import is_loopback_host, register_fs_routes
 from .http_cache import SkipImageGZipMiddleware
 from .libraries import register_libraries
 from .library_manager import ActiveConfigProxy, LibraryManager
+from .media_routes import register_media_routes
 from .models_routes import register_model_routes
 from .pipeline_runner import run_pipeline_stages
 from .recap_routes import register_recap_routes
@@ -234,6 +235,7 @@ def build_app(
     register_taste_routes(app, proxy)
     register_recap_routes(app, proxy)
     register_video_routes(app, proxy, publish, manager)
+    register_media_routes(app, proxy, publish)
     register_watch_routes(app, manager, publish)
     register_fs_routes(app, bind_host=bind_host)
     register_system_routes(app, proxy)
