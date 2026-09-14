@@ -180,6 +180,29 @@ UI same-origin — no `npm run dev` needed. With **no folder argument** it opens
 onboarding if none exists. Drive stages directly with `selects index <folder> [--pass <stage>]` and
 check hardware with `selects doctor`.
 
+### macOS (Apple Silicon)
+
+No Docker or other services are needed; the models run in-process on ONNX Runtime. Use a native
+arm64 Python. An Intel Homebrew install (`/usr/local`) runs as x86_64 under Rosetta, and there
+`umap-learn`'s `llvmlite` dependency has no wheel, so it tries to build from source and fails.
+[uv](https://docs.astral.sh/uv/) can fetch a native interpreter:
+
+```bash
+uv venv --managed-python --python cpython-3.11-macos-aarch64 .venv
+uv pip install --python .venv/bin/python -e ".[ml,dev]"
+.venv/bin/python -c "import platform; print(platform.machine())"   # expect: arm64
+.venv/bin/selects serve /path/to/photos
+```
+
+The first ML run downloads about 3.4 GB of weights: the ONNX bundle into
+`~/.cache/selects/models/` and InsightFace's `buffalo_l` into `~/.insightface/models/`. Downloads
+use plain HTTP because Selects sets `HF_HUB_DISABLE_XET=1` by default; the Hub's Xet downloader can
+hang mid-file. Set `HF_HUB_DISABLE_XET=0` to opt back in, and `HF_TOKEN` for faster,
+less rate-limited downloads.
+
+Video-only folders show up under **Videos** in the sidebar. The photo views (Cull, Curated, People,
+Map) stay empty for them.
+
 ## Configuration
 
 `selects serve` binds **8000** by default. If `--port` is omitted, it honors `SELECTS_WEB_PORT`.
@@ -217,7 +240,9 @@ cd frontend && npm run lint && npm run e2e   # ESLint + Playwright smoke test
 `npm run e2e` needs Chromium once (`npx playwright install chromium`). It builds the SPA into
 `selects/server/static/`, indexes a throwaway six-photo library in the temp directory and drives the
 real server on port 8765. Point `SELECTS_PYTHON` at the interpreter that has `selects` installed if
-it is not the one on `PATH` (e.g. `SELECTS_PYTHON=../.venv/Scripts/python.exe`).
+it is not the one on `PATH`. Use an absolute path, because the fixture runs it from the repo root
+(e.g. `SELECTS_PYTHON="$PWD/../.venv/bin/python" npm run e2e` from `frontend/` on macOS/Linux, or
+`...\.venv\Scripts\python.exe` on Windows).
 
 For the native desktop window (`pywebview`), install `selects[desktop]` (or `selects[ml,desktop]`
 for AI + the desktop window).
