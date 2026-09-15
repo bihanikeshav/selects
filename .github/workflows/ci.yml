@@ -29,8 +29,8 @@ jobs:
       - name: Cache insightface model pack
         uses: actions/cache@v4
         with:
-          path: ~/.insightface
-          key: insightface-buffalo_l
+          path: ~/.cache/selects/models/buffalo_l
+          key: insightface-buffalo_l-v2
       - name: Install package + test deps (full ML stack)
         run: |
           # The suite exercises faces (insightface), model downloads (requests)

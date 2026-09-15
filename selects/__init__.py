@@ -10,4 +10,4 @@ import os
 # anything imports it. Set HF_HUB_DISABLE_XET=0 to opt back in.
 os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
 
-__version__ = "0.1.14"
+__version__ = "0.1.15"

@@ -30,7 +30,7 @@ The app is meant to do the boring first pass locally, then leave the final taste
 |---|---|
 | **Private by design** | All inference runs locally. No cloud, no account, no upload. |
 | **More than EXIF sorting** | Semantic search, face grouping, aesthetic scoring, eyes-open burst picking. |
-| **Photos and video** | Frame scoring, dead-footage detection, highlight segments. |
+| **Photos and video** | Scene-aware highlights, unusable-clip flags, keep/reject on clips and moments. |
 | **Fast to cull** | Keyboard-first review, side-by-side compare, learns your taste. |
 | **Yours to extend** | Clean FastAPI backend + React UI + a scriptable CLI. |
 
@@ -51,7 +51,9 @@ The only network call is an optional place-name lookup for geotagged shots.
 | Taste learning | A local model that nudges scoring toward your keep/reject history |
 | Export | Copy/zip keepers or write XMP star ratings to Lightroom/darktable |
 | Trip recap | A self-contained shareable HTML keepsake per trip |
-| Video culling | Frame sampling, quality scoring, dead-footage flags, highlights |
+| Video culling | 1-second timeline, hard-dead vs scenic stillness, highlight peaks, keyboard keep/reject |
+| Transcripts | Local Whisper for speech, silence/filler selects, search by what was said |
+| Models page | See what's on disk vs missing; download SigLIP, InsightFace, and Whisper |
 | Watch folder | Point it at your camera dump; new files index automatically |
 
 ## Install
@@ -88,17 +90,19 @@ RAM++ is the ONNX graph in the `selects-onnx` bundle — it is already part of `
 
 ### Platform support
 
-SigLIP, CLIP-IQA, and RAM++ run on **CPU** on every platform. The Windows `[ml]` extra installs
-DirectML (`onnxruntime-directml`), but those transformer graphs are forced onto the CPU EP —
-DirectML is listed, not used for scoring. `selects doctor` reports whether SigLIP would actually
-run on a non-CPU provider (today: no). GPU acceleration is on the [roadmap](#roadmap).
+ONNX Runtime does **not** need NVIDIA CUDA to use a GPU. Windows `[ml]` ships DirectML (any DX12
+GPU). macOS can use CoreML. CUDA is used only if you install `onnxruntime-gpu` on NVIDIA Linux.
 
-| Platform | Scoring | GPU EP |
+SigLIP, CLIP-IQA, and RAM++ still run on **CPU** everywhere — those graphs are not DirectML-safe.
+Whisper can use DirectML/CoreML/CUDA when the provider exists. InsightFace uses CUDA if present,
+otherwise CPU. `selects doctor` and the **Models** page show which provider this machine selected.
+
+| Platform | Photo scoring | GPU without CUDA |
 |---|---|---|
-| Windows (x64) | CPU | DirectML bundled; unused for SigLIP/RAM++ |
-| macOS (Apple Silicon) | CPU | CoreML may be present; unused for SigLIP/RAM++ |
+| Windows (x64) | CPU (SigLIP/RAM++) | DirectML bundled — used for graphs that support it |
+| macOS (Apple Silicon) | CPU | CoreML may be present |
 | macOS (Intel) | CPU | — |
-| Linux (x64) | CPU | CUDA may be present; unused for SigLIP/RAM++ |
+| Linux (x64) | CPU | CUDA only with `onnxruntime-gpu` |
 
 ## Architecture
 
@@ -112,7 +116,7 @@ flowchart TD
     API["FastAPI + WebSocket API"]
     Pipeline["Pipeline orchestrator"]
     Classical["Classical scoring<br/>(blur, exposure, faces)"]
-    ML["ML stages<br/>(SigLIP, CLIP-IQA, ArcFace, RAM++)"]
+    ML["ML stages<br/>(SigLIP, CLIP-IQA, ArcFace, RAM++, Whisper)"]
     Files[("Photos & videos<br/>local disk")]
     DB[("Per-library SQLite<br/>&lt;folder&gt;/.selects/")]
 
@@ -131,7 +135,7 @@ Each stage reads/writes `<folder>/.selects/index.db` and is independently re-run
 | # | Stage | Does |
 |---|---|---|
 | 1 | `index` | walk & hash files, decode previews/thumbnails, read EXIF/GPS |
-| 2 | `video` | sample frames, classical quality, highlights, dead-footage flags |
+| 2 | `video` | 1 s timeline, scene/dead/highlight segments, optional Whisper + face enrichment |
 | 3 | `classical` | blur / exposure / clipped-highlight / face scoring; auto-reject gate |
 | 4 | `embed` | SigLIP-SO400M image embeddings + CLIP-IQA aesthetic score |
 | 5 | `tag` | zero-shot tagging via SigLIP text-prompt similarity |
@@ -144,7 +148,8 @@ Each stage reads/writes `<folder>/.selects/index.db` and is independently re-run
 | 12 | `thematic` | rule-driven location/theme clusters from GPS, people, tags, time |
 | 13 | `date` | group photos by calendar day |
 
-`speed_mode=fast` skips `ram_tag`, `smart_tag`, `face_embed`, and `persons`. Aesthetic curation
+`speed_mode=fast` skips `ram_tag`, `smart_tag`, `face_embed`, `persons`, and video Whisper /
+InsightFace enrichment. Aesthetic curation
 ranks on CLIP-IQA (`Embedding.aesthetic_iqa` in [0, 1]) with configurable per-scope and
 library-wide percentile thresholds (see [Configuration](#configuration)).
 
@@ -154,11 +159,13 @@ library-wide percentile thresholds (see [Configuration](#configuration)).
 - [x] Discovery search, tagging, people, face-aware culling
 - [x] Stories, aesthetic curation, duplicate finder
 - [x] Keyboard culling + compare, taste learning
-- [x] Export (copy/zip + XMP), trip recap, video culling, watch folder
+- [x] Export (copy/zip + XMP), trip recap, watch folder
+- [x] Video highlights, clip/moment cull, local transcripts, Models page
 - [x] CPU desktop builds for Windows, macOS, Linux + PyPI package
+- [x] DirectML / CoreML GPU path (no CUDA required); SigLIP/RAM++ still CPU
 
 **Planned**
-- [ ] **GPU acceleration** — Apple Silicon (MPS/CoreML) & NVIDIA (CUDA) first, AMD (DirectML/ROCm) later
+- [ ] **SigLIP/RAM++ on GPU** — re-export graphs that DirectML/CoreML can run
 - [ ] **Android companion** — LAN remote that drives the desktop backend from your phone
 - [ ] **Android standalone** — on-device culling for small libraries (no desktop needed)
 - [ ] Cursor-based pagination, auto-tuned aesthetic/burst thresholds, iOS parity
@@ -194,11 +201,12 @@ uv pip install --python .venv/bin/python -e ".[ml,dev]"
 .venv/bin/selects serve /path/to/photos
 ```
 
-The first ML run downloads about 3.4 GB of weights: the ONNX bundle into
-`~/.cache/selects/models/` and InsightFace's `buffalo_l` into `~/.insightface/models/`. Downloads
-use plain HTTP because Selects sets `HF_HUB_DISABLE_XET=1` by default; the Hub's Xet downloader can
-hang mid-file. Set `HF_HUB_DISABLE_XET=0` to opt back in, and `HF_TOKEN` for faster,
-less rate-limited downloads.
+The first ML run (or the **Models** page) downloads weights into `~/.cache/selects/models/`
+(`SELECTS_MODELS_DIR` to override): `selects-onnx/` (~3.1 GB), `buffalo_l/` (~330 MB), and
+`whisper-small/` (~250–500 MB). Older InsightFace installs under `~/.insightface/models/` still
+count as present. Downloads use plain HTTP because Selects sets `HF_HUB_DISABLE_XET=1` by default;
+the Hub's Xet downloader can hang mid-file. Set `HF_HUB_DISABLE_XET=0` to opt back in, and
+`HF_TOKEN` for faster, less rate-limited downloads.
 
 Video-only folders show up under **Videos** in the sidebar. The photo views (Cull, Curated, People,
 Map) stay empty for them.
@@ -217,7 +225,7 @@ var (or `.env`). See `selects/config.py`.
 | `burst_similarity_threshold` | `0.96` | Similarity cutoff for burst grouping |
 | `aesthetic_per_scope_pct` | `75.0` | CLIP-IQA: must be top `(100 - pct)`% within its scope |
 | `aesthetic_library_pct` | `50.0` | CLIP-IQA: must also be top `(100 - pct)`% library-wide |
-| `speed_mode` | `full` | `fast` skips `ram_tag`, `smart_tag`, `face_embed`, `persons` |
+| `speed_mode` | `full` | `fast` skips `ram_tag`, `smart_tag`, `face_embed`, `persons`, video Whisper |
 
 Derived paths under `<folder>/.selects/`: `index.db`, `thumbs/`, `previews/`.
 
@@ -260,7 +268,7 @@ autogenerate a revision against a throwaway SQLite URL and review it — SQLite 
 | `selects/classical/` | Non-ML scoring (blur, exposure, faces, auto-reject) |
 | `selects/decode/` | Image / video / RAW decoding |
 | `selects/indexer/` | Folder walking, EXIF, previews, orchestration |
-| `selects/ml/` | Embedding, tagging, faces, clustering, stories, enhancement |
+| `selects/ml/` | Embedding, tagging, faces, clustering, stories, video cull, Whisper |
 | `selects/server/` | FastAPI app, routes, WebSocket progress bus |
 | `frontend/` | React + Vite + TypeScript web UI |
 | `tests/` · `docs/` | Test suite · landing page (GitHub Pages) |
