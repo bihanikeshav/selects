@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="packaging/assets/selects-logo.svg" width="92" alt="selects logo" />
+<img src="https://raw.githubusercontent.com/bihanikeshav/selects/main/packaging/assets/selects-logo.svg" width="92" alt="selects logo" />
 
 # Selects
 
