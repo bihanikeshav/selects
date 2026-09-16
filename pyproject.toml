@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "selects"
-version = "0.1.16"
+version = "0.1.17"
 description = "Local AI-assisted travel photo and video culling"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -37,20 +37,22 @@ media = [
   "imageio-ffmpeg>=0.6",
 ]
 ml = [
-  # All models run on ONNX Runtime — no torch, transformers, or the
-  # recognize-anything package. RAM++ is the ONNX graph in selects-onnx.
-  # Windows extra is onnxruntime-directml (DirectML is listed); SigLIP/RAM++
-  # graphs are forced CPU. Plain onnxruntime elsewhere.
-  "onnxruntime-directml>=1.17; sys_platform == 'win32'",
-  "onnxruntime>=1.17; sys_platform != 'win32'",
-  "sentencepiece>=0.2",       # SigLIP text tokenizer
-  "huggingface-hub>=0.23",    # fetch ONNX weights from the selects-onnx repo
+  # All models run on ONNX Runtime — no torch/transformers at runtime.
+  # insightface and faster-whisper depend on the CPU ``onnxruntime`` wheel,
+  # which overwrites ``onnxruntime-gpu``. Keep the GPU extra last, and run
+  # ``selects doctor --fix`` after install on NVIDIA Windows.
+  "sentencepiece>=0.2",       # SigLIP 2 Gemma tokenizer
+  "huggingface-hub>=0.23",    # fetch ONNX / CTranslate2 weights from HF
+  "faster-whisper>=1.0",      # Whisper via CTranslate2 (CUDA or int8 CPU)
   "insightface>=0.7",         # face detection/recognition (already ONNX-based)
   "opencv-python>=4.9,<5",    # insightface pulls opencv-python; 4.x required for the Haar cascade fallback (cv2.CascadeClassifier)
   "scikit-learn>=1.4",
   "hdbscan>=0.8.33",
   "umap-learn>=0.5.5",
   "requests>=2.31",
+  "onnxruntime-gpu[cuda,cudnn]>=1.24; sys_platform == 'win32'",
+  "nvidia-cublas~=13.0; sys_platform == 'win32'",
+  "onnxruntime>=1.17; sys_platform != 'win32'",
 ]
 dev = [
   "pytest>=8.0",

@@ -540,8 +540,7 @@ export default function Onboarding() {
               <div className="onb-warn">
                 <strong>Heads up:</strong> {nPhotos.toLocaleString()} photos on CPU
                 take about {fmtDuration(estimateTotalSeconds(nPhotos, "cpu"))}.
-                SigLIP and RAM++ run on CPU even if DirectML is installed. You can
-                leave this running — it keeps going in the background.
+                You can leave this running — it keeps going in the background.
               </div>
             )}
 

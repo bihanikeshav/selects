@@ -1,8 +1,8 @@
-"""SigLIP-SO400M image embedding + IQA pass — ONNX Runtime (no torch). Batched.
+"""SigLIP 2 SO400M image embedding + prompt IQA — ONNX Runtime (no torch).
 
-Image and text towers are served from siglip_vision.onnx / siglip_text.onnx
-(fp16) via onnxruntime; text is tokenized by the ported SiglipTokenizer. All
-returns are L2-normalized float32 numpy arrays.
+Vision/text towers are ``onnx-community`` fp16 graphs (384px, 1152-d). Text is
+tokenized with the Gemma sentencepiece from that repo. Returns L2-normalized
+float32 numpy arrays.
 """
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from PIL import Image
 from selects.config import FolderConfig
 from selects.db import init_db, session_scope
 from selects.db.models import Embedding, PipelineState, Photo
-from selects.ml.onnx_rt import model_session
+from selects.ml.onnx_rt import model_session, pooled_output
 from selects.ml.siglip_tokenizer import get_tokenizer
 from selects.pipeline import PipelineCancelled
 
@@ -23,15 +23,12 @@ log = logging.getLogger(__name__)
 
 _IQA_TEXT_FEATS: np.ndarray | None = None
 
-# SigLIP image preprocessing (from the HF image_processor config): resize to
-# 384x384 BICUBIC, rescale 1/255, normalize mean/std 0.5 -> pixel = x/127.5 - 1.
+# SigLIP 2 image processor: 384x384 bicubic, mean/std 0.5 → pixel = x/127.5 - 1.
 _IMG_SIZE = 384
 
-# SigLIP sigmoid-training constants (google/siglip-so400m-patch14-384), used to
-# turn image<->IQA-prompt similarity into a probability. The bias cancels in the
-# 2-way softmax but is kept for fidelity with the original torch path.
-_LOGIT_SCALE = 112.33287048339844   # = logit_scale.exp()
-_LOGIT_BIAS = -16.54642105102539
+# OpenCLIP SigLIP 2 defaults. Additive bias cancels in the 2-way IQA softmax.
+_LOGIT_SCALE = 100.0
+_LOGIT_BIAS = -10.0
 
 # CLIP-IQA-style antonym pair prompts (Wang et al. 2023).
 # Softmax over the pair gives prob(positive) = aesthetic IQA in [0, 1].
@@ -57,7 +54,7 @@ def encode_text_prompts(prompts: list[str]) -> np.ndarray:
     """Return L2-normalized [N, 1152] float32 text embeddings."""
     sess = model_session("siglip_text")
     ids = get_tokenizer()(prompts)                          # [N, 64] int64
-    embeds = sess.run(None, {"input_ids": ids})[0]          # [N, 1152]
+    embeds = pooled_output(sess, {"input_ids": ids})
     return _l2norm(embeds.astype(np.float32))
 
 
@@ -65,7 +62,7 @@ def encode_image_batch(images: list[Image.Image]) -> tuple[np.ndarray, np.ndarra
     """Return (image_feats_normed [B,1152] float32, iqa_scores [B] float32 in [0,1]).
 
     IQA compares each image feature against the pos/neg IQA text prompts via a
-    softmax over the antonym pair.
+    softmax over the antonym pair. Ranking uses HyperIQA when that stage has run.
     """
     global _IQA_TEXT_FEATS
     if _IQA_TEXT_FEATS is None:
@@ -73,7 +70,8 @@ def encode_image_batch(images: list[Image.Image]) -> tuple[np.ndarray, np.ndarra
 
     sess = model_session("siglip_vision")
     pixel_values = _preprocess_images(images)               # [B,3,384,384]
-    embeds = sess.run(None, {"pixel_values": pixel_values})[0]
+    in_name = sess.get_inputs()[0].name
+    embeds = pooled_output(sess, {in_name: pixel_values})
     feats = _l2norm(embeds.astype(np.float32))              # [B, 1152]
 
     sim = feats @ _IQA_TEXT_FEATS.T                         # [B, 2]

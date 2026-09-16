@@ -40,21 +40,51 @@ log = logging.getLogger(__name__)
 # Manifest                                                                     #
 # --------------------------------------------------------------------------- #
 
-# ``ref`` is the HF repo id (kind="hf"), the download URL (kind="url"), or the
-# insightface model-pack name/url (kind="insightface"). kind="onnx" is the shared
-# selects-onnx bundle managed by selects.ml.onnx_rt (SigLIP + RAM++ + the three
-# enhancement nets + tokenizer/metadata) — all ML runs on ONNX Runtime now, so
-# there is no bundled torch and no per-model .pth downloads. Sizes are approximate
-# download footprints in MB.
+# ``ref`` is the HF repo id (kind="onnx"/"hf"), a zip URL (kind="insightface"),
+# or a single file URL (kind="url"). kind="onnx" lists the files to pull from
+# *ref* into asset_dir(id). Sizes are approximate download footprints in MB.
 MANIFEST: list[dict] = [
     {
-        "id": "selects_onnx",
-        "name": "selects ONNX models (SigLIP, RAM++, enhancement)",
+        "id": "siglip2",
+        "name": "SigLIP 2 SO400M (search, tags, prompt IQA)",
+        "kind": "onnx",
+        "ref": "onnx-community/siglip2-so400m-patch16-384-ONNX",
+        "files": (
+            "onnx/vision_model_fp16.onnx",
+            "onnx/text_model_fp16.onnx",
+            "tokenizer.model",
+        ),
+        "approx_size_mb": 2300,
+        "required_for": "photo search, zero-shot tags, CLIP-style IQA",
+        "sha256": None,
+    },
+    {
+        "id": "ram_plus",
+        "name": "RAM++ open-vocabulary tags",
         "kind": "onnx",
         "ref": "bihanikeshav/selects-onnx",
-        "approx_size_mb": 3130,
-        "required_for": "photo scoring, tagging, enhancement",
-        "sha256": None,  # n/a for hf assets
+        "files": (
+            "ram_plus.onnx",
+            "ram_plus.onnx.data",
+            "ram_tags.json",
+            "ram_meta.npz",
+        ),
+        "approx_size_mb": 1600,
+        "required_for": "open-vocabulary object tags",
+        "sha256": None,
+    },
+    {
+        "id": "hyperiqa",
+        "name": "HyperIQA (in-the-wild photo quality)",
+        "kind": "onnx",
+        "ref": "86Cao/IQA-ONNX-Models",
+        "files": (
+            "hyperiqa_model.onnx",
+            "hyperiqa_model.onnx.data",
+        ),
+        "approx_size_mb": 105,
+        "required_for": "aesthetic ranking (KonIQ-10k, not AVA art scores)",
+        "sha256": None,
     },
     {
         "id": "buffalo_l",
@@ -63,14 +93,14 @@ MANIFEST: list[dict] = [
         "ref": "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip",
         "approx_size_mb": 330,
         "required_for": "face recognition and video highlight faces",
-        "sha256": None,  # insightface manages/verifies its own pack
+        "sha256": None,
     },
     {
-        "id": "whisper_small_onnx",
-        "name": "Whisper small ONNX (word-timed transcript)",
+        "id": "whisper_small",
+        "name": "faster-whisper small (word-timed transcript)",
         "kind": "hf",
-        "ref": "onnx-community/whisper-small",
-        "approx_size_mb": 500,
+        "ref": "Systran/faster-whisper-small",
+        "approx_size_mb": 490,
         "required_for": "video transcript, silence and filler selects",
         "sha256": None,
     },
@@ -85,8 +115,11 @@ MANIFEST: list[dict] = [
 # API is {root}/models/{name}, so buffalo_l is models_dir()/buffalo_l with
 # root = models_dir().parent (the default models_dir is named "models").
 _ASSET_FOLDERS = {
-    "selects_onnx": "selects-onnx",
-    "whisper_small_onnx": "whisper-small",
+    "siglip2": "siglip2",
+    "ram_plus": "ram-plus",
+    "hyperiqa": "hyperiqa",
+    "whisper_small": "whisper-small",
+    "whisper_small_onnx": "whisper-small",  # legacy id
     "buffalo_l": "buffalo_l",
 }
 
@@ -96,8 +129,8 @@ _LEGACY_INSIGHTFACE = Path.home() / ".insightface" / "models" / "buffalo_l"
 def models_dir() -> Path:
     """Canonical weights root. Override with ``SELECTS_MODELS_DIR``.
 
-    Default: ``~/.cache/selects/models``. Every pack is a subdirectory:
-    ``selects-onnx``, ``whisper-small``, ``buffalo_l``.
+    Default: ``~/.cache/selects/models``. Packs are subdirectories:
+    ``siglip2``, ``ram-plus``, ``hyperiqa``, ``whisper-small``, ``buffalo_l``.
     """
     env = os.environ.get("SELECTS_MODELS_DIR")
     if env:
@@ -209,15 +242,23 @@ def asset_cache_path(asset: dict, base_models_dir: Optional[Path] = None) -> str
     return str(asset_dir(asset["id"], base_models_dir))
 
 
+def _onnx_files_present(asset: dict, base_models_dir: Optional[Path] = None) -> bool:
+    folder = asset_dir(asset["id"], base_models_dir)
+    files = asset.get("files") or ()
+    if not files:
+        return folder.is_dir() and any(folder.iterdir())
+    return all(
+        (folder / rel).is_file() and (folder / rel).stat().st_size > 0 for rel in files
+    )
+
+
 def asset_present(asset: dict, base_models_dir: Optional[Path] = None) -> bool:
     """Return True if *asset* is already available on disk."""
     kind = asset["kind"]
     if kind == "onnx":
-        from selects.ml.onnx_rt import all_present
-
-        return all_present()
+        return _onnx_files_present(asset, base_models_dir)
     if kind == "hf":
-        if asset.get("id") == "whisper_small_onnx":
+        if asset.get("id") in {"whisper_small", "whisper_small_onnx"}:
             from selects.ml.video_speech import whisper_files_present
 
             return whisper_files_present()
@@ -284,14 +325,21 @@ def status(base_models_dir: Optional[Path] = None) -> dict:
     }
 
 
+def _download_onnx_files(asset: dict, base_models_dir: Optional[Path]) -> None:
+    from huggingface_hub import hf_hub_download
+
+    dest = asset_dir(asset["id"], base_models_dir)
+    dest.mkdir(parents=True, exist_ok=True)
+    for rel in asset.get("files") or ():
+        hf_hub_download(asset["ref"], rel, local_dir=str(dest))
+
+
 def _download_asset(asset: dict, base_models_dir: Optional[Path]) -> None:
     kind = asset["kind"]
     if kind == "onnx":
-        from selects.ml.onnx_rt import ensure_all
-
-        ensure_all()
+        _download_onnx_files(asset, base_models_dir)
     elif kind == "hf":
-        if asset.get("id") == "whisper_small_onnx":
+        if asset.get("id") in {"whisper_small", "whisper_small_onnx"}:
             from selects.ml.video_speech import _ensure_whisper_files
 
             _ensure_whisper_files()

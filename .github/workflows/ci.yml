@@ -37,6 +37,13 @@ jobs:
           # and clustering — all in the [ml] extra. Install it so tests don't
           # ModuleNotFoundError.
           pip install -e ".[ml,dev]"
+      - name: Keep CUDA ONNX Runtime on Windows
+        if: runner.os == 'Windows'
+        # insightface/faster-whisper install the CPU onnxruntime wheel on top of
+        # onnxruntime-gpu. Put the GPU wheel back so Windows CI matches NVIDIA.
+        run: |
+          pip uninstall -y onnxruntime
+          pip install "onnxruntime-gpu>=1.24"
       - name: Run tests
         run: pytest -q
 

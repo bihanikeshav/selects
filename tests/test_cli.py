@@ -26,6 +26,16 @@ def test_doctor_runs_and_reports():
     assert "nvImageCodec" in result.output
 
 
+def test_doctor_fix_calls_repair(monkeypatch):
+    called = []
+    monkeypatch.setattr("selects.gpu.repair_gpu_runtime", lambda: called.append(True))
+    monkeypatch.setattr("selects.gpu.cpu_ort_hiding_nvidia", lambda: False)
+    runner = CliRunner()
+    result = runner.invoke(main, ["doctor", "--fix"])
+    assert result.exit_code == 0
+    assert called == [True]
+
+
 def test_index_command_indexes(populated_folder):
     runner = CliRunner()
     result = runner.invoke(main, ["index", str(populated_folder), "--pass", "index"])

@@ -40,20 +40,20 @@ The only network call is an optional place-name lookup for geotagged shots.
 
 | Feature | What it does |
 |---|---|
-| Discovery search | Natural-language + tag search over on-device SigLIP embeddings |
+| Discovery search | Natural-language + tag search over on-device SigLIP 2 embeddings |
 | Auto tagging | Zero-shot + RAM++ open-vocabulary labels |
 | People | ArcFace embeddings clustered into named "Person" identities |
 | Face-aware culling | Eyes-open / head-pose scoring picks the best frame in a burst |
 | Stories | GPS + time clustering into day-by-day, place-by-place trips |
-| Aesthetic curation | CLIP-IQA scoring with percentile "best-of" gating |
+| Aesthetic curation | HyperIQA (in-the-wild) + prompt IQA, percentile "best-of" gating |
 | Duplicate finder | Exact + near-duplicate report with reclaimable-storage summary |
 | Keyboard culling | Arrow-key review, undo, 100% zoom, synced-zoom compare |
 | Taste learning | A local model that nudges scoring toward your keep/reject history |
 | Export | Copy/zip keepers or write XMP star ratings to Lightroom/darktable |
 | Trip recap | A self-contained shareable HTML keepsake per trip |
 | Video culling | 1-second timeline, hard-dead vs scenic stillness, highlight peaks, keyboard keep/reject |
-| Transcripts | Local Whisper for speech, silence/filler selects, search by what was said |
-| Models page | See what's on disk vs missing; download SigLIP, InsightFace, and Whisper |
+| Transcripts | Local faster-whisper for speech, silence/filler selects, search by what was said |
+| Models page | See what's on disk vs missing; download SigLIP 2, RAM++, HyperIQA, InsightFace, Whisper |
 | Watch folder | Point it at your camera dump; new files index automatically |
 
 ## Install
@@ -81,28 +81,32 @@ right-click → Open on macOS, or More info → Run anyway on Windows.)
 uv tool install "selects[ml]"  # or: pip install "selects[ml]"
 pip install selects            # base app + web GUI + CLI, no on-device AI
 pip install "selects[ml,desktop]"  # AI + a native desktop window instead of a browser tab
+selects doctor --fix           # NVIDIA: restore the CUDA wheel (insightface installs CPU ORT)
 selects serve                  # open the web UI (port 8000; honors SELECTS_WEB_PORT)
 selects index /path/to/trip    # or run headless from the CLI
 ```
 
-RAM++ is the ONNX graph in the `selects-onnx` bundle — it is already part of `[ml]`. No extra
+RAM++ is an ONNX graph from the `selects-onnx` repo — it is already part of `[ml]`. No extra
 `pip install` and no `recognize-anything` git checkout.
 
 ### Platform support
 
-ONNX Runtime does **not** need NVIDIA CUDA to use a GPU. Windows `[ml]` ships DirectML (any DX12
-GPU). macOS can use CoreML. CUDA is used only if you install `onnxruntime-gpu` on NVIDIA Linux.
+Windows `[ml]` installs ``onnxruntime-gpu[cuda,cudnn]`` plus ``nvidia-cublas`` (CUDA 13).
+insightface and faster-whisper also depend on the CPU ``onnxruntime`` wheel, which pip
+installs *over* the GPU build — run ``selects doctor --fix`` after install on NVIDIA.
+macOS uses the default ``onnxruntime`` package (CoreML when present). Linux `[ml]` is CPU
+unless you install ``onnxruntime-gpu`` yourself.
 
-SigLIP, CLIP-IQA, and RAM++ still run on **CPU** everywhere — those graphs are not DirectML-safe.
-Whisper can use DirectML/CoreML/CUDA when the provider exists. InsightFace uses CUDA if present,
-otherwise CPU. `selects doctor` and the **Models** page show which provider this machine selected.
+SigLIP 2, RAM++, and HyperIQA load on CUDA → DirectML → CoreML → CPU and fall back if a
+provider rejects an op. faster-whisper uses CTranslate2 CUDA when present, otherwise int8
+CPU. `selects doctor` and the **Models** page show which provider this machine selected.
 
-| Platform | Photo scoring | GPU without CUDA |
+| Platform | Photo scoring | Notes |
 |---|---|---|
-| Windows (x64) | CPU (SigLIP/RAM++) | DirectML bundled — used for graphs that support it |
-| macOS (Apple Silicon) | CPU | CoreML may be present |
+| Windows (x64) | CUDA, then CPU | `selects doctor --fix` after `[ml]` on NVIDIA |
+| macOS (Apple Silicon) | CoreML, then CPU | bundled in the CPU `onnxruntime` wheel |
 | macOS (Intel) | CPU | — |
-| Linux (x64) | CPU | CUDA only with `onnxruntime-gpu` |
+| Linux (x64) | CPU extra; CUDA if you install `onnxruntime-gpu` | |
 
 ## Architecture
 
@@ -116,7 +120,7 @@ flowchart TD
     API["FastAPI + WebSocket API"]
     Pipeline["Pipeline orchestrator"]
     Classical["Classical scoring<br/>(blur, exposure, faces)"]
-    ML["ML stages<br/>(SigLIP, CLIP-IQA, ArcFace, RAM++, Whisper)"]
+    ML["ML stages<br/>(SigLIP 2, HyperIQA, ArcFace, RAM++, faster-whisper)"]
     Files[("Photos & videos<br/>local disk")]
     DB[("Per-library SQLite<br/>&lt;folder&gt;/.selects/")]
 
@@ -137,21 +141,24 @@ Each stage reads/writes `<folder>/.selects/index.db` and is independently re-run
 | 1 | `index` | walk & hash files, decode previews/thumbnails, read EXIF/GPS |
 | 2 | `video` | 1 s timeline, scene/dead/highlight segments, optional Whisper + face enrichment |
 | 3 | `classical` | blur / exposure / clipped-highlight / face scoring; auto-reject gate |
-| 4 | `embed` | SigLIP-SO400M image embeddings + CLIP-IQA aesthetic score |
-| 5 | `tag` | zero-shot tagging via SigLIP text-prompt similarity |
-| 6 | `ram_tag` | RAM++ open-vocabulary tagging (ONNX in `selects-onnx`) |
-| 7 | `smart_tag` | HDBSCAN clustering over embeddings + SigLIP zero-shot names |
-| 8 | `face_embed` | ArcFace embeddings for detected faces |
-| 9 | `persons` | cluster ArcFace embeddings into named Person identities |
-| 10 | `moment` | collapse near-duplicate/burst photos into one best pick |
-| 11 | `story` | build day/place stories from moments, tags, and locations |
-| 12 | `thematic` | rule-driven location/theme clusters from GPS, people, tags, time |
-| 13 | `date` | group photos by calendar day |
+| 4 | `embed` | SigLIP 2 SO400M image embeddings + prompt IQA |
+| 5 | `aesthetic` | HyperIQA in-the-wild quality (KonIQ-10k) |
+| 6 | `tag` | zero-shot tagging via SigLIP 2 text-prompt similarity |
+| 7 | `ram_tag` | RAM++ open-vocabulary tagging |
+| 8 | `smart_tag` | HDBSCAN clustering over embeddings + SigLIP 2 zero-shot names |
+| 9 | `face_embed` | ArcFace embeddings for detected faces |
+| 10 | `persons` | cluster ArcFace embeddings into named Person identities |
+| 11 | `moment` | collapse near-duplicate/burst photos into one best pick |
+| 12 | `story` | build day/place stories from moments, tags, and locations |
+| 13 | `thematic` | rule-driven location/theme clusters from GPS, people, tags, time |
+| 14 | `date` | group photos by calendar day |
 
 `speed_mode=fast` skips `ram_tag`, `smart_tag`, `face_embed`, `persons`, and video Whisper /
 InsightFace enrichment. Aesthetic curation
-ranks on CLIP-IQA (`Embedding.aesthetic_iqa` in [0, 1]) with configurable per-scope and
-library-wide percentile thresholds (see [Configuration](#configuration)).
+ranks on HyperIQA when present, else prompt IQA (`Embedding.aesthetic_iqa` in [0, 1]), with
+configurable per-scope and library-wide percentile thresholds (see [Configuration](#configuration)).
+After upgrading to SigLIP 2, re-run `selects index <folder> --pass embed` (and `aesthetic`) so
+stored vectors match the new towers.
 
 ## Roadmap
 
@@ -162,10 +169,9 @@ library-wide percentile thresholds (see [Configuration](#configuration)).
 - [x] Export (copy/zip + XMP), trip recap, watch folder
 - [x] Video highlights, clip/moment cull, local transcripts, Models page
 - [x] CPU desktop builds for Windows, macOS, Linux + PyPI package
-- [x] DirectML / CoreML GPU path (no CUDA required); SigLIP/RAM++ still CPU
+- [x] CUDA / CoreML GPU path (Windows `onnxruntime-gpu` + `selects doctor --fix`)
 
 **Planned**
-- [ ] **SigLIP/RAM++ on GPU** — re-export graphs that DirectML/CoreML can run
 - [ ] **Android companion** — LAN remote that drives the desktop backend from your phone
 - [ ] **Android standalone** — on-device culling for small libraries (no desktop needed)
 - [ ] Cursor-based pagination, auto-tuned aesthetic/burst thresholds, iOS parity
@@ -202,9 +208,10 @@ uv pip install --python .venv/bin/python -e ".[ml,dev]"
 ```
 
 The first ML run (or the **Models** page) downloads weights into `~/.cache/selects/models/`
-(`SELECTS_MODELS_DIR` to override): `selects-onnx/` (~3.1 GB), `buffalo_l/` (~330 MB), and
-`whisper-small/` (~250–500 MB). Older InsightFace installs under `~/.insightface/models/` still
-count as present. Downloads use plain HTTP because Selects sets `HF_HUB_DISABLE_XET=1` by default;
+(`SELECTS_MODELS_DIR` to override): `siglip2/` (~2.3 GB), `ram-plus/` (~1.6 GB), `hyperiqa/`
+(~105 MB), `buffalo_l/` (~330 MB), and `whisper-small/` (~490 MB). Older InsightFace installs
+under `~/.insightface/models/` still count as present. Downloads use plain HTTP because Selects
+sets `HF_HUB_DISABLE_XET=1` by default;
 the Hub's Xet downloader can hang mid-file. Set `HF_HUB_DISABLE_XET=0` to opt back in, and
 `HF_TOKEN` for faster, less rate-limited downloads.
 

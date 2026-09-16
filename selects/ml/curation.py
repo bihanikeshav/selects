@@ -89,7 +89,7 @@ def compute_library_threshold(
 
     Used by quality-bucket filters (underexposed/blurry_keepers) whose SQL
     compares against ``Embedding.aesthetic_iqa``. Story/Best-Of curation uses
-    :func:`compute_rank_threshold` so AP-V2.5 participates in gating.
+    :func:`compute_rank_threshold` so HyperIQA participates in gating.
     """
     del ap_w, nima_w
     rows = (
@@ -234,7 +234,7 @@ def curate(
 ) -> list[CuratedPhoto]:
     """Apply per-scope + library-wide aesthetic curation to a set of photo IDs.
 
-    Ranking score is AP-V2.5 (scaled 0–1) when present, else CLIP-IQA.
+    Ranking score is HyperIQA (scaled 0–1) when present, else prompt IQA.
     Missing scores are a non-gate: an unscored scope is returned (burst-dedup
     still applies).
 

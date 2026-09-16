@@ -1,6 +1,6 @@
 """Aesthetic calibration: extremes, ratings, agreement, retrain, dashboard.
 
-Live score is CLIP-IQA on Embedding.aesthetic_iqa. NIMA / AP-V2.5 may be
+Live score is prompt IQA on Embedding.aesthetic_iqa. NIMA / HyperIQA may be
 absent; they are shown when present but never required to list photos.
 Ratings train a per-folder personal centroid on SigLIP embeddings.
 """
@@ -24,8 +24,8 @@ def _combined_percentile_pairs(s) -> list[tuple]:
     percentile ascending.
 
     combined_pct is the IQA percentile rank in this library (0–100), used
-    only to pick worst/best batches. Display ``combined`` uses AP-V2.5 +
-    NIMA (or AP25, or IQA×10) via :func:`ensemble_score`.
+    only to pick worst/best batches. Display ``combined`` uses HyperIQA +
+    NIMA (or HyperIQA, or IQA×10) via :func:`ensemble_score`.
     """
     rows = (
         s.query(

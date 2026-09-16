@@ -33,7 +33,7 @@ type Agreement = {
 const AGREEMENT_KEYS = ["iqa", "ap25", "combined", "personal"] as const;
 const AGREEMENT_LABELS: Record<string, string> = {
   iqa: "Quality score",
-  ap25: "Aesthetic model",
+  ap25: "HyperIQA",
   combined: "Combined",
   personal: "Your taste",
 };
@@ -314,7 +314,7 @@ export default function Calibrate() {
                           transition: "transform 90ms ease",
                           transform: isFlipped ? "scale(0.97)" : "scale(1)",
                         }}
-                        title={`Quality score (IQA) ${p.scores.iqa?.toFixed(3) ?? "—"} · Aesthetic model (AP-V2.5) ${p.scores.ap25?.toFixed(2) ?? "—"}`}
+                        title={`Prompt IQA ${p.scores.iqa?.toFixed(3) ?? "—"} · HyperIQA ${p.scores.ap25?.toFixed(2) ?? "—"}`}
                       >
                         <img
                           src={p.thumb_url}
@@ -623,8 +623,8 @@ export default function Calibrate() {
                     {p.scores.iqa?.toFixed(3) ?? "—"}
                   </span>
                 </span>
-                <span title="Aesthetic model (AP-V2.5)">
-                  Aesthetic{" "}
+                <span title="HyperIQA (in-the-wild quality)">
+                  HyperIQA{" "}
                   <span style={{ color: "#fff" }}>
                     {p.scores.ap25?.toFixed(2) ?? "—"}
                   </span>

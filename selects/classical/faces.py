@@ -41,21 +41,42 @@ def _get_detector():
 
         from selects.ml.model_assets import insightface_root
 
-        # DirectML cannot run buffalo_l's SCRFD detector (Reshape ops throw), so
-        # we do not offer DML here. CUDA is used when onnxruntime-gpu is present;
-        # otherwise this is CPU. Weights live under ~/.cache/selects/models/buffalo_l.
-        providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
-        app = FaceAnalysis(
-            name="buffalo_l",
-            root=str(insightface_root()),
-            providers=providers,
-        )
+        # Same GPU stack as the rest of the app, except DirectML — buffalo_l's
+        # SCRFD detector throws on DML Reshape. CUDA/CoreML still used.
+        try:
+            from selects.ml.onnx_rt import select_providers
+
+            providers = [
+                p for p in select_providers() if p != "DmlExecutionProvider"
+            ] or ["CPUExecutionProvider"]
+        except Exception:
+            providers = ["CPUExecutionProvider"]
+        try:
+            app = FaceAnalysis(
+                name="buffalo_l",
+                root=str(insightface_root()),
+                providers=providers,
+            )
+        except Exception:
+            app = FaceAnalysis(
+                name="buffalo_l",
+                root=str(insightface_root()),
+                providers=["CPUExecutionProvider"],
+            )
         # det_size drives small-face recall: at 640x640 distant/small faces vanish.
         # 1280x1280 recovers them (slower). det_thresh 0.4 (< default 0.5) keeps more
         # low-confidence faces. Both overridable via env for tuning.
         det = int(os.environ.get("SELECTS_FACE_DET_SIZE", "1280"))
         thr = float(os.environ.get("SELECTS_FACE_DET_THRESH", "0.4"))
-        app.prepare(ctx_id=0, det_size=(det, det), det_thresh=thr)
+        try:
+            app.prepare(ctx_id=0, det_size=(det, det), det_thresh=thr)
+        except Exception:
+            app = FaceAnalysis(
+                name="buffalo_l",
+                root=str(insightface_root()),
+                providers=["CPUExecutionProvider"],
+            )
+            app.prepare(ctx_id=0, det_size=(det, det), det_thresh=thr)
         _detector = app
         return app
     except Exception as exc:

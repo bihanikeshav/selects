@@ -1,57 +1,59 @@
-"""AP-V2.5 head scoring (no network — injected numpy layers)."""
+"""HyperIQA scoring (no network — injected session)."""
 from __future__ import annotations
 
 import numpy as np
 import pytest
+from PIL import Image
 
-from selects.ml import aesthetic as aesthetic_mod
-from selects.ml.aesthetic import ensemble_score, score_embeddings
+from selects.ml.aesthetic import ensemble_score, score_images
+
+
+class _FakeSess:
+    def get_inputs(self):
+        return [type("I", (), {"name": "input"})()]
+
+    def run(self, _names, feed):
+        n = feed["input"].shape[0]
+        # 0-1 raw quality
+        return [np.linspace(0.2, 0.8, n, dtype=np.float32)]
 
 
 @pytest.fixture(autouse=True)
-def _tiny_head(monkeypatch):
-    """Five tiny linear maps: 8-d fake space is too small; use real 1152 with zeros+one."""
-    rng = np.random.default_rng(0)
-    layers = []
-    dims = [(1024, 1152), (128, 1024), (64, 128), (16, 64), (1, 16)]
-    for out, inn in dims:
-        w = rng.normal(0, 0.01, size=(out, inn)).astype(np.float32)
-        b = np.zeros((out,), dtype=np.float32)
-        layers.append((w, b))
-    monkeypatch.setattr(aesthetic_mod, "_LAYERS", layers)
-    yield
-    monkeypatch.setattr(aesthetic_mod, "_LAYERS", None)
+def _fake_hyperiqa(monkeypatch):
+    monkeypatch.setattr(
+        "selects.ml.onnx_rt.model_session",
+        lambda name, prefer=None, cache=True: _FakeSess(),
+    )
 
 
-def test_score_embeddings_shape_and_finite():
-    x = np.random.default_rng(1).normal(size=(4, 1152)).astype(np.float32)
-    s = score_embeddings(x)
+def test_score_images_shape_and_range():
+    imgs = [Image.new("RGB", (32, 32), color=(i * 40, 10, 10)) for i in range(4)]
+    s = score_images(imgs)
     assert s.shape == (4,)
     assert np.isfinite(s).all()
-
-
-def test_score_embeddings_l2_invariant_direction():
-    x = np.ones((1, 1152), dtype=np.float32)
-    a = score_embeddings(x)
-    b = score_embeddings(x * 3.0)
-    assert a.shape == b.shape
-    np.testing.assert_allclose(a, b, rtol=1e-5, atol=1e-5)
+    assert (s >= 0).all() and (s <= 10).all()
 
 
 def test_run_aesthetic_stage_writes_ap25(tmp_path, monkeypatch):
     from selects.config import get_folder_config
     from selects.db import init_db, session_scope
-    from selects.db.models import AestheticScore, Embedding, Photo
+    from selects.db.models import AestheticScore, Photo
     from selects.ml.aesthetic import run_aesthetic_stage
 
     cfg = get_folder_config(tmp_path)
     Session = init_db(cfg.db_path)
-    feat = np.ones(1152, dtype=np.float16).tobytes()
+    previews = cfg.state_dir / "previews"
+    previews.mkdir(parents=True, exist_ok=True)
+    img_path = previews / "a.jpg"
+    Image.new("RGB", (64, 64), color=(20, 80, 20)).save(img_path)
     with session_scope(Session) as s:
-        p = Photo(path=str(tmp_path / "a.jpg"), sha256="a" * 64)
+        p = Photo(
+            path=str(tmp_path / "a.jpg"),
+            sha256="a" * 64,
+            preview_path="previews/a.jpg",
+        )
         s.add(p)
         s.flush()
-        s.add(Embedding(photo_id=p.id, siglip=feat, aesthetic_iqa=0.2))
         pid = p.id
     n = run_aesthetic_stage(cfg)
     assert n == 1
@@ -60,6 +62,7 @@ def test_run_aesthetic_stage_writes_ap25(tmp_path, monkeypatch):
         assert row is not None
         assert row.ap25_score is not None
         assert np.isfinite(row.ap25_score)
+        assert 0.0 <= row.ap25_score <= 10.0
 
 
 def test_ensemble_prefers_ap_nima_then_ap_then_iqa():

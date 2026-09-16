@@ -1,96 +1,31 @@
-"""AP-V2.5 aesthetic head on stored SigLIP embeddings (no extra vision pass).
+"""In-the-wild photo quality via HyperIQA (KonIQ-10k), not AVA art scores.
 
-The official predictor is a 5-layer MLP on L2-normalised SigLIP-SO400M
-(1152-d) pooled embeddings. We already store those in ``embeddings.siglip``.
-Weights are downloaded from the upstream GitHub release on first use and
-cached as float32 ``.npz`` so later runs do not need torch.
+AP-V2.5 was a linear head on SigLIP-1 embeddings trained on aesthetic-predictor
+data that prefers "pretty/processed" stills over a sharp travel snapshot.
+HyperIQA is a ResNet-50 quality model trained on authentic Flickr-style photos
+(KonIQ-10k). The graph is ONNX, ~105 MB, and runs on CUDA/DirectML/CoreML.
 
-License of the head weights: AGPL-3.0 (upstream). We fetch at runtime and
-do not vendor them in the MIT sdist.
+Scores are stored on ``AestheticScore.ap25_score`` on the historical 1–10
+scale (raw 0–1 × 10) so ranking/calibrate keep working. Prompt-IQA from
+SigLIP 2 stays on ``Embedding.aesthetic_iqa``.
 """
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import Callable
 
 import numpy as np
+from PIL import Image
 
 from selects.config import FolderConfig
 from selects.db import init_db, session_scope
-from selects.db.models import AestheticScore, Embedding
+from selects.db.models import AestheticScore, Photo
 
 log = logging.getLogger(__name__)
 
-HEAD_URL = (
-    "https://github.com/discus0434/aesthetic-predictor-v2-5/raw/main/"
-    "models/aesthetic_predictor_v2_5.pth"
-)
-HEAD_DIM = 1152
-_LAYERS: list[tuple[np.ndarray, np.ndarray]] | None = None
-
-
-def _npz_path() -> Path:
-    from selects.ml.model_assets import models_dir
-
-    return models_dir() / "aesthetic_predictor_v2_5.npz"
-
-
-def _pth_path() -> Path:
-    from selects.ml.model_assets import models_dir
-
-    return models_dir() / "aesthetic_predictor_v2_5.pth"
-
-
-def _layers_from_state_dict(sd: dict) -> list[tuple[np.ndarray, np.ndarray]]:
-    """``scoring_head.{0,2,4,6,8}.{weight,bias}`` → list of (W, b) float32.
-
-    torch.nn.Linear: y = x @ W.T + b. We store W as (out, in).
-    """
-    layers = []
-    for idx in (0, 2, 4, 6, 8):
-        w = sd[f"scoring_head.{idx}.weight"].detach().float().cpu().numpy()
-        b = sd[f"scoring_head.{idx}.bias"].detach().float().cpu().numpy()
-        layers.append((np.ascontiguousarray(w), np.ascontiguousarray(b)))
-    if layers[0][0].shape[1] != HEAD_DIM:
-        raise ValueError(f"AP-V2.5 head in-dim {layers[0][0].shape[1]} != {HEAD_DIM}")
-    return layers
-
-
-def _convert_pth(pth: Path, npz: Path) -> list[tuple[np.ndarray, np.ndarray]]:
-    import torch
-
-    sd = torch.load(pth, map_location="cpu", weights_only=True)
-    layers = _layers_from_state_dict(sd)
-    np.savez(
-        npz,
-        **{f"w{i}": w for i, (w, _) in enumerate(layers)},
-        **{f"b{i}": b for i, (_, b) in enumerate(layers)},
-    )
-    return layers
-
-
-def _load_npz(npz: Path) -> list[tuple[np.ndarray, np.ndarray]]:
-    data = np.load(npz)
-    return [(data[f"w{i}"], data[f"b{i}"]) for i in range(5)]
-
-
-def load_ap25_head(*, force_download: bool = False) -> list[tuple[np.ndarray, np.ndarray]]:
-    """Return the five (W, b) pairs, downloading/converting on first call."""
-    global _LAYERS
-    if _LAYERS is not None and not force_download:
-        return _LAYERS
-    npz = _npz_path()
-    if npz.exists() and npz.stat().st_size > 1000 and not force_download:
-        _LAYERS = _load_npz(npz)
-        return _LAYERS
-    from selects.ml.model_assets import download_file
-
-    pth = _pth_path()
-    if force_download or not pth.exists() or pth.stat().st_size < 1000:
-        download_file(HEAD_URL, pth, timeout=60.0)
-    _LAYERS = _convert_pth(pth, npz)
-    return _LAYERS
+_IMG_SIZE = 224
+_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 
 
 def ensemble_score(
@@ -101,7 +36,7 @@ def ensemble_score(
     ap_w: float = 0.6,
     nima_w: float = 0.4,
 ) -> float | None:
-    """Blend AP-V2.5 + NIMA when both exist; otherwise AP25, else IQA on a 1–10 scale."""
+    """Blend HyperIQA (1–10, column name ap25) + NIMA; else HyperIQA; else IQA×10."""
     if ap25 is not None and nima is not None:
         return float(ap_w * ap25 + nima_w * nima)
     if ap25 is not None:
@@ -119,58 +54,89 @@ def rank_score(
     ap_w: float = 0.6,
     nima_w: float = 0.4,
 ) -> float | None:
-    """0–1 ranking score so AP-V2.5 (≈1–10) and CLIP-IQA (0–1) share a scale."""
+    """0–1 ranking score so HyperIQA (1–10) and CLIP-IQA (0–1) share a scale."""
     ens = ensemble_score(ap25, nima, iqa, ap_w=ap_w, nima_w=nima_w)
     if ens is None:
         return None
     return float(ens) / 10.0
 
 
-def score_embeddings(feats: np.ndarray) -> np.ndarray:
-    """L2-normalised [N, 1152] float32 → AP-V2.5 scores [N] (typically ~1–10)."""
-    layers = load_ap25_head()
-    x = np.asarray(feats, dtype=np.float32)
-    if x.ndim == 1:
-        x = x[None, :]
-    nrm = np.linalg.norm(x, axis=1, keepdims=True)
-    x = x / np.clip(nrm, 1e-9, None)
-    for w, b in layers:
-        x = x @ w.T + b
-    return x.reshape(-1)
+def _preprocess(images: list[Image.Image]) -> np.ndarray:
+    out = np.empty((len(images), 3, _IMG_SIZE, _IMG_SIZE), dtype=np.float32)
+    for i, im in enumerate(images):
+        arr = np.asarray(
+            im.convert("RGB").resize((_IMG_SIZE, _IMG_SIZE), Image.BICUBIC),
+            dtype=np.float32,
+        ) / 255.0
+        out[i] = ((arr - _MEAN) / _STD).transpose(2, 0, 1)
+    return out
+
+
+def score_images(images: list[Image.Image]) -> np.ndarray:
+    """HyperIQA 1–10 scores for a batch of PIL images."""
+    from selects.ml.onnx_rt import model_session
+
+    if not images:
+        return np.zeros((0,), dtype=np.float32)
+    sess = model_session("hyperiqa")
+    x = _preprocess(images)
+    name = sess.get_inputs()[0].name
+    raw = sess.run(None, {name: x})[0]
+    vals = np.asarray(raw, dtype=np.float32).reshape(-1)
+    return np.clip(vals, 0.0, 1.0) * 10.0
 
 
 def run_aesthetic_stage(
     cfg: FolderConfig,
     on_progress: Callable[[int, int, str], None] | None = None,
 ) -> int:
-    """Write ``AestheticScore.ap25_score`` for every embedded photo. Returns count."""
+    """Write HyperIQA scores into ``AestheticScore.ap25_score``. Returns count."""
     Session = init_db(cfg.db_path)
     with session_scope(Session) as s:
-        rows = s.query(Embedding.photo_id, Embedding.siglip).all()
+        rows = s.query(Photo.id, Photo.preview_path).all()
     if not rows:
         return 0
     try:
-        load_ap25_head()
+        from selects.ml.onnx_rt import model_session
+
+        model_session("hyperiqa")
     except Exception as exc:
-        log.warning("AP-V2.5 head unavailable (%s); skipping aesthetic stage", exc)
+        log.warning("HyperIQA unavailable (%s); skipping aesthetic stage", exc)
         if on_progress:
-            on_progress(0, 0, "AP-V2.5 weights unavailable")
+            on_progress(0, 0, "HyperIQA weights unavailable")
         return 0
 
     total = len(rows)
-    ids = [r[0] for r in rows]
-    feats = np.stack(
-        [np.frombuffer(r[1], dtype=np.float16).astype(np.float32) for r in rows]
-    )
-    if on_progress:
-        on_progress(0, total, "scoring")
-    scores = score_embeddings(feats)
-    with session_scope(Session) as s:
-        for pid, sc in zip(ids, scores):
-            row = s.get(AestheticScore, pid) or AestheticScore(photo_id=pid)
-            row.ap25_score = float(sc)
-            s.add(row)
-    if on_progress:
-        on_progress(total, total, "ap25 written")
-    log.info("aesthetic stage: scored %d photos", total)
-    return total
+    processed = 0
+    batch: list[tuple[int, Image.Image]] = []
+
+    def flush() -> None:
+        nonlocal processed
+        if not batch:
+            return
+        scores = score_images([im for _, im in batch])
+        with session_scope(Session) as s:
+            for (pid, _), sc in zip(batch, scores):
+                row = s.get(AestheticScore, pid) or AestheticScore(photo_id=pid)
+                row.ap25_score = float(sc)
+                s.add(row)
+        processed += len(batch)
+        batch.clear()
+        if on_progress:
+            on_progress(processed, total, "hyperiqa")
+
+    for pid, preview_path in rows:
+        if not preview_path:
+            continue
+        path = cfg.state_dir / preview_path
+        try:
+            img = Image.open(path).convert("RGB")
+        except Exception as exc:
+            log.warning("hyperiqa: could not load preview for %s: %s", pid, exc)
+            continue
+        batch.append((pid, img))
+        if len(batch) >= 8:
+            flush()
+    flush()
+    log.info("aesthetic stage: scored %d photos", processed)
+    return processed

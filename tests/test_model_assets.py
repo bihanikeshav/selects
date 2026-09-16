@@ -68,14 +68,13 @@ def test_manifest_well_formed():
             # sha256 is only meaningful for url assets
             assert a["sha256"] is None
 
-    # All ML now runs on ONNX Runtime: SigLIP, RAM++ and the enhancement nets
-    # are bundled into a single shared ONNX asset, plus the insightface pack.
     refs = {a["ref"] for a in model_assets.MANIFEST}
+    assert "onnx-community/siglip2-so400m-patch16-384-ONNX" in refs
     assert "bihanikeshav/selects-onnx" in refs
+    assert "86Cao/IQA-ONNX-Models" in refs
+    assert "Systran/faster-whisper-small" in refs
     ids_present = {a["id"] for a in model_assets.MANIFEST}
-    assert "selects_onnx" in ids_present
-    assert "buffalo_l" in ids_present
-    assert "whisper_small_onnx" in ids_present
+    assert ids_present == {"siglip2", "ram_plus", "hyperiqa", "buffalo_l", "whisper_small"}
 
 
 # --------------------------------------------------------------------------- #
@@ -172,12 +171,8 @@ def test_asset_present_url_sha256(tmp_path):
 
 
 def test_status_shape(tmp_path, monkeypatch):
-    # Force every asset "missing": no hf cache, no insightface, no onnx bundle,
-    # empty url dir.
-    from selects.ml import onnx_rt
-
+    # Force every asset "missing": no hf cache, no insightface, empty onnx dirs.
     monkeypatch.setattr(model_assets, "_hf_repo_cached", lambda repo_id: False)
-    monkeypatch.setattr(onnx_rt, "all_present", lambda: False)
     monkeypatch.setattr("selects.ml.video_speech.whisper_files_present", lambda: False)
 
     st = model_assets.status(base_models_dir=tmp_path)
@@ -246,10 +241,10 @@ def test_route_status(monkeypatch):
 
 def test_standard_cache_layout(tmp_path):
     buffalo = next(a for a in model_assets.MANIFEST if a["id"] == "buffalo_l")
-    whisper = next(a for a in model_assets.MANIFEST if a["id"] == "whisper_small_onnx")
-    onnx = next(a for a in model_assets.MANIFEST if a["id"] == "selects_onnx")
+    whisper = next(a for a in model_assets.MANIFEST if a["id"] == "whisper_small")
+    siglip = next(a for a in model_assets.MANIFEST if a["id"] == "siglip2")
     root = model_assets.status(base_models_dir=tmp_path)["cache_root"]
-    assert model_assets.asset_cache_path(onnx, tmp_path) == str(tmp_path / "selects-onnx")
+    assert model_assets.asset_cache_path(siglip, tmp_path) == str(tmp_path / "siglip2")
     assert model_assets.asset_cache_path(whisper, tmp_path) == str(tmp_path / "whisper-small")
     assert model_assets.asset_cache_path(buffalo, tmp_path) == str(tmp_path / "buffalo_l")
     assert root == str(tmp_path)
@@ -276,9 +271,9 @@ def test_download_one_calls_asset(monkeypatch):
         lambda asset, base: seen.append(asset["id"]),
     )
     monkeypatch.setattr(model_assets, "asset_present", lambda a, base_models_dir=None: True)
-    out = model_assets.download_one("whisper_small_onnx")
-    assert seen == ["whisper_small_onnx"]
-    assert out == {"id": "whisper_small_onnx", "present": True}
+    out = model_assets.download_one("whisper_small")
+    assert seen == ["whisper_small"]
+    assert out == {"id": "whisper_small", "present": True}
 
 
 def test_route_download_one(monkeypatch):

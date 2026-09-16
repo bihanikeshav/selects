@@ -674,8 +674,8 @@ class AestheticScore(Base):
     """Alternative aesthetic-quality scores from off-the-shelf and personalized models.
 
     Held separate from Embedding so we can backfill / re-score without touching
-    the SigLIP blob column. The CLIP-IQA score remains on Embedding.aesthetic_iqa
-    for backward compat.
+    the SigLIP blob column. ``ap25_score`` is HyperIQA on a 1–10 scale.
+    Prompt-IQA from SigLIP 2 stays on Embedding.aesthetic_iqa.
     """
 
     __tablename__ = "aesthetic_scores"

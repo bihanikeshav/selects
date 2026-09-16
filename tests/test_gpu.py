@@ -39,17 +39,101 @@ class TestDetectCapabilities:
         caps = detect_capabilities()
         assert caps is not None
 
-    def test_gpu_available_false_when_models_cpu_only(self) -> None:
+    def test_gpu_available_when_dml_selected(self) -> None:
         dml_first = ["DmlExecutionProvider", "CPUExecutionProvider"]
         with (
             patch("selects.ml.onnx_rt.available_providers", return_value=dml_first),
             patch("selects.ml.onnx_rt.select_providers", return_value=dml_first),
-            patch(
-                "selects.ml.onnx_rt._CPU_ONLY_MODELS",
-                {"siglip_text", "siglip_vision", "ram_plus"},
-            ),
+        ):
+            caps = detect_capabilities()
+        assert caps.gpu_available is True
+        assert caps.provider == "DmlExecutionProvider"
+        assert "DmlExecutionProvider" in caps.installed_providers
+
+    def test_gpu_available_false_on_cpu_only(self) -> None:
+        cpu = ["CPUExecutionProvider"]
+        with (
+            patch("selects.ml.onnx_rt.available_providers", return_value=cpu),
+            patch("selects.ml.onnx_rt.select_providers", return_value=cpu),
         ):
             caps = detect_capabilities()
         assert caps.gpu_available is False
         assert caps.provider == "CPUExecutionProvider"
-        assert "DmlExecutionProvider" in caps.installed_providers
+
+
+def test_session_skips_cuda_when_ort_silently_binds_cpu(tmp_path, monkeypatch):
+    """ORT lists CUDA even when cublas is missing, then binds CPU. Walk the chain."""
+    from selects.ml import onnx_rt
+
+    class _FakeSess:
+        def __init__(self, providers):
+            self._providers = list(providers)
+
+        def get_providers(self):
+            return list(self._providers)
+
+    calls: list[list[str]] = []
+
+    def fake_session(_path, sess_options=None, providers=None):
+        calls.append(list(providers))
+        if providers and providers[0] == "CUDAExecutionProvider":
+            return _FakeSess(["CPUExecutionProvider"])
+        return _FakeSess(list(providers))
+
+    class _Ort:
+        class SessionOptions:
+            graph_optimization_level = None
+
+        class GraphOptimizationLevel:
+            ORT_ENABLE_ALL = 99
+
+        InferenceSession = staticmethod(fake_session)
+
+    monkeypatch.setattr(onnx_rt, "_preload_gpu_dlls", lambda: None)
+    import sys
+
+    monkeypatch.setitem(sys.modules, "onnxruntime", _Ort)
+    model = tmp_path / "toy.onnx"
+    model.write_bytes(b"not-a-real-graph")
+    sess = onnx_rt._ResilientSession(
+        str(model), ["CUDAExecutionProvider", "CPUExecutionProvider"]
+    )
+    built = sess._build(False)
+    assert "CPUExecutionProvider" in built.get_providers()
+    assert calls[0][0] == "CUDAExecutionProvider"
+    assert calls[-1][0] == "CPUExecutionProvider"
+
+
+def test_cuda_dll_dirs_is_a_list():
+    from selects.ml.onnx_rt import cuda_dll_dirs
+
+    dirs = cuda_dll_dirs()
+    assert isinstance(dirs, list)
+    assert all(hasattr(p, "parts") for p in dirs)
+
+
+def test_repair_gpu_runtime_runs_pip(monkeypatch):
+    from selects.gpu import GPU_ORT_PACKAGES, repair_gpu_runtime
+
+    cmds: list[list[str]] = []
+
+    class _R:
+        returncode = 0
+
+    def fake_run(cmd, check=False):
+        cmds.append(list(cmd))
+        return _R()
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+    repair_gpu_runtime()
+    flat = [" ".join(c) for c in cmds]
+    assert any("uninstall" in line and "onnxruntime" in line for line in flat)
+    assert any("onnxruntime-gpu" in line for line in flat)
+    assert GPU_ORT_PACKAGES[0].split("[")[0] in " ".join(flat)
+
+
+def test_cpu_ort_hiding_nvidia_false_without_gpu(monkeypatch):
+    monkeypatch.setattr("selects.gpu.nvidia_gpu_present", lambda: False)
+    from selects.gpu import cpu_ort_hiding_nvidia
+
+    assert cpu_ort_hiding_nvidia() is False

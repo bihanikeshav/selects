@@ -152,8 +152,22 @@ def serve(folder: Path | None, port: int, host: str, no_browser: bool, no_backgr
 
 
 @main.command()
-def doctor():
+@click.option(
+    "--fix",
+    is_flag=True,
+    help="Reinstall onnxruntime-gpu over the CPU wheel insightface/faster-whisper install.",
+)
+def doctor(fix: bool):
     """Report the active ONNX Runtime provider / nvImageCodec / cv2.cuda."""
+    from selects.gpu import cpu_ort_hiding_nvidia, repair_gpu_runtime
+
+    if fix:
+        click.echo("Reinstalling onnxruntime-gpu (CUDA 13 extras) ...", err=True)
+        try:
+            repair_gpu_runtime()
+        except RuntimeError as exc:
+            raise click.ClickException(str(exc)) from exc
+
     caps = detect_capabilities()
     click.echo(f"GPU acceleration  : {'yes' if caps.gpu_available else 'no'}")
     click.echo(f"ONNX provider     : {caps.provider} ({caps.device_name})")
@@ -162,3 +176,9 @@ def doctor():
     click.echo(f"VRAM              : {caps.vram_total_mb} MB")
     click.echo(f"nvImageCodec      : {'yes' if caps.nvimgcodec_available else 'no'}")
     click.echo(f"cv2.cuda          : {'yes' if caps.cv2_cuda_available else 'no'}")
+    if cpu_ort_hiding_nvidia():
+        click.echo(
+            "hint: NVIDIA GPU is present but this Python has the CPU "
+            "`onnxruntime` wheel. Run: selects doctor --fix",
+            err=True,
+        )

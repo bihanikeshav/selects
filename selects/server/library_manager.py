@@ -266,7 +266,7 @@ class LibraryManager:
 
             Session = init_db(cfg.db_path)
             with session_scope(Session) as s:
-                # Prefer AP-V2.5, then CLIP-IQA, else first row.
+                # Prefer HyperIQA, then prompt IQA, else first row.
                 q = (
                     s.query(Photo.sha256)
                     .outerjoin(AestheticScore, AestheticScore.photo_id == Photo.id)

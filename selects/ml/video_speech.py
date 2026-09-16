@@ -18,8 +18,8 @@ FILLER_PAD_SEC = 0.08
 SPEECH_SCENE_RATIO = 0.15
 TOPIC_TEXT_COSINE = 0.80
 WHISPER_WINDOW_SEC = 30.0
-WHISPER_ASSET_ID = "whisper_small_onnx"
-WHISPER_HF_REPO = "onnx-community/whisper-small"
+WHISPER_ASSET_ID = "whisper_small"
+WHISPER_HF_REPO = "Systran/faster-whisper-small"
 
 FILLER_WORDS = frozenset({"um", "uh", "er", "ah", "hmm"})
 FILLER_PHRASES = (("you", "know"), ("i", "mean"))
@@ -162,7 +162,7 @@ WHISPER_LANG_BEGIN = 50259
 WHISPER_LANG_END = 50357
 WHISPER_MAX_TOKENS = 448
 
-_WHISPER_SESSIONS: tuple[object, object] | None = None
+_WHISPER_MODEL = None
 _WHISPER_VOCAB: dict[int, str] | None = None
 _WHISPER_FAILED = False
 
@@ -239,25 +239,28 @@ def transcribe_pcm(
         x_old = np.linspace(0.0, 1.0, audio.size, endpoint=False)
         x_new = np.linspace(0.0, 1.0, target, endpoint=False)
         audio = np.interp(x_new, x_old, audio).astype(np.float32)
-    decode = decode_window or _decode_window_onnx
-    window = int(window_sec * WHISPER_SAMPLE_RATE)
-    words: list[Word] = []
-    start = 0
-    while start < audio.size:
-        if cancel is not None and cancel():
-            break
-        chunk = audio[start:start + window]
-        if chunk.size < WHISPER_SAMPLE_RATE // 4:
-            break
-        stamp = offset + start / float(WHISPER_SAMPLE_RATE)
-        try:
-            words.extend(decode(chunk, stamp))
-        except Exception as exc:
-            log.warning("whisper window at %.1fs failed: %s", stamp, exc)
-        start += window
-        if cancel is not None and cancel():
-            break
-    return words
+    if decode_window is not None:
+        window = int(window_sec * WHISPER_SAMPLE_RATE)
+        words: list[Word] = []
+        start = 0
+        while start < audio.size:
+            if cancel is not None and cancel():
+                break
+            chunk = audio[start:start + window]
+            if chunk.size < WHISPER_SAMPLE_RATE // 4:
+                break
+            stamp = offset + start / float(WHISPER_SAMPLE_RATE)
+            try:
+                words.extend(decode_window(chunk, stamp))
+            except Exception as exc:
+                log.warning("whisper window at %.1fs failed: %s", stamp, exc)
+            start += window
+            if cancel is not None and cancel():
+                break
+        return words
+    if cancel is not None and cancel():
+        return []
+    return _transcribe_faster_whisper(audio, offset=offset)
 
 
 def transcribe_video(
@@ -266,7 +269,7 @@ def transcribe_video(
     cancel: Callable[[], bool] | None = None,
     window_sec: float = WHISPER_WINDOW_SEC,
 ) -> list[Word]:
-    """Return word timings. Empty if ffmpeg or the Whisper ONNX asset is missing."""
+    """Return word timings. Empty if ffmpeg or faster-whisper weights are missing."""
     pcm = _read_pcm16(path, cancel=cancel)
     if pcm is None or pcm.size == 0:
         return []
@@ -276,14 +279,14 @@ def transcribe_video(
 def whisper_cache_dir() -> Path:
     from selects.ml.model_assets import asset_dir
 
-    path = asset_dir("whisper_small_onnx")
+    path = asset_dir("whisper_small")
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
 def whisper_files_present() -> bool:
     folder = whisper_cache_dir()
-    return (folder / "encoder_model.onnx").is_file() and (folder / "decoder_model.onnx").is_file()
+    return (folder / "model.bin").is_file() and (folder / "config.json").is_file()
 
 
 def _read_pcm16(path: Path, *, cancel: Callable[[], bool] | None = None) -> np.ndarray | None:
@@ -414,96 +417,92 @@ def _ensure_whisper_files() -> bool:
     if whisper_files_present():
         return True
     try:
-        from huggingface_hub import hf_hub_download
+        from huggingface_hub import snapshot_download
     except Exception:
         return False
-    folder = whisper_cache_dir()
-    files = (
-        ("onnx/encoder_model_quantized.onnx", "encoder_model.onnx"),
-        ("onnx/decoder_model_quantized.onnx", "decoder_model.onnx"),
-        ("vocab.json", "vocab.json"),
-        ("added_tokens.json", "added_tokens.json"),
-        ("tokenizer.json", "tokenizer.json"),
-    )
     try:
-        for remote, local in files:
-            downloaded = Path(
-                hf_hub_download(WHISPER_HF_REPO, remote, local_dir=str(folder))
-            )
-            dest = folder / local
-            if downloaded.is_file() and downloaded.resolve() != dest.resolve():
-                dest.write_bytes(downloaded.read_bytes())
+        snapshot_download(
+            WHISPER_HF_REPO,
+            local_dir=str(whisper_cache_dir()),
+            allow_patterns=[
+                "model.bin",
+                "config.json",
+                "tokenizer.json",
+                "vocabulary.txt",
+                "vocabulary.json",
+            ],
+        )
         return whisper_files_present()
     except Exception as exc:
         log.info("whisper download skipped: %s", exc)
         return False
 
 
-def _whisper_sessions() -> tuple[object, object] | None:
-    global _WHISPER_SESSIONS, _WHISPER_FAILED
+def _whisper_device() -> tuple[str, str]:
+    """CTranslate2 device. CUDA if the CT2 build sees a GPU; else CPU int8.
+
+    DirectML is not a CTranslate2 backend — Windows-without-CUDA still gets
+    int8 CPU, which is far faster than the old greedy ONNX decode loop.
+    """
+    try:
+        import ctranslate2
+
+        if ctranslate2.get_cuda_device_count() > 0:
+            return "cuda", "float16"
+    except Exception:
+        pass
+    return "cpu", "int8"
+
+
+def _whisper_model():
+    global _WHISPER_MODEL, _WHISPER_FAILED
     if _WHISPER_FAILED:
         return None
-    if _WHISPER_SESSIONS is not None:
-        return _WHISPER_SESSIONS
+    if _WHISPER_MODEL is not None:
+        return _WHISPER_MODEL
     if not _ensure_whisper_files():
         _WHISPER_FAILED = True
         return None
     try:
-        from selects.ml.onnx_rt import make_session
+        from faster_whisper import WhisperModel
 
-        folder = whisper_cache_dir()
-        encoder = make_session(folder / "encoder_model.onnx")
-        decoder = make_session(folder / "decoder_model.onnx")
-        _WHISPER_SESSIONS = (encoder, decoder)
-        return _WHISPER_SESSIONS
+        device, compute_type = _whisper_device()
+        _WHISPER_MODEL = WhisperModel(
+            str(whisper_cache_dir()),
+            device=device,
+            compute_type=compute_type,
+        )
+        log.info("faster-whisper small on %s/%s", device, compute_type)
+        return _WHISPER_MODEL
     except Exception as exc:
-        log.warning("whisper ONNX load failed: %s", exc)
+        log.warning("faster-whisper load failed: %s", exc)
         _WHISPER_FAILED = True
         return None
 
 
-def _decoder_feed(decoder, input_ids: np.ndarray, encoder_hidden: np.ndarray) -> np.ndarray:
-    names = {inp.name for inp in decoder.get_inputs()}
-    feed = {}
-    if "input_ids" in names:
-        feed["input_ids"] = input_ids
-    if "encoder_hidden_states" in names:
-        feed["encoder_hidden_states"] = encoder_hidden
-    if "attention_mask" in names:
-        feed["attention_mask"] = np.ones_like(input_ids, dtype=np.int64)
-    if "encoder_attention_mask" in names:
-        feed["encoder_attention_mask"] = np.ones((encoder_hidden.shape[0], encoder_hidden.shape[1]), dtype=np.int64)
-    for inp in decoder.get_inputs():
-        if inp.name not in feed:
-            # unused past-key inputs on merged graphs: skip by using decoder_model only
-            pass
-    if not feed:
-        feed = {"input_ids": input_ids, "encoder_hidden_states": encoder_hidden}
-    outputs = decoder.run(None, feed)
-    return outputs[0]
-
-
-def _decode_window_onnx(chunk: np.ndarray, offset: float) -> list[Word]:
-    sessions = _whisper_sessions()
-    if sessions is None:
+def _transcribe_faster_whisper(audio: np.ndarray, *, offset: float = 0.0) -> list[Word]:
+    model = _whisper_model()
+    if model is None:
         return []
-    encoder, decoder = sessions
-    mel = log_mel_spectrogram(chunk)[None, :, :]
-    enc_names = [inp.name for inp in encoder.get_inputs()]
-    enc_feed = {enc_names[0]: mel}
-    encoder_hidden = encoder.run(None, enc_feed)[0]
-    ids = [WHISPER_SOT]
-    logits = _decoder_feed(decoder, np.asarray([ids], dtype=np.int64), encoder_hidden)
-    lang_logits = logits[0, -1, WHISPER_LANG_BEGIN:WHISPER_LANG_END + 1]
-    ids.append(int(WHISPER_LANG_BEGIN + int(np.argmax(lang_logits))))
-    ids.append(WHISPER_TRANSCRIBE)
-    for _ in range(WHISPER_MAX_TOKENS - 3):
-        logits = _decoder_feed(decoder, np.asarray([ids], dtype=np.int64), encoder_hidden)
-        nxt = int(np.argmax(logits[0, -1]))
-        ids.append(nxt)
-        if nxt == WHISPER_EOS:
-            break
-    return tokens_to_words(ids, offset=offset)
+    try:
+        segments, _info = model.transcribe(
+            audio,
+            word_timestamps=True,
+            vad_filter=True,
+        )
+    except Exception as exc:
+        log.warning("faster-whisper transcribe failed: %s", exc)
+        return []
+    words: list[Word] = []
+    for segment in segments:
+        for item in segment.words or []:
+            text = (item.word or "").strip()
+            if not text:
+                continue
+            start = offset + float(item.start)
+            dur = max(float(item.end) - float(item.start), 0.02)
+            words.append(Word(start, dur, text))
+    return words
 
 
 def persist_transcript(

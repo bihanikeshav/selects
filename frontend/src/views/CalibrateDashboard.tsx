@@ -25,7 +25,7 @@ type SortKey = "iqa" | "ap25" | "personal";
 
 const SCORE_LABELS: Record<SortKey, string> = {
   iqa: "Quality score",
-  ap25: "Aesthetic model",
+  ap25: "HyperIQA",
   personal: "Your taste",
 };
 
@@ -354,7 +354,7 @@ export default function CalibrateDashboard() {
                         <span style={{ color: "var(--md-on-surface)" }}>{formatScore(r.scores.iqa)}</span>
                       </div>
                       <div style={{ display: "flex", justifyContent: "space-between" }}>
-                        <span title="Aesthetic model (AP-V2.5)">Aesthetic</span>
+                        <span title="HyperIQA (in-the-wild quality)">Quality</span>
                         <span style={{ color: "var(--md-on-surface)" }}>{formatScore(r.scores.ap25)}</span>
                       </div>
                       <div style={{ display: "flex", justifyContent: "space-between" }}>

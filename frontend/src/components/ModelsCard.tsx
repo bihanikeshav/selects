@@ -12,17 +12,25 @@ function gb(mb: number): string {
 // Human-readable labels for the average user. The real model names are still
 // shown (muted, underneath) — masked, not hidden.
 export const MODEL_LABELS: Record<string, { title: string; tech: string }> = {
-  selects_onnx: {
-    title: "Photo understanding & enhancement",
-    tech: "SigLIP · RAM++ · image restoration",
+  siglip2: {
+    title: "Photo understanding",
+    tech: "SigLIP 2 SO400M · search, tags, prompt IQA",
+  },
+  ram_plus: {
+    title: "Object tags",
+    tech: "RAM++ open-vocabulary labels",
+  },
+  hyperiqa: {
+    title: "Photo quality",
+    tech: "HyperIQA · in-the-wild (KonIQ-10k)",
   },
   buffalo_l: {
     title: "Face recognition",
     tech: "InsightFace buffalo_l",
   },
-  whisper_small_onnx: {
+  whisper_small: {
     title: "Speech transcripts",
-    tech: "Whisper small ONNX",
+    tech: "faster-whisper small",
   },
 };
 
