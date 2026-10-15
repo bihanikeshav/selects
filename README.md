@@ -34,7 +34,16 @@ The app is meant to do the boring first pass locally, then leave the final taste
 | **Fast to cull** | Keyboard-first review, side-by-side compare, learns your taste. |
 | **Yours to extend** | Clean FastAPI backend + React UI + a scriptable CLI. |
 
-The only network call is an optional place-name lookup for geotagged shots.
+Photo analysis stays local. Network access is used for model downloads, map tiles,
+optional place-name lookups, and a manual update check when you choose **Updates → Check for updates**.
+
+### Updating Selects
+
+Open **Updates** in the app to see your installed version and check the latest stable
+GitHub release. Desktop bundles offer a download for your OS when one is available;
+extract it into a new folder, quit the old copy, and open the new one. Python installs
+show the appropriate uv/pip upgrade commands. Libraries and model downloads stay in place.
+Selects does not install updates automatically.
 
 ## Features
 

@@ -30,6 +30,7 @@ from .recap_routes import register_recap_routes
 from .routes import register_routes
 from .search2_routes import register_search2_routes
 from .system_routes import register_system_routes
+from .update_routes import register_update_routes
 from .taste_routes import register_taste_routes
 from .video_routes import register_video_routes
 from .watch_routes import register_watch_routes
@@ -239,6 +240,7 @@ def build_app(
     register_watch_routes(app, manager, publish)
     register_fs_routes(app, bind_host=bind_host)
     register_system_routes(app, proxy)
+    register_update_routes(app)
     register_ws(app, lan_token=lan_token if lan_exposed else None)
     _mount_frontend(app)
     return app

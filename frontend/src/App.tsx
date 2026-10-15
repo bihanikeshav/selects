@@ -18,6 +18,7 @@ const Curated = lazy(() => import("./views/Curated"));
 const Dedup = lazy(() => import("./views/Dedup"));
 const MapView = lazy(() => import("./views/Map"));
 const Models = lazy(() => import("./views/Models"));
+const Updates = lazy(() => import("./views/Updates"));
 const Persons = lazy(() => import("./views/Persons"));
 const PersonDetail = lazy(() => import("./views/PersonDetail"));
 const Search = lazy(() => import("./views/Search"));
@@ -42,7 +43,7 @@ function OnboardingGate() {
     libraryStatus()
       .then((s) => {
         if (cancelled) return;
-        const allowed = ["/onboarding", "/libraries", "/models"];
+        const allowed = ["/onboarding", "/libraries", "/models", "/updates"];
         if (s.needs_onboarding && !allowed.includes(location.pathname)) {
           navigate("/onboarding", { replace: true });
         }
@@ -106,6 +107,7 @@ export default function App() {
         <Route path="/onboarding" element={<Onboarding />} />
         <Route path="/libraries" element={<Libraries />} />
         <Route path="/models" element={<Models />} />
+        <Route path="/updates" element={<Updates />} />
         {/* Cull mode — three sub-views */}
         <Route path="/" element={<Navigate to="/cull" replace />} />
         <Route path="/cull" element={<BurstCull />} />

@@ -194,6 +194,19 @@ export default function Rail() {
         Library
       </NavLink>
 
+      <NavLink
+        to="/updates"
+        className={({ isActive }) => "rail-item" + (isActive ? " is-active" : "")}
+        title="Updates for Selects"
+      >
+        <span className="icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M20 7a9 9 0 0 0-15-2L2 8m0-5v5h5M4 17a9 9 0 0 0 15 2l3-3m0 5v-5h-5" />
+          </svg>
+        </span>
+        Updates
+      </NavLink>
+
       <button
         className="rail-item theme-toggle"
         onClick={toggleTheme}
