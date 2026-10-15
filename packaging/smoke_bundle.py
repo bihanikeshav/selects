@@ -48,7 +48,9 @@ def smoke_bundle(executable: Path) -> None:
                 raise RuntimeError("Bundle did not create the library database")
             with closing(sqlite3.connect(db)) as connection:
                 rows = connection.execute("SELECT path, sha256 FROM photos").fetchall()
-            if len(rows) != 1 or Path(rows[0][0]) != photo:
+            # The app stores resolved paths. Temp directories can be aliases:
+            # /var -> /private/var on macOS, or an 8.3 path on Windows runners.
+            if len(rows) != 1 or Path(rows[0][0]).resolve() != photo.resolve():
                 raise RuntimeError(f"Expected one indexed photo, got {rows!r}")
             for directory in ("thumbs", "previews"):
                 if not (library / ".selects" / directory / f"{rows[0][1]}.jpg").is_file():
