@@ -3,7 +3,12 @@ name: Release builds
 on:
   push:
     tags: ["v*"]
-  workflow_dispatch: {}  # allow manual runs from the Actions tab
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Existing tag to rebuild and publish (without republishing PyPI)"
+        required: true
+        type: string
 
 jobs:
   build:
@@ -20,6 +25,20 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Recovery runs build the original tagged source, never today's main.
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
+      - name: Check out release validation tools
+        uses: actions/checkout@v4
+        with:
+          # Use the checker from this workflow revision, allowing validation
+          # repairs without changing the tagged application or its version.
+          ref: ${{ github.sha }}
+          path: .release-tools
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /packaging/smoke_bundle.py
+            /tests/fixtures/small.jpg
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -62,7 +81,7 @@ jobs:
         run: |
           executable=dist/selects/selects
           if [ "$RUNNER_OS" = "Windows" ]; then executable="$executable.exe"; fi
-          python packaging/smoke_bundle.py "$executable"
+          python .release-tools/packaging/smoke_bundle.py "$executable"
       - name: Zip bundle
         shell: bash
         run: |
@@ -121,7 +140,8 @@ jobs:
       - name: Create GitHub release with artifacts
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.release_tag || github.ref_name }}
           files: "*.zip"
           generate_release_notes: true
           draft: false  # publish immediately, not as a draft
-          prerelease: ${{ contains(github.ref_name, '-') }}  # -test/-rc tags = prerelease
+          prerelease: ${{ contains(inputs.release_tag || github.ref_name, '-') }}
