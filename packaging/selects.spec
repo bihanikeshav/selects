@@ -159,6 +159,11 @@ else:
     print("[selects.spec] WARNING: no migrations dir; DB init will fail at runtime.")
 
 # --- base hidden imports (the classic PyInstaller pain points) -------------
+# Pipeline stages are resolved with importlib from STAGE_FUNCS. Static import
+# analysis cannot see those targets (including the indexer), so collect our own
+# package explicitly. This also covers dynamically loaded media helpers and
+# future stages; optional third-party ML dependencies remain excluded below.
+hiddenimports += collect_submodules("selects")
 hiddenimports += collect_submodules("uvicorn")
 hiddenimports += [
     "uvicorn.logging",

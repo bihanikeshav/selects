@@ -57,6 +57,12 @@ jobs:
         run: python packaging/fetch_darktable.py
       - name: Build bundle (with ML stack)
         run: python packaging/build.py --ml
+      - name: Smoke test packaged indexing and re-indexing
+        shell: bash
+        run: |
+          executable=dist/selects/selects
+          if [ "$RUNNER_OS" = "Windows" ]; then executable="$executable.exe"; fi
+          python packaging/smoke_bundle.py "$executable"
       - name: Zip bundle
         shell: bash
         run: |
