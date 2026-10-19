@@ -12,6 +12,7 @@ from selects.db.models import Person, PhotoPerson, PipelineState, Photo, Video
 from selects.decode import decode
 from selects.decode.video import decode_first_frame, probe
 from selects.indexer.exif import read_exif
+from selects.indexer.metadata import METADATA_VERSION
 from selects.indexer.preview import write_previews
 from selects.indexer.walker import FileKind, classify_paths, sha256_of, walk_supported
 from selects.util import chunked
@@ -42,14 +43,17 @@ def index_folder(
     """Walk the folder (or an explicit *paths* subset) and upsert files by path.
 
     Identity is path: a new path is INSERT even if sha256 collides with another
-    row. An existing path with unchanged sha is skipped. An existing path whose
-    content changed is UPDATE (thumbs rewritten, pipeline flags reset).
+    row. An existing path with unchanged sha only retries outdated metadata readers.
+    An existing path whose content changed is UPDATE (thumbs rewritten,
+    pipeline flags reset).
 
     When *paths* is given, only those paths are classified/ingested instead of
     walking the whole tree — used by the watch-folder poller to index just the
     newly-detected files without re-scanning the entire library.
 
-    Returns count of new rows.
+    Returns count of new rows plus files whose missing metadata was recovered.
+    Metadata recovery counts as a change so downstream date/location groups
+    are rebuilt by the shared pipeline.
     """
     # Emit an immediate ping so the UI shows "Scanning folder…" while the
     # (potentially slow, count-unknown) directory walk runs, instead of an
@@ -59,18 +63,23 @@ def index_folder(
     files = list(classify_paths(paths)) if paths is not None else list(walk_supported(cfg.folder))
     total = len(files)
     added = 0
+    recovered = 0
     failed = 0
 
     Session = init_db(cfg.db_path)
 
     with session_scope(Session) as s:
         photo_by_path = {
-            path: (id_, sha)
-            for path, id_, sha in s.execute(select(Photo.path, Photo.id, Photo.sha256))
+            path: (id_, sha, version)
+            for path, id_, sha, version in s.execute(
+                select(Photo.path, Photo.id, Photo.sha256, Photo.metadata_version)
+            )
         }
         video_by_path = {
-            path: (id_, sha)
-            for path, id_, sha in s.execute(select(Video.path, Video.id, Video.sha256))
+            path: (id_, sha, version)
+            for path, id_, sha, version in s.execute(
+                select(Video.path, Video.id, Video.sha256, Video.metadata_version)
+            )
         }
 
     for i, (path, kind) in enumerate(files, start=1):
@@ -82,17 +91,21 @@ def index_folder(
             if kind == FileKind.VIDEO:
                 existing = video_by_path.get(key)
                 if existing is not None and existing[1] == sha:
+                    if (existing[2] or 0) < METADATA_VERSION:
+                        recovered += _backfill_video_metadata(Session, path, existing[0], sha)
                     continue
                 video_id = existing[0] if existing is not None else None
                 added += _ingest_video(cfg, Session, path, sha, video_id=video_id)
-                video_by_path[key] = (video_id or 0, sha)
+                video_by_path[key] = (video_id or 0, sha, METADATA_VERSION)
             else:
                 existing = photo_by_path.get(key)
                 if existing is not None and existing[1] == sha:
+                    if (existing[2] or 0) < METADATA_VERSION:
+                        recovered += _backfill_photo_metadata(Session, path, existing[0], sha)
                     continue
                 photo_id = existing[0] if existing is not None else None
                 added += _ingest_photo(cfg, Session, path, sha, kind, photo_id=photo_id)
-                photo_by_path[key] = (photo_id or 0, sha)
+                photo_by_path[key] = (photo_id or 0, sha, METADATA_VERSION)
         except Exception as exc:
             failed += 1
             log.warning("Failed to ingest %s: %s", path, exc)
@@ -112,7 +125,51 @@ def index_folder(
         if pruned and on_progress:
             on_progress(total, total, f"{pruned} missing file(s) removed")
 
-    return added
+    if recovered:
+        log.info("Recovered missing metadata for %d file(s)", recovered)
+        if on_progress:
+            on_progress(total, total, f"Recovered missing metadata for {recovered} file(s)")
+
+    return added + recovered
+
+
+def _backfill_photo_metadata(Session, path: Path, photo_id: int, sha: str) -> int:
+    """Fill missing fields only, leaving previews and analysis state intact."""
+    exif = read_exif(path)
+    if exif.error is not None:
+        return 0
+    values = {
+        field: value for field in ("taken_at", "camera", "gps_lat", "gps_lon")
+        if (value := getattr(exif, field)) is not None
+    }
+    with session_scope(Session) as s:
+        photo = s.get(Photo, photo_id)
+        if photo is None or photo.sha256 != sha:
+            return 0
+        changed = False
+        for field, value in values.items():
+            if getattr(photo, field) is None:
+                setattr(photo, field, value)
+                changed = True
+        # A successful read with no embedded tags is complete too. Do not retry
+        # optional/missing fields on every subsequent reindex.
+        photo.metadata_version = METADATA_VERSION
+    return int(changed)
+
+
+def _backfill_video_metadata(Session, path: Path, video_id: int, sha: str) -> int:
+    meta = probe(path)
+    if meta.metadata_error is not None:
+        return 0
+    with session_scope(Session) as s:
+        video = s.get(Video, video_id)
+        if video is None or video.sha256 != sha:
+            return 0
+        changed = video.taken_at is None and meta.taken_at is not None
+        if changed:
+            video.taken_at = meta.taken_at
+        video.metadata_version = METADATA_VERSION
+    return int(changed)
 
 
 def prune_missing(cfg: FolderConfig, Session) -> int:
@@ -239,6 +296,7 @@ def _ingest_photo(
         p.gps_lat = exif.gps_lat
         p.gps_lon = exif.gps_lon
         p.camera = exif.camera
+        p.metadata_version = METADATA_VERSION if exif.error is None else None
         p.thumb_path = str(thumb_path.relative_to(cfg.state_dir))
         p.preview_path = str(preview_path.relative_to(cfg.state_dir))
     return 1 if is_new else 0
@@ -249,7 +307,6 @@ def _ingest_video(
 ) -> int:
     meta = probe(path)
     frame = decode_first_frame(path)
-    exif = read_exif(path)
     thumb_path, preview_path = write_previews(frame, sha, cfg.thumbs_dir, cfg.previews_dir)
     st = path.stat()
 
@@ -271,7 +328,8 @@ def _ingest_video(
         v.width = meta.width
         v.height = meta.height
         v.duration_sec = meta.duration_sec
-        v.taken_at = exif.taken_at
+        v.taken_at = meta.taken_at
+        v.metadata_version = METADATA_VERSION if meta.metadata_error is None else None
         v.thumb_path = str(thumb_path.relative_to(cfg.state_dir))
         v.preview_path = str(preview_path.relative_to(cfg.state_dir))
     return 1 if is_new else 0

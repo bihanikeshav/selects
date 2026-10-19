@@ -3,8 +3,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import logging
 from pathlib import Path
 from typing import Optional
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -17,6 +20,9 @@ class ExifData:
     camera: Optional[str] = None
     gps_lat: Optional[float] = None
     gps_lon: Optional[float] = None
+    # None also covers a successful read with no tags. Failures carry only the
+    # exception type, never a filename, path, or potentially private metadata.
+    error: Optional[str] = None
 
 
 def _parse_datetime(raw: str) -> Optional[datetime]:
@@ -58,13 +64,11 @@ def _dms_to_decimal(dms_str: str, ref: str) -> Optional[float]:
 def read_exif(path: Path) -> ExifData:
     """Read EXIF metadata from *path* using pyexiv2 with Pillow fallback for dimensions.
 
-    Returns an empty ExifData (all fields None) if the file does not exist,
-    is not readable, or pyexiv2 raises any error.
+    If metadata cannot be read, ``error`` contains the exception type and a
+    warning is logged. A readable file with no EXIF has ``error=None``.
+    Pillow dimensions are retained even when metadata cannot be read.
     """
     data = ExifData()
-
-    if not path.exists():
-        return data
 
     # ------------------------------------------------------------------ #
     # Pillow fallback: width + height from image header (always reliable)  #
@@ -83,7 +87,13 @@ def read_exif(path: Path) -> ExifData:
     try:
         import pyexiv2  # noqa: PLC0415
 
-        img = pyexiv2.Image(str(path))
+        try:
+            img = pyexiv2.Image(str(path))
+        except Exception:
+            # Exiv2's narrow filename API can reject Unicode paths on Windows.
+            # Python opens those paths correctly; keep metadata decoding at its
+            # default UTF-8 rather than changing it to the Windows code page.
+            img = pyexiv2.ImageData(path.read_bytes())
         try:
             exif = img.read_exif()
         finally:
@@ -141,7 +151,8 @@ def read_exif(path: Path) -> ExifData:
         if lon_str:
             data.gps_lon = _dms_to_decimal(lon_str, lon_ref)
 
-    except Exception:
-        pass
+    except Exception as exc:
+        data.error = type(exc).__name__
+        log.warning("Could not read EXIF metadata (%s); metadata may be incomplete", data.error)
 
     return data

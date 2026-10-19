@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import subprocess
 from dataclasses import dataclass
+from datetime import datetime
+import logging
 from pathlib import Path
 
 import numpy as np
 
+from selects.decode.video_dates import parse_creation_time, read_mp4_creation_time
+
+log = logging.getLogger(__name__)
 
 @dataclass
 class VideoMeta:
@@ -13,6 +18,8 @@ class VideoMeta:
     height: int
     duration_sec: float
     codec: str
+    taken_at: datetime | None = None
+    metadata_error: str | None = None
 
 
 _PROBE_FAIL = (OSError, subprocess.SubprocessError, ValueError, KeyError, IndexError)
@@ -47,18 +54,25 @@ def _probe_ffprobe(path: Path) -> VideoMeta:
     cmd = [
         "ffprobe", "-v", "error",
         "-select_streams", "v:0",
-        "-show_entries", "stream=width,height,codec_name,duration:format=duration",
+        "-show_entries", (
+            "stream=width,height,codec_name,duration:format=duration:"
+            "stream_tags=creation_time:format_tags=creation_time,com.apple.quicktime.creationdate"
+        ),
         "-of", "default=noprint_wrappers=1:nokey=0",
         str(path),
     ]
     out = subprocess.check_output(cmd, text=True)
     kv: dict[str, str] = {}
     durations: list[str] = []
+    dates: list[datetime] = []
     for line in out.strip().splitlines():
         k, _, v = line.partition("=")
         k, v = k.strip(), v.strip()
         if k == "duration":
             durations.append(v)
+        elif k in {"TAG:creation_time", "TAG:com.apple.quicktime.creationdate"}:
+            if (date := parse_creation_time(v)) is not None:
+                dates.append(date)
         else:
             kv[k] = v
     parsed = [d for d in (_parse_duration(v) for v in durations) if d is not None]
@@ -67,6 +81,8 @@ def _probe_ffprobe(path: Path) -> VideoMeta:
         height=int(kv["height"]),
         duration_sec=parsed[0] if parsed else 0.0,
         codec=kv.get("codec_name", "unknown"),
+        # Stream tags precede format tags; prefer the container's date.
+        taken_at=dates[-1] if dates else None,
     )
 
 
@@ -84,7 +100,17 @@ def _probe_cv2(path: Path) -> VideoMeta:
         duration = frame_count / fps if fps > 0 and frame_count > 0 else 0.0
         fourcc = int(cap.get(cv2.CAP_PROP_FOURCC) or 0)
         codec = "".join(chr((fourcc >> (8 * i)) & 0xFF) for i in range(4)).strip("\x00 ") or "unknown"
-        return VideoMeta(width=width, height=height, duration_sec=duration, codec=codec)
+        taken_at = None
+        metadata_error = None
+        try:
+            taken_at = read_mp4_creation_time(path)
+        except (OSError, ValueError) as exc:
+            metadata_error = type(exc).__name__
+            log.warning("Could not read video date (%s)", metadata_error)
+        return VideoMeta(
+            width=width, height=height, duration_sec=duration, codec=codec,
+            taken_at=taken_at, metadata_error=metadata_error,
+        )
     finally:
         cap.release()
 
