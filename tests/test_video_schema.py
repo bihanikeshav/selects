@@ -33,7 +33,7 @@ from selects.db.models import (
 
 PREVIOUS_HEAD = "b1c2d3e4f5a6"
 CULL_V2_PREVIOUS = "f7a8b9c0d1e2"
-CURRENT_HEAD = "c9d0e1f2a3b4"
+CURRENT_HEAD = "f8b9c0d1e2f3"
 
 
 def _forget_engine(db_path: Path) -> None:
