@@ -1071,9 +1071,16 @@ button.rail-item {
   color: #1B1B1F;
 }
 
-.burst-thumb.is-gold {
-  outline: 2.5px solid var(--g-yellow);
-  outline-offset: 2px;
+/* Drawn inside the thumb: an outer outline gets clipped on the sides by the
+   scrolling strip, leaving only the top and bottom edges visible. */
+.burst-thumb.is-gold::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border: 2.5px solid var(--g-yellow);
+  border-radius: var(--r-sm);
+  pointer-events: none;
 }
 
 .burst-thumb.is-kept::after {

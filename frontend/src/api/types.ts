@@ -178,6 +178,7 @@ export interface ModelsStatus {
 }
 
 export interface CuratedPhoto {
+  selection_reasons?: string[];
   photo_id: number;
   sha256: string;
   taken_at: string | null;

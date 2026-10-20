@@ -6,6 +6,7 @@ from pathlib import Path
 import click
 
 from selects.config import get_folder_config
+from selects.creative.cli import creative
 from selects.db import init_db
 from selects.gpu import detect_capabilities
 from selects.server.pipeline_runner import STAGE_FUNCS, get_stage_callable, run_pipeline_stages
@@ -47,6 +48,9 @@ def _default_web_port() -> int:
 @click.group()
 def main():
     """selects — local AI-assisted travel photo & video culling."""
+
+
+main.add_command(creative)
 
 
 @main.command()

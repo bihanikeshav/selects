@@ -18,9 +18,11 @@ dependency and is trivial to unit test with tmp dirs + fake images.
 from __future__ import annotations
 
 import shutil
+import os
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Callable, Iterable, Literal, Optional
 
 from selects.indexer.walker import FileKind, classify
@@ -35,6 +37,11 @@ VERDICT_RATING: dict[str, int] = {
     "liked": 5,
     "curated": 4,
     "rejected": 1,
+    "hero": 5,
+    "grade": 4,
+    "story": 3,
+    "maybe": 2,
+    "reject": 1,
 }
 
 
@@ -267,6 +274,12 @@ def _sidecar_path(path: Path) -> Path:
     return path.with_suffix(path.suffix + ".xmp")
 
 
+def rating_sidecar_path(path: Path) -> Path:
+    """Choose an external rating file without merging RAW/JPEG pair decisions."""
+    extension = ".xmp" if classify(path) == FileKind.RAW else path.suffix + ".xmp"
+    return path.with_suffix(extension)
+
+
 def _read_existing_rating(target: Path) -> Optional[int]:
     """Best-effort read of an existing Xmp.xmp.Rating, or None if absent/unreadable."""
     if not target.exists():
@@ -274,7 +287,13 @@ def _read_existing_rating(target: Path) -> Optional[int]:
     try:
         import pyexiv2  # noqa: PLC0415
 
-        img = pyexiv2.Image(str(target))
+        if target.suffix.lower() == ".xmp":
+            img = pyexiv2.ImageData(target.read_bytes())
+        else:
+            try:
+                img = pyexiv2.Image(str(target))
+            except Exception:
+                img = pyexiv2.ImageData(target.read_bytes())
         try:
             xmp = img.read_xmp()
         finally:
@@ -307,6 +326,33 @@ def _minimal_xmp_sidecar(rating: int) -> str:
     )
 
 
+def _update_xmp_sidecar(target: Path, rating: int) -> None:
+    """Update a small sidecar through bytes, preserving metadata and Unicode paths."""
+    import pyexiv2
+
+    with pyexiv2.ImageData(target.read_bytes()) as image:
+        image.modify_xmp({"Xmp.xmp.Rating": str(rating)})
+        payload = image.get_bytes()
+    temporary = None
+    try:
+        with NamedTemporaryFile(dir=target.parent, prefix=".rating-", delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(temporary, target.stat().st_mode)
+        os.replace(temporary, target)
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink(missing_ok=True)
+            except PermissionError:
+                # A read-only destination transfers that attribute to the
+                # staged file on Windows. Clean it up if replacement fails.
+                temporary.chmod(0o600)
+                temporary.unlink()
+
+
 def _outside_library(path: Path, library_root: Path) -> bool:
     try:
         return not Path(path).resolve().is_relative_to(Path(library_root).resolve())
@@ -315,79 +361,64 @@ def _outside_library(path: Path, library_root: Path) -> bool:
 
 
 def plan_xmp_write(
-    photo_id: int,
-    path: Path,
-    verdict: str,
-    force: bool = False,
-    library_root: Optional[Path] = None,
+    photo_id: int, path: Path, verdict: str, force: bool = False,
+    library_root: Optional[Path] = None, *, sidecar_only: bool = False,
 ) -> XmpPlan:
-    """Compute what would be written for one photo, without writing anything.
-
-    Powers both the preview endpoint and the actual write (same logic decides
-    whether to skip due to an existing higher rating).
-    """
+    """Resolve the destination and validate a rating operation without writing."""
     rating = VERDICT_RATING.get(verdict)
+    raw = classify(path) == FileKind.RAW
+    external = raw or sidecar_only
+    if sidecar_only:
+        target = rating_sidecar_path(path)
+    elif raw:
+        target = _sidecar_path(path)
+    else:
+        target = path
+    values = dict(photo_id=photo_id, path=str(path), verdict=verdict,
+                  new_rating=rating or 0, target=str(target),
+                  is_sidecar=external, existing_rating=None)
+
+    def result(action, reason=None):
+        return XmpPlan(**values, action=action, reason=reason)
+
     if rating is None:
-        return XmpPlan(
-            photo_id=photo_id, path=str(path), verdict=verdict, new_rating=0,
-            target=str(path), is_sidecar=False, existing_rating=None,
-            action="no_op", reason=f"unknown verdict {verdict!r}",
-        )
-
+        values.update(target=str(path), is_sidecar=False)
+        return result("no_op", f"unknown verdict {verdict!r}")
     if library_root is not None and _outside_library(path, library_root):
-        return XmpPlan(
-            photo_id=photo_id, path=str(path), verdict=verdict, new_rating=rating,
-            target=str(path), is_sidecar=False, existing_rating=None,
-            action="no_op", reason="outside library",
-        )
-
-    kind = classify(path)
-    is_raw = kind == FileKind.RAW
-    target = _sidecar_path(path) if is_raw else path
+        return result("no_op", "outside library")
+    if sidecar_only and classify(path) not in (FileKind.JPEG, FileKind.HEIC, FileKind.RAW):
+        return result("no_op", "unsupported photo format")
+    if external:
+        unsafe = target.is_symlink()
+        if target.exists():
+            unsafe = unsafe or target.stat().st_nlink > 1
+        if library_root is not None:
+            unsafe = unsafe or _outside_library(target, library_root)
+        if unsafe:
+            return result("no_op", "unsafe sidecar target")
+    if not path.is_file():
+        return result("no_op", "source RAW missing" if raw else "source file missing")
     existing = _read_existing_rating(target)
-
-    if not path.exists() and not is_raw:
-        return XmpPlan(
-            photo_id=photo_id, path=str(path), verdict=verdict, new_rating=rating,
-            target=str(target), is_sidecar=is_raw, existing_rating=existing,
-            action="no_op", reason="source file missing",
-        )
-    if is_raw and not path.exists():
-        return XmpPlan(
-            photo_id=photo_id, path=str(path), verdict=verdict, new_rating=rating,
-            target=str(target), is_sidecar=True, existing_rating=existing,
-            action="no_op", reason="source RAW missing",
-        )
-
-    if existing is not None and not force:
+    values["existing_rating"] = existing
+    if not force and existing is not None:
         if existing > rating:
-            return XmpPlan(
-                photo_id=photo_id, path=str(path), verdict=verdict, new_rating=rating,
-                target=str(target), is_sidecar=is_raw, existing_rating=existing,
-                action="skip_lower",
-            )
+            return result("skip_lower")
         if existing == rating:
-            return XmpPlan(
-                photo_id=photo_id, path=str(path), verdict=verdict, new_rating=rating,
-                target=str(target), is_sidecar=is_raw, existing_rating=existing,
-                action="skip_same",
-            )
-
-    return XmpPlan(
-        photo_id=photo_id, path=str(path), verdict=verdict, new_rating=rating,
-        target=str(target), is_sidecar=is_raw, existing_rating=existing,
-        action="write",
-    )
+            return result("skip_same")
+    return result("write")
 
 
 def preview_xmp_writes(
     photos: Iterable[tuple[int, Path, str]],
     force: bool = False,
     library_root: Optional[Path] = None,
+    *,
+    sidecar_only: bool = False,
 ) -> list[XmpPlan]:
-    """Dry-run: compute the write plan for each (photo_id, path, verdict)."""
+    """Dry-run: compute the write plan, optionally using only rating sidecars."""
     return [
-        plan_xmp_write(pid, path, verdict, force=force, library_root=library_root)
+        plan_xmp_write(pid, path, verdict, force=force, library_root=library_root,
+                       sidecar_only=sidecar_only)
         for pid, path, verdict in photos
     ]
 
@@ -396,16 +427,22 @@ def write_xmp_ratings(
     photos: Iterable[tuple[int, Path, str]],
     force: bool = False,
     library_root: Optional[Path] = None,
+    *,
+    sidecar_only: bool = False,
 ) -> list[XmpPlan]:
     """Actually write the ratings, returning the same plan shape with results applied.
 
     Plans with action ``skip_lower`` / ``skip_same`` / ``no_op`` are left as-is
     (nothing written). Plans with action ``write`` get the rating stamped via
     pyexiv2, creating a sidecar file for RAW sources.
+
+    With ``sidecar_only=True`` every still format uses a sidecar; original
+    image bytes are never modified. Existing sidecar metadata is preserved.
     """
     results: list[XmpPlan] = []
     for pid, path, verdict in photos:
-        plan = plan_xmp_write(pid, path, verdict, force=force, library_root=library_root)
+        plan = plan_xmp_write(pid, path, verdict, force=force, library_root=library_root,
+                              sidecar_only=sidecar_only)
         if plan.action != "write":
             results.append(plan)
             continue
@@ -413,7 +450,10 @@ def write_xmp_ratings(
         target = Path(plan.target)
         try:
             if plan.is_sidecar and not target.exists():
-                target.write_text(_minimal_xmp_sidecar(plan.new_rating), encoding="utf-8")
+                with target.open("x", encoding="utf-8") as f:
+                    f.write(_minimal_xmp_sidecar(plan.new_rating))
+            elif plan.is_sidecar:
+                _update_xmp_sidecar(target, plan.new_rating)
             else:
                 import pyexiv2  # noqa: PLC0415
 

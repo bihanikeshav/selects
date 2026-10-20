@@ -1031,6 +1031,7 @@ export default function Stories() {
             </div>
             <div className="stories-header-actions">
               <StoryGroupTabs value={groupBy} onChange={setGroupBy} />
+              <Link to="/best/library/all" className="btn btn-tonal">Library highlights</Link>
               <BestOfDropdown />
             </div>
           </div>

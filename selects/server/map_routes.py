@@ -85,11 +85,13 @@ def register_map_routes(app: FastAPI, cfg: FolderConfig) -> None:
     # ── Best-Of / curated facets ─────────────────────────────────────────────
     @app.get("/api/curate")
     def curate_scope(
-        facet: str = Query(..., description="day|place|person|category"),
+        facet: str = Query(..., description="library|day|place|person|category"),
         value: str = Query(..., description="facet value"),
         limit: int = Query(200, ge=1, le=1000),
-        scope_pct: float = Query(None, description="override per-scope percentile gate"),
-        library_pct: float = Query(None, description="override library-wide percentile floor"),
+        scope_pct: Optional[float] = Query(None, ge=0, le=100, description="override per-scope percentile gate"),
+        library_pct: Optional[float] = Query(None, ge=0, le=100, description="override library-wide percentile floor"),
+        budget: Optional[int] = Query(None, ge=1, le=1000, description="Maximum highlights; does not change keepers"),
+        diverse: bool = Query(True, description="Balance highlights across days, scenes, places and people"),
     ):
         """Return a curated ranked set of photos for a Best-Of facet.
 
@@ -106,7 +108,9 @@ def register_map_routes(app: FastAPI, cfg: FolderConfig) -> None:
 
         with session_scope(Session) as s:
             # Resolve the scope to a set of photo IDs
-            if facet == "day":
+            if facet == "library":
+                scope_ids = [r[0] for r in s.query(Photo.id).order_by(Photo.id).all()]
+            elif facet == "day":
                 from sqlalchemy import text as _text
                 scope_ids = [
                     row[0]
@@ -119,7 +123,7 @@ def register_map_routes(app: FastAPI, cfg: FolderConfig) -> None:
                 # photos at any Visit with this name — by overlapping taken_at
                 visits = s.query(Visit).filter(Visit.name == value).all()
                 if not visits:
-                    return {"facet": facet, "value": value, "total": 0, "photos": []}
+                    return {"facet": facet, "value": value, "total": 0, "available": 0, "budget": budget, "photos": []}
                 # Photos taken between any visit's arrived_at and departed_at
                 scope_ids = []
                 for v in visits:
@@ -151,10 +155,12 @@ def register_map_routes(app: FastAPI, cfg: FolderConfig) -> None:
                 raise HTTPException(400, detail=f"unknown facet '{facet}'")
 
             if not scope_ids:
-                return {"facet": facet, "value": value, "total": 0, "photos": []}
+                return {"facet": facet, "value": value, "total": 0, "available": 0, "budget": budget, "photos": []}
 
             eff_scope = scope_pct if scope_pct is not None else cfg.aesthetic_per_scope_pct
             eff_library = library_pct if library_pct is not None else cfg.aesthetic_library_pct
+            from selects.ml.highlights import eligible_photo_ids
+            scope_ids = eligible_photo_ids(s, scope_ids)
             curated_list = curate(
                 s, scope_ids,
                 sort="score",
@@ -162,12 +168,22 @@ def register_map_routes(app: FastAPI, cfg: FolderConfig) -> None:
                 pct_floor=eff_scope,
                 library_pct_floor=eff_library,
             )
-            curated_list = curated_list[:limit]
+            reasons = {}
+            available = len(curated_list)
+            if budget is not None:
+                from selects.ml.highlights import select_highlights
+                curated_list, reasons, available = select_highlights(
+                    s, curated_list, min(budget, limit), diverse=diverse,
+                )
+            else:
+                curated_list = curated_list[:limit]
 
             return {
                 "facet": facet,
                 "value": value,
                 "total": len(curated_list),
+                "available": available,
+                "budget": budget,
                 "photos": [
                     {
                         "photo_id": c.photo_id,
@@ -181,6 +197,7 @@ def register_map_routes(app: FastAPI, cfg: FolderConfig) -> None:
                         "nima": c.nima,
                         "moment_id": c.moment_id,
                         "moment_size": c.moment_size,
+                        "selection_reasons": reasons.get(c.photo_id, []),
                     }
                     for c in curated_list
                 ],
