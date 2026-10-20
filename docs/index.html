@@ -2,12 +2,20 @@
 <html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>selects: cull a thousand trip photos in an evening</title>
+<title>selects: sort a thousand trip photos in an evening</title>
 <link rel="icon" href="assets/logo.svg">
 
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preload" href="assets/fonts/funneldisplay-700.woff2" as="font" type="font/woff2" crossorigin>
 <style>@font-face {
+  font-family: 'Funnel Display';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("assets/fonts/funneldisplay-700.woff2") format('woff2');
+}
+@font-face {
   font-family: 'Bricolage Grotesque';
   font-style: normal;
   font-weight: 200 800;
@@ -144,7 +152,7 @@ a{color:inherit;text-decoration:none}a:hover{color:#fff}
   .om-section h2{font-size:30px!important}
   .om-section>div:first-child p{font-size:16px!important}
   .om-feat-grid{margin:28px -24px 0!important;padding:0 24px 8px!important;gap:12px!important;background:transparent!important;border:0!important;border-radius:0!important;
-    grid-template-columns:none!important;grid-auto-flow:column;grid-auto-columns:80%;overflow-x:auto;scroll-snap-type:x mandatory;scroll-padding:0 24px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+    grid-template-columns:none!important;grid-auto-flow:column;grid-auto-columns:80%;overflow-x:auto!important;overflow-y:hidden!important;scroll-snap-type:x mandatory;scroll-padding:0 24px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
   .om-feat-grid::-webkit-scrollbar{display:none}
   .om-feat-grid>div{scroll-snap-align:start;border:1px solid rgba(255,255,255,.08);border-radius:14px;background:#1b1a18!important;padding:20px!important;gap:16px!important}
   .om-feat-grid>div>div:first-child{height:96px!important}
@@ -175,7 +183,9 @@ a{color:inherit;text-decoration:none}a:hover{color:#fff}
 .hv1:hover{color:#ecebe5!important;background:rgba(255,255,255,.06)!important}
 .hv2:hover{color:#ecebe5!important;background:rgba(255,255,255,.06)!important}
 .hv3:hover{background:#fff6e6!important}
+.om-cta{box-shadow:0 16px 38px -8px rgba(245,234,213,.5),0 4px 14px -4px rgba(245,234,213,.34);transition:box-shadow .25s,background .2s}
 .hv4:hover{background:#fff6e6!important}
+.om-cta:hover{box-shadow:0 18px 44px -8px rgba(245,234,213,.55),0 4px 14px -4px rgba(245,234,213,.38)}
 .hv5:hover{background:rgba(255,255,255,.06)!important;border-color:rgba(255,255,255,.24)!important}
 .hv6:hover{background:#fff6e6!important}
 .hv7:hover{background:#fff6e6!important}
@@ -221,10 +231,10 @@ a{color:inherit;text-decoration:none}a:hover{color:#fff}
       <div>
         
         <div style="display:inline-flex;align-items:center;gap:10px;font-family:'Geist Mono',monospace;font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:#aaa89f;white-space:nowrap;"><span style="display:flex;gap:3px;"><i style="width:5px;height:5px;border-radius:1px;background:#8fa7d1;display:block;"></i><i style="width:5px;height:5px;border-radius:1px;background:#8cc59a;display:block;"></i><i style="width:5px;height:5px;border-radius:1px;background:#e2c17a;display:block;"></i><i style="width:5px;height:5px;border-radius:1px;background:#e18779;display:block;"></i></span>Free and open source</div>
-        <h1 style="margin:20px 0 0;font-size:clamp(42px,5.6vw,68px);line-height:1.02;letter-spacing:-0.035em;font-weight:700;text-wrap:balance;">Cull a thousand trip photos in an evening.</h1>
-        <p style="margin:24px 0 0;max-width:480px;font-size:18px;line-height:1.6;color:#aaa89f;text-wrap:pretty;">Point <span style="color:#f5ead5;font-weight:500;">selects</span> at the trip folder you keep not opening. The blurry shots and duplicates get out of the way, so the good ones come first. Nothing is uploaded.</p>
+        <h1 style="margin:20px 0 0;font-family:'Funnel Display','Bricolage Grotesque',system-ui,sans-serif;font-size:clamp(42px,5.6vw,68px);line-height:1.04;letter-spacing:-0.035em;font-weight:700;text-wrap:balance;">Sort a thousand trip photos in an evening.</h1>
+        <p style="margin:24px 0 0;max-width:480px;font-size:18px;line-height:1.6;color:#aaa89f;text-wrap:pretty;">Point <span style="color:#f5ead5;font-weight:500;">selects</span> at the trip folder you keep not opening. It sets aside the blurry shots and duplicates, so the good ones are right there. Nothing gets uploaded.</p>
         <div style="display:flex;gap:10px;margin-top:36px;flex-wrap:wrap;">
-          <a href="#download" style="display:inline-flex;align-items:center;height:44px;padding:0 20px;border-radius:8px;white-space:nowrap;background:#f5ead5;color:#161513;font-weight:500;font-size:15px;" class="hv4">Download for free</a>
+          <a href="#download" style="display:inline-flex;align-items:center;height:44px;padding:0 20px;border-radius:8px;white-space:nowrap;background:#f5ead5;color:#161513;font-weight:500;font-size:15px;" class="hv4 om-cta">Download for free</a>
           <a href="https://github.com/bihanikeshav/selects" style="display:inline-flex;align-items:center;height:44px;padding:0 18px;border-radius:8px;white-space:nowrap;border:1px solid rgba(255,255,255,.14);color:#ecebe5;font-weight:500;font-size:15px;background:rgba(10,10,10,.5);" class="hv5">View on GitHub</a>
         </div>
         <p style="margin:16px 0 0;font-size:13px;color:#7b796f;">macOS, Windows, Linux · MIT</p>
@@ -272,8 +282,8 @@ a{color:inherit;text-decoration:none}a:hover{color:#fff}
   <!-- Features -->
   <div id="features" class="om-section" style="max-width:1080px;margin:0 auto;padding:128px 24px 0;">
     <div style="max-width:560px;">
-      <h2 style="margin:0;font-size:clamp(28px,3.4vw,40px);line-height:1.1;letter-spacing:-0.03em;font-weight:700;text-wrap:balance;">You still decide. It does the boring part.</h2>
-      <p style="margin:14px 0 0;font-size:16px;line-height:1.55;color:#aaa89f;">Most of a trip folder is near-misses and repeats. selects clears those away, so your evening goes on the photos you like.</p>
+      <h2 style="margin:0;font-size:clamp(28px,3.4vw,40px);line-height:1.1;letter-spacing:-0.03em;font-weight:700;text-wrap:balance;">Less digging, more picking.</h2>
+      <p style="margin:14px 0 0;font-size:16px;line-height:1.55;color:#aaa89f;">selects sorts out the blurry shots and duplicates first, so you can get straight to picking favourites.</p>
     </div>
     <div class="om-feat-grid" style="margin-top:48px;display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.08);border-radius:12px;overflow:hidden;">
       <div style="background:#161513;padding:28px;display:flex;flex-direction:column;gap:20px;">
@@ -405,15 +415,17 @@ customElements.define('bg-field', class extends HTMLElement {
     const palette = [0x8cc59a, 0xe2c17a, 0xe18779, 0x8fa7d1];
     const geo = new THREE.PlaneGeometry(1.5, 1); const edges = new THREE.EdgesGeometry(geo);
     const items = []; const rnd = (a, b) => a + Math.random() * (b - a);
-    for (let i = 0; i < 70; i++) {
+    for (let i = 0; i < 48; i++) {
       const c = palette[i % 4];
       const g = new THREE.Group();
-      g.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.07, side: THREE.DoubleSide, depthWrite: false })));
-      g.add(new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: c, transparent: true, opacity: 0.45 })));
+      g.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.035, side: THREE.DoubleSide, depthWrite: false })));
+      g.add(new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: c, transparent: true, opacity: 0.22 })));
       const s = rnd(0.5, 1.6); g.scale.setScalar(s);
-      g.position.set(rnd(-16, 16), rnd(-9, 9), rnd(-16, 5));
+      g.position.set(0, rnd(-9, 9), rnd(-16, 4));
+      // horizontal position is kept in screen terms so frames stay at the left and right edges
+      const side = (i % 2 ? 1 : -1) * Math.random();
       g.rotation.set(rnd(-0.5, 0.5), rnd(-0.8, 0.8), rnd(-0.2, 0.2));
-      g.userData = { vy: rnd(0.08, 0.22), ry: rnd(-0.12, 0.12), rx: rnd(-0.06, 0.06) };
+      g.userData = { side, s, vy: rnd(0.08, 0.22), ry: rnd(-0.12, 0.12), rx: rnd(-0.06, 0.06) };
       scene.add(g); items.push(g);
     }
     let mx = 0, my = 0, tx = 0, ty = 0, raf = 0, visible = true, last = performance.now();
@@ -427,6 +439,7 @@ customElements.define('bg-field', class extends HTMLElement {
     };
     const ro = new ResizeObserver(resize); ro.observe(this); resize();
     const io = new IntersectionObserver(([en]) => { visible = en.isIntersecting; if (visible && !raf) loop(); }); io.observe(this);
+    const halfTan = Math.tan(camera.fov * Math.PI / 360);
     const loop = () => {
       raf = 0; if (!visible || !this.isConnected) return;
       resize(); if (!cw) { raf = requestAnimationFrame(loop); return; }
@@ -436,6 +449,10 @@ customElements.define('bg-field', class extends HTMLElement {
         mx += (tx - mx) * 0.04; my += (ty - my) * 0.04;
         camera.position.x = mx * 1.6; camera.position.y = -my * 1.0; camera.lookAt(0, 0, -4);
       }
+      const lo = camera.aspect < 1 ? 0.85 : 0.55, span = 1.1 - lo;
+      const k = camera.aspect < 1 ? 0.5 : 1;
+      for (const g of items) g.scale.setScalar(g.userData.s * k);
+      for (const g of items) g.position.x = camera.position.x + Math.sign(g.userData.side) * (lo + Math.abs(g.userData.side) * span) * halfTan * (camera.position.z - g.position.z) * camera.aspect;
       renderer.render(scene, camera);
       if (!reduced) raf = requestAnimationFrame(loop);
     };
