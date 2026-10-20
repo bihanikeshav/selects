@@ -1,0 +1,13 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp" android:height="48dp" android:viewportWidth="128" android:viewportHeight="128">
+    <!-- Existing Selects brand mark, converted from packaging/assets/selects-logo.svg. -->
+    <group android:rotation="45" android:pivotX="64" android:pivotY="64">
+        <clip-path android:pathData="M48,26 H80 Q102,26 102,48 V80 Q102,102 80,102 H48 Q26,102 26,80 V48 Q26,26 48,26 Z" />
+        <path android:fillColor="#78df93" android:pathData="M64,26 H102 V64 H64 Z" />
+        <path android:fillColor="#f5cf68" android:pathData="M64,64 H102 V102 H64 Z" />
+        <path android:fillColor="#ff7c78" android:pathData="M26,64 H64 V102 H26 Z" />
+        <path android:fillColor="#7aa7ff" android:pathData="M26,26 H64 V64 H26 Z" />
+        <path android:fillColor="#09090f" android:fillAlpha="0.75"
+            android:pathData="M57,45 H71 Q83,45 83,57 V71 Q83,83 71,83 H57 Q45,83 45,71 V57 Q45,45 57,45 Z" />
+    </group>
+</vector>
