@@ -70,9 +70,10 @@ def index_folder(
 
     with session_scope(Session) as s:
         photo_by_path = {
-            path: (id_, sha, version)
-            for path, id_, sha, version in s.execute(
-                select(Photo.path, Photo.id, Photo.sha256, Photo.metadata_version)
+            path: (id_, sha, version, thumb, preview)
+            for path, id_, sha, version, thumb, preview in s.execute(
+                select(Photo.path, Photo.id, Photo.sha256, Photo.metadata_version,
+                       Photo.thumb_path, Photo.preview_path)
             )
         }
         video_by_path = {
@@ -99,13 +100,18 @@ def index_folder(
                 video_by_path[key] = (video_id or 0, sha, METADATA_VERSION)
             else:
                 existing = photo_by_path.get(key)
-                if existing is not None and existing[1] == sha:
+                if existing is not None and existing[1] == sha and all(
+                    rel and (cfg.state_dir / rel).is_file() for rel in existing[3:]
+                ):
                     if (existing[2] or 0) < METADATA_VERSION:
                         recovered += _backfill_photo_metadata(Session, path, existing[0], sha)
                     continue
                 photo_id = existing[0] if existing is not None else None
                 added += _ingest_photo(cfg, Session, path, sha, kind, photo_id=photo_id)
-                photo_by_path[key] = (photo_id or 0, sha, METADATA_VERSION)
+                photo_by_path[key] = (
+                    photo_id or 0, sha, METADATA_VERSION,
+                    f"thumbs/{sha}.jpg", f"previews/{sha}.jpg",
+                )
         except Exception as exc:
             failed += 1
             log.warning("Failed to ingest %s: %s", path, exc)
@@ -284,7 +290,10 @@ def _ingest_photo(
             is_new = True
         else:
             is_new = False
-            _reset_pipeline(s, p.id)
+            # Rebuilding a missing cache for an unchanged source must not
+            # trigger several GB of model inference again.
+            if p.sha256 != sha:
+                _reset_pipeline(s, p.id)
 
         p.sha256 = sha
         p.mtime = st.st_mtime

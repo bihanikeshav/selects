@@ -15,7 +15,10 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(here, "..", "..");
-export const PORT = 8765;
+export const PORT = Number(process.env.SELECTS_E2E_PORT || 8765);
+if (!Number.isInteger(PORT) || PORT < 1024 || PORT > 65535) {
+  throw new Error("SELECTS_E2E_PORT must be an integer between 1024 and 65535");
+}
 export const BASE_URL = `http://127.0.0.1:${PORT}`;
 export const PHOTO_COUNT = 6;
 

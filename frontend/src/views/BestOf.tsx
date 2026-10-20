@@ -8,12 +8,14 @@ import Viewer from "../components/Viewer";
 import PhotoEditor from "../editor/PhotoEditor";
 import type { CuratedPhoto } from "../api/types";
 import { stripPlaceSuffix } from "../lib/placeName";
+import "./BestOf.css";
 
 type CurateResp = {
   facet: string;
   value: string;
   total: number;
   photos: CuratedPhoto[];
+  available?: number;
 };
 
 const FACET_LABELS: Record<string, string> = {
@@ -21,6 +23,7 @@ const FACET_LABELS: Record<string, string> = {
   place: "Place",
   person: "Person",
   category: "Category",
+  library: "Library",
 };
 
 export default function BestOf() {
@@ -33,25 +36,42 @@ export default function BestOf() {
   const [editShas, setEditShas] = useState<string[] | null>(null);
   const [personLabel, setPersonLabel] = useState<string | null>(null);
   const [focusedPhotoId, setFocusedPhotoId] = useState<number | null>(null);
+  const [budget, setBudget] = useState(facet === "library" ? "40" : "all");
+  const [diverse, setDiverse] = useState(true);
+  const [activeShas, setActiveShas] = useState<Record<number, string>>({});
 
   useEffect(() => {
     if (!facet || !value) return;
     setLoading(true);
     setErr(null);
-    fetch(`/api/curate?facet=${encodeURIComponent(facet)}&value=${encodeURIComponent(value)}`)
+    setData(null);
+    setSelected(new Set());
+    setLightboxIdx(null);
+    setFocusedPhotoId(null);
+    setActiveShas({});
+    const controller = new AbortController();
+    const params = new URLSearchParams({ facet, value, limit: "1000" });
+    if (budget !== "all") {
+      params.set("budget", budget);
+      params.set("diverse", String(diverse));
+    }
+    fetch(`/api/curate?${params}`, { signal: controller.signal })
       .then(async (r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
       })
       .then((j: CurateResp) => {
+        if (controller.signal.aborted) return;
         setData(j);
         setLoading(false);
       })
       .catch((e) => {
+        if (controller.signal.aborted) return;
         setErr(String(e));
         setLoading(false);
       });
-  }, [facet, value]);
+    return () => controller.abort();
+  }, [facet, value, budget, diverse]);
 
   // Look up person label if facet=person
   useEffect(() => {
@@ -67,6 +87,7 @@ export default function BestOf() {
 
   const title = useMemo(() => {
     if (!facet || !value) return "Best of";
+    if (facet === "library") return "Library highlights";
     if (facet === "person") return `Best of ${personLabel || `P${value}`}`;
     if (facet === "category") return `Best ${value}s`;
     return `Best of ${stripPlaceSuffix(value)}`;
@@ -82,7 +103,7 @@ export default function BestOf() {
   }, []);
 
   const selectAll = () =>
-    setSelected(new Set((data?.photos ?? []).map((p) => p.sha256)));
+    setSelected(new Set((data?.photos ?? []).map((p) => activeShas[p.photo_id] ?? p.sha256)));
   const clearSelection = () => setSelected(new Set());
 
   const openInEditor = useCallback(() => {
@@ -111,7 +132,7 @@ export default function BestOf() {
   }, [lightboxIdx, data]);
 
   return (
-    <div className="app">
+    <div className="app bestof-page">
       <Rail />
       <div
         className="workspace"
@@ -131,7 +152,7 @@ export default function BestOf() {
               {data ? `${data.total} curated photos` : loading ? "Loading…" : ""}
               {" · "}
               <span style={{ fontFamily: "var(--font-mono)" }}>
-                {FACET_LABELS[facet || ""] ?? facet}: {stripPlaceSuffix(value ?? "")}
+                {facet === "library" ? "Whole library" : `${FACET_LABELS[facet || ""] ?? facet}: ${stripPlaceSuffix(value ?? "")}`}
               </span>
             </>
           }
@@ -167,6 +188,27 @@ export default function BestOf() {
         />
 
         <div style={{ padding: "12px 24px 16px", overflow: "auto", minHeight: 0 }}>
+          <div className="highlights-controls">
+            <label>
+              Highlights
+              <select aria-label="Highlights" value={budget} onChange={(e) => setBudget(e.target.value)}>
+                <option value="all">All qualifying photos</option>
+                <option value="12">Up to 12</option>
+                <option value="40">Up to 40</option>
+                <option value="80">Up to 80</option>
+              </select>
+            </label>
+            <label>
+              <input type="checkbox" checked={diverse} disabled={budget === "all"}
+                onChange={(e) => setDiverse(e.target.checked)} />
+              Balance scenes, places and people
+            </label>
+            <span role="status">
+              {loading ? "Finding highlights…" : budget !== "all" && data
+                ? `${data.total} of ${data.available ?? data.total} qualifying photos` : ""}
+            </span>
+          </div>
+          <p className="highlights-note">Suggestions leave your photos and keeper decisions unchanged.</p>
           {err && (
             <div
               style={{
@@ -192,72 +234,83 @@ export default function BestOf() {
               }}
             >
               {data.photos.map((p, i) => {
-                const isSel = selected.has(p.sha256);
+                const activeSha = activeShas[p.photo_id] ?? p.sha256;
+                const isAlternative = activeSha !== p.sha256;
+                const isSel = selected.has(activeSha);
                 return (
-                  <StackPhoto
-                    key={p.photo_id}
-                    sha256={p.sha256}
-                    thumbUrl={p.thumb_url}
-                    momentId={p.moment_id ?? null}
-                    momentSize={p.moment_size ?? null}
-                    isFocused={focusedPhotoId === p.photo_id}
-                    onFocus={() => setFocusedPhotoId(p.photo_id)}
-                    onClick={(activeSha) => toggle(activeSha)}
-                    onDoubleClick={() => setLightboxIdx(i)}
-                    title={`Quality ${
-                      (p.iqa ?? p.combined) != null
-                        ? (p.iqa ?? p.combined)!.toFixed(2)
-                        : "—"
-                    }${
-                      p.moment_size && p.moment_size > 1 ? ` · burst of ${p.moment_size}` : ""
-                    }`}
-                    className={isSel ? "is-selected" : undefined}
-                    style={{
-                      border: isSel
-                        ? "3px solid var(--md-primary)"
-                        : "1px solid var(--md-outline-var)",
-                      borderRadius: 10,
-                      overflow: "hidden",
-                      background: "var(--md-surface-c-low)",
-                      cursor: "pointer",
-                      transition: "transform 90ms ease",
-                      transform: isSel ? "scale(0.98)" : "scale(1)",
-                      aspectRatio: "4/3",
-                    }}
-                  >
-                    <span
+                  <div key={p.photo_id}>
+                    <StackPhoto
+                      sha256={p.sha256}
+                      thumbUrl={p.thumb_url}
+                      momentId={p.moment_id ?? null}
+                      momentSize={p.moment_size ?? null}
+                      isFocused={focusedPhotoId === p.photo_id}
+                      onFocus={() => setFocusedPhotoId(p.photo_id)}
+                      onClick={(activeSha) => toggle(activeSha)}
+                      onDoubleClick={() => setLightboxIdx(i)}
+                      hotkeysEnabled={lightboxIdx === null && editShas === null}
+                      onActiveChange={(sha) => setActiveShas((prev) => ({ ...prev, [p.photo_id]: sha }))}
+                      title={isAlternative ? "Burst alternative" : `${p.selection_reasons?.length ? p.selection_reasons.join(" · ") + " · " : ""}Quality ${
+                        (p.combined ?? p.iqa) != null
+                          ? (p.combined ?? p.iqa)!.toFixed(2)
+                          : "—"
+                      }${
+                        p.moment_size && p.moment_size > 1 ? ` · burst of ${p.moment_size}` : ""
+                      }`}
+                      className={isSel ? "is-selected" : undefined}
                       style={{
-                        position: "absolute",
-                        top: 6,
-                        left: 6,
-                        background: "rgba(0,0,0,0.75)",
-                        color: "#fff",
-                        fontSize: 10,
-                        padding: "2px 6px",
-                        borderRadius: 4,
-                        fontFamily: "var(--font-mono)",
+                        border: isSel
+                          ? "3px solid var(--md-primary)"
+                          : "1px solid var(--md-outline-var)",
+                        borderRadius: 10,
+                        overflow: "hidden",
+                        background: "var(--md-surface-c-low)",
+                        cursor: "pointer",
+                        transition: "transform 90ms ease",
+                        transform: isSel ? "scale(0.98)" : "scale(1)",
+                        aspectRatio: "4/3",
                       }}
                     >
-                      #{i + 1}
-                    </span>
-                    <span
-                      style={{
-                        position: "absolute",
-                        top: 6,
-                        right: 6,
-                        background: "rgba(0,0,0,0.75)",
-                        color: "#fff",
-                        fontSize: 10,
-                        padding: "2px 6px",
-                        borderRadius: 4,
-                        fontFamily: "var(--font-mono)",
-                      }}
-                    >
-                      {(p.iqa ?? p.combined) != null
-                        ? (p.iqa ?? p.combined)!.toFixed(2)
-                        : "—"}
-                    </span>
-                  </StackPhoto>
+                      <span
+                        style={{
+                          position: "absolute",
+                          top: 6,
+                          left: 6,
+                          background: "rgba(0,0,0,0.75)",
+                          color: "#fff",
+                          fontSize: 10,
+                          padding: "2px 6px",
+                          borderRadius: 4,
+                          fontFamily: "var(--font-mono)",
+                        }}
+                      >
+                        #{i + 1}
+                      </span>
+                      <span
+                        style={{
+                          position: "absolute",
+                          top: 6,
+                          right: 6,
+                          background: "rgba(0,0,0,0.75)",
+                          color: "#fff",
+                          fontSize: 10,
+                          padding: "2px 6px",
+                          borderRadius: 4,
+                          fontFamily: "var(--font-mono)",
+                        }}
+                      >
+                        {isAlternative ? "Alternative" : (p.combined ?? p.iqa) != null
+                          ? (p.combined ?? p.iqa)!.toFixed(2)
+                          : "—"}
+                      </span>
+                    </StackPhoto>
+                    {!isAlternative && !!p.selection_reasons?.length && (
+                      <details className="highlight-reasons">
+                        <summary>Why this photo?</summary>
+                        <ul>{p.selection_reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
+                      </details>
+                    )}
+                  </div>
                 );
               })}
             </div>
@@ -271,7 +324,7 @@ export default function BestOf() {
 
       {lightboxIdx !== null && data && data.photos[lightboxIdx] && (
         <Viewer
-          items={data.photos.map((p) => ({ sha256: p.sha256 }))}
+          items={data.photos.map((p) => ({ sha256: activeShas[p.photo_id] ?? p.sha256 }))}
           index={lightboxIdx}
           onIndex={setLightboxIdx}
           onClose={() => setLightboxIdx(null)}

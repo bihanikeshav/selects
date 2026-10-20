@@ -25,6 +25,8 @@ export interface StackPhotoProps {
   onClick?: (sha: string) => void;
   /** Called on double click; receives the *currently-displayed* sha. */
   onDoubleClick?: (sha: string) => void;
+  /** Notify a parent when cycling displays a different burst member. */
+  onActiveChange?: (sha: string) => void;
   /** Optional title for tooltip */
   title?: string;
   /** Optional caption-bar children rendered below the image */
@@ -50,6 +52,7 @@ export default function StackPhoto({
   onFocus,
   onClick,
   onDoubleClick,
+  onActiveChange,
   title,
   children,
   style,
@@ -116,6 +119,7 @@ export default function StackPhoto({
       const mem = m.members[next];
       setActiveSha(mem.sha256);
       setActiveThumb(`/api/thumb/${mem.sha256}`);
+      onActiveChange?.(mem.sha256);
 
       // Persist new primary after a short debounce
       if (persistTimer.current) window.clearTimeout(persistTimer.current);
@@ -125,7 +129,7 @@ export default function StackPhoto({
         });
       }, 450);
     },
-    [hasStack, ensureMoment, stackIdx],
+    [hasStack, ensureMoment, stackIdx, onActiveChange],
   );
 
   // Brief "I just swapped" animation

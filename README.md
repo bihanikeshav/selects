@@ -169,6 +169,30 @@ configurable per-scope and library-wide percentile thresholds (see [Configuratio
 After upgrading to SigLIP 2, re-run `selects index <folder> --pass embed` (and `aesthetic`) so
 stored vectors match the new towers.
 
+## Highlights and creative review
+
+Open **Stories → Library highlights** to build a shortlist of up to 12, 40, or
+80 qualifying photos. Balance coverage across days, scenes, places and people,
+or turn balancing off for score order. Expand **Why this photo?** for the
+selection signals. Suggestions never change your keeper decisions or originals.
+Budgets are caps; Selects does not fill them with photos below the quality gate.
+The same controls are available in each Best Of scope.
+
+For a separate editorial pass using cached previews:
+
+```bash
+selects creative candidates /path/to/trip --percentile 50 --batch-size 50
+selects creative import /path/to/trip reviewed-batch.json
+selects creative shortlist /path/to/trip --heroes 12 --grades 40 --story 80
+selects creative report /path/to/trip
+selects creative xmp /path/to/trip --dry-run
+```
+
+Creative review imports require explicit judgments; no additional model assigns
+composition or grading-potential scores. See the [review contract](docs/creative-curation.md).
+Creative XMP export uses
+sidecars for every format and defaults to dry-run.
+
 ## Roadmap
 
 **Shipped (v0.1)**

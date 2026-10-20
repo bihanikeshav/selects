@@ -1,0 +1,52 @@
+.highlights-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 24px;
+  color: var(--md-on-surface);
+  font-size: 13px;
+}
+.highlights-controls label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.highlights-controls select {
+  font: inherit;
+  color: inherit;
+  background: var(--md-surface-c-low);
+  border: 1px solid var(--md-outline-var);
+  border-radius: 6px;
+  padding: 8px;
+}
+.highlights-controls :focus-visible {
+  outline: 2px solid var(--md-primary);
+  outline-offset: 3px;
+}
+.highlights-controls input { accent-color: var(--md-primary); }
+.highlights-note {
+  color: var(--md-on-surface-var);
+  font-size: 12px;
+  margin: 12px 0 20px;
+}
+.highlight-reasons {
+  color: var(--md-on-surface-var);
+  font-size: 12px;
+  padding: 8px 0;
+}
+.highlight-reasons summary { cursor: pointer; }
+.highlight-reasons summary:focus-visible {
+  outline: 2px solid var(--md-primary);
+  outline-offset: 3px;
+}
+.highlight-reasons ul { padding-left: 20px; line-height: 1.5; }
+@media (max-width: 640px) {
+  .bestof-page .page-actions {
+    width: 100%;
+    max-width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 0;
+  }
+}
