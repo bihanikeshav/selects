@@ -205,8 +205,8 @@ sidecars for every format and defaults to dry-run.
 - [x] CUDA / CoreML GPU path (Windows `onnxruntime-gpu` + `selects doctor --fix`)
 
 **Planned**
-- [ ] **Android companion** — LAN remote that drives the desktop backend from your phone
-- [ ] **Android standalone** — on-device culling for small libraries (no desktop needed)
+- [ ] **Android standalone (in progress)**: [native Android app](mobile/README.md) with photo import, on-device technical analysis, and saved reviews
+- [ ] **Android companion**: optional LAN remote for the desktop backend
 - [ ] Cursor-based pagination, auto-tuned aesthetic/burst thresholds, iOS parity
 
 ## Quickstart (from source)
