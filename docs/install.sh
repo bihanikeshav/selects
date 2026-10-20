@@ -1,7 +1,7 @@
 #!/bin/sh
 # selects one-line installer (macOS / Linux).
 #
-#   curl -LsSf https://bihanikeshav.github.io/selects/install.sh | sh
+#   curl -LsSf https://selects.best/install.sh | sh
 #
 # Installs through uv, so there is no downloaded app bundle for Gatekeeper to
 # flag and nothing to code-sign. uv brings its own managed Python, so you do
