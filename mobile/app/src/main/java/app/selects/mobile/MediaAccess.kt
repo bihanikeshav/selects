@@ -21,6 +21,14 @@ import java.time.format.DateTimeFormatter
 import java.time.format.ResolverStyle
 
 object MediaAccess {
+    fun includedSources(context: Context): Set<AlbumSource> =
+        context
+            .getSharedPreferences("gallery_filters", 0)
+            .getStringSet("included_sources", emptySet())
+            .orEmpty()
+            .mapNotNull { runCatching { AlbumSource.valueOf(it) }.getOrNull() }
+            .toSet()
+
     fun isTrashed(context: Context, uri: Uri): Boolean {
         if (Build.VERSION.SDK_INT < 30) return false
         return try {
@@ -90,7 +98,9 @@ object MediaAccess {
                 MediaStore.Images.Media.SIZE,
                 MediaStore.Images.Media.BUCKET_ID,
                 MediaStore.Images.Media.BUCKET_DISPLAY_NAME,
-            )
+            ) +
+                if (Build.VERSION.SDK_INT >= 29) arrayOf(MediaStore.MediaColumns.RELATIVE_PATH)
+                else emptyArray()
         return context.contentResolver
             .query(collection, columns, null, null, "${MediaStore.Images.Media._ID} ASC")
             ?.use { c ->
@@ -106,6 +116,9 @@ object MediaAccess {
                                 c.getString(5) ?: "",
                                 c.getLong(4),
                                 c.getLong(3),
+                                relativePath =
+                                    if (Build.VERSION.SDK_INT >= 29) c.getString(7).orEmpty()
+                                    else "",
                             )
                         )
                     }
@@ -123,7 +136,9 @@ object MediaAccess {
                     MediaStore.Images.Media.SIZE,
                     MediaStore.Images.Media.BUCKET_ID,
                     MediaStore.Images.Media.BUCKET_DISPLAY_NAME,
-                )
+                ) +
+                    if (Build.VERSION.SDK_INT >= 29) arrayOf(MediaStore.MediaColumns.RELATIVE_PATH)
+                    else emptyArray()
             context.contentResolver.query(uri, cols, null, null, null)?.use { c ->
                 if (c.moveToFirst())
                     return MediaEntry(
@@ -134,6 +149,8 @@ object MediaAccess {
                         c.getString(4) ?: "",
                         c.getLong(3),
                         c.getLong(2),
+                        relativePath =
+                            if (Build.VERSION.SDK_INT >= 29) c.getString(6).orEmpty() else "",
                     )
             }
         }
@@ -162,6 +179,7 @@ object MediaAccess {
         entry: MediaEntry,
         old: Photo?,
         locationAllowed: Boolean = location(context),
+        readOriginal: Boolean = true,
     ): MediaEntry {
         val version = if (locationAllowed) 2 else 1
         if (
@@ -177,6 +195,13 @@ object MediaAccess {
                 metadataRead = true,
             )
         if (!locationAllowed && entry.taken > 0) return entry.copy(metadataRead = true)
+        if (!readOriginal)
+            return entry.copy(
+                taken =
+                    entry.taken.takeIf { it > 0 }
+                        ?: old?.taken?.takeIf { it > 0 }
+                        ?: entry.modified * 1000
+            )
         return try {
             val uri = Uri.parse(entry.uri)
             val original =

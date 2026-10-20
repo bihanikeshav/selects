@@ -20,6 +20,23 @@ import org.robolectric.annotation.Config
 @Config(sdk = [35])
 class MediaAccessTest {
     @Test
+    fun excludedSourcesUseOnlyCatalogDatesUntilCleanupRequestsOriginalMetadata() {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        val entry =
+            MediaEntry(
+                "content://media/external/images/media/999",
+                "image",
+                taken = 123,
+                album = "WhatsApp Images",
+            )
+        val result =
+            MediaAccess.metadata(app, entry, null, locationAllowed = true, readOriginal = false)
+        assertEquals(123, result.taken)
+        assertFalse(result.metadataRead)
+        assertNull(result.latitude)
+    }
+
+    @Test
     fun unchangedMetadataUsesCacheWithoutOpeningTheOriginal() {
         val app = ApplicationProvider.getApplicationContext<Application>()
         val entry =

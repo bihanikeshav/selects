@@ -165,6 +165,47 @@ class GalleryStoreTest {
     }
 
     @Test
+    fun albumFiltersLeaveAppPhotosAvailableToWholeGalleryCleanup() {
+        val entries =
+            listOf(
+                entry(1).copy(album = "Camera", relativePath = "DCIM/Camera/"),
+                entry(2).copy(album = "Screenshots", relativePath = "DCIM/Screenshots/"),
+                entry(3).copy(album = "WhatsApp Images"),
+            )
+        store.upsertBatch(entries, "scan", 2, emptyMap())
+        assertEquals(3, store.catalog().size)
+        assertEquals(1, store.catalog().count { AlbumSources.allowed(it, emptySet()) })
+        assertEquals("DCIM/Camera/", store.find(entry(1).uri)!!.relativePath)
+        store.queueGallery()
+        assertEquals(3, store.queuedCount())
+    }
+
+    @Test
+    fun versionTwoUpgradeAndPathBackfillPreserveHealthyAnalysisAndReviews() {
+        val id = store.upsert(entry(1), "old", 2)
+        store.complete(id, null, Quality(90, .01, 0.0))
+        store.saveHash(id, "existing")
+        store.decide(id, "keep")
+        store.writableDatabase.execSQL("ALTER TABLE photos DROP COLUMN relative_path")
+        store.writableDatabase.version = 2
+        store.close()
+        store = PhotoStore(context)
+        assertEquals("", store.find(entry(1).uri)!!.relativePath)
+        store.upsertBatch(
+            listOf(entry(1).copy(relativePath = "DCIM/Camera/", metadataRead = true)),
+            "backfill",
+            2,
+            store.scanSnapshot(),
+        )
+        val photo = store.find(entry(1).uri)!!
+        assertEquals("DCIM/Camera/", photo.relativePath)
+        assertEquals("keep", photo.decision)
+        assertEquals("ready", photo.status)
+        assertEquals("existing", photo.sha)
+        assertEquals(0, store.queuedCount())
+    }
+
+    @Test
     fun versionOneMigrationPreservesTheExistingLibrary() {
         store.close()
         context.deleteDatabase("selects.db")

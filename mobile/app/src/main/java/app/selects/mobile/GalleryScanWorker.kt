@@ -34,6 +34,13 @@ class GalleryScanWorker(context: Context, params: WorkerParameters) :
                     val seen = id.toString()
                     val version = if (MediaAccess.location(applicationContext)) 2 else 1
                     val previous = store.scanSnapshot()
+                    val cleanup = inputData.getBoolean("cleanup", false)
+                    val included = MediaAccess.includedSources(applicationContext)
+                    val readUris =
+                        entries
+                            .filter { cleanup || AlbumSources.allowed(it, included) }
+                            .map { it.uri }
+                            .toHashSet()
                     val metadataDispatcher = Dispatchers.IO.limitedParallelism(4)
                     val deadline = System.currentTimeMillis() + 360_000
                     var lastUpdate = 0L
@@ -41,6 +48,7 @@ class GalleryScanWorker(context: Context, params: WorkerParameters) :
                     var lastLog = started
                     var unread = 0
                     var done = 0
+                    var inventoried = 0
                     entries.chunked(128).forEach { batch ->
                         coroutineContext.ensureActive()
                         if (System.currentTimeMillis() > deadline) return@withContext Result.retry()
@@ -54,6 +62,7 @@ class GalleryScanWorker(context: Context, params: WorkerParameters) :
                                             entry,
                                             previous[entry.uri],
                                             locationAllowed = version == 2,
+                                            readOriginal = entry.uri in readUris,
                                         )
                                     }
                                 }
@@ -61,29 +70,34 @@ class GalleryScanWorker(context: Context, params: WorkerParameters) :
                         }
                         coroutineContext.ensureActive()
                         store.upsertBatch(enriched, seen, version, previous)
-                        done += batch.size
-                        unread += enriched.count { !it.metadataRead }
+                        inventoried += batch.size
+                        done += batch.count { it.uri in readUris }
+                        unread += enriched.count { it.uri in readUris && !it.metadataRead }
                         val elapsed = android.os.SystemClock.elapsedRealtime()
-                        if (elapsed - lastLog >= 5_000 || done == entries.size) {
+                        if (elapsed - lastLog >= 5_000 || inventoried == entries.size) {
                             android.util.Log.d(
                                 "SelectsScan",
-                                "photos=$done/${entries.size} elapsedMs=${elapsed - started} unread=$unread",
+                                "photos=$done/${readUris.size} elapsedMs=${elapsed - started} unread=$unread inventory=$inventoried/${entries.size}",
                             )
                             lastLog = elapsed
                         }
-                        if (done == entries.size || System.currentTimeMillis() - lastUpdate > 500) {
+                        if (
+                            inventoried == entries.size ||
+                                System.currentTimeMillis() - lastUpdate > 500
+                        ) {
                             store.progress(
                                 "scan",
-                                "Reading dates and locations",
+                                if (cleanup) "Reading gallery for cleanup"
+                                else "Reading personal photo dates and locations",
                                 done,
-                                entries.size,
+                                readUris.size,
                             )
                             setProgress(workDataOf("done" to done))
                             lastUpdate = System.currentTimeMillis()
                         }
                     }
                     store.finishScan(seen)
-                    store.progress("scan", "Gallery ready", entries.size, entries.size, "complete")
+                    store.progress("scan", "Gallery ready", done, readUris.size, "complete")
                     if (inputData.getBoolean("cleanup", false)) {
                         store.queueGallery()
                         store.queueRepairs()

@@ -34,6 +34,7 @@ data class Photo(
     val clipped: Double? = null,
     val aspect: Double = 0.0,
     val metadataVersion: Int = 0,
+    val relativePath: String = "",
 )
 
 data class MediaEntry(
@@ -47,6 +48,7 @@ data class MediaEntry(
     val latitude: Double? = null,
     val longitude: Double? = null,
     val metadataRead: Boolean = false,
+    val relativePath: String = "",
 )
 
 data class JobProgress(
@@ -60,7 +62,7 @@ data class JobProgress(
         get() = if (total > 0) (done.toFloat() / total).coerceIn(0f, 1f) else 0f
 }
 
-class PhotoStore(context: Context) : SQLiteOpenHelper(context, "selects.db", null, 2) {
+class PhotoStore(context: Context) : SQLiteOpenHelper(context, "selects.db", null, 3) {
     init {
         setWriteAheadLoggingEnabled(true)
     }
@@ -74,10 +76,16 @@ class PhotoStore(context: Context) : SQLiteOpenHelper(context, "selects.db", nul
         )
         db.execSQL("CREATE INDEX photos_status ON photos(status,id)")
         gallerySchema(db)
+        pathSchema(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) gallerySchema(db)
+        if (oldVersion < 3) pathSchema(db)
+    }
+
+    private fun pathSchema(db: SQLiteDatabase) {
+        db.execSQL("ALTER TABLE photos ADD COLUMN relative_path TEXT NOT NULL DEFAULT ''")
     }
 
     private fun gallerySchema(db: SQLiteDatabase) {
@@ -152,6 +160,7 @@ class PhotoStore(context: Context) : SQLiteOpenHelper(context, "selects.db", nul
             d("clipped"),
             d("aspect") ?: 0.0,
             n("metadata_version").toInt(),
+            s("relative_path")!!,
         )
     }
 
@@ -186,7 +195,16 @@ class PhotoStore(context: Context) : SQLiteOpenHelper(context, "selects.db", nul
         previous: Map<String, Photo>,
     ) = transaction {
         entries.forEach { entry ->
-            upsertKnown(entry, seen, if (entry.metadataRead) version else 0, previous[entry.uri])
+            val old = previous[entry.uri]
+            val cachedVersion =
+                old?.takeIf { it.bytes == entry.bytes && it.modified == entry.modified }
+                    ?.metadataVersion ?: 0
+            upsertKnown(
+                entry,
+                seen,
+                if (entry.metadataRead) maxOf(version, cachedVersion) else cachedVersion,
+                old,
+            )
         }
     }
 
@@ -202,6 +220,7 @@ class PhotoStore(context: Context) : SQLiteOpenHelper(context, "selects.db", nul
                 put("taken", e.taken)
                 put("album", e.album)
                 put("album_id", e.albumId)
+                put("relative_path", e.relativePath)
                 put("bytes", e.bytes)
                 put("modified", e.modified)
                 put("latitude", e.latitude)

@@ -240,23 +240,20 @@ private fun ImportPage(
     confirm: (Set<Long>) -> Unit,
 ) {
     var albumsOpen by rememberSaveable { mutableStateOf(false) }
+    var filtersOpen by rememberSaveable { mutableStateOf(false) }
     var selectedAlbums by remember { mutableStateOf(emptySet<String>()) }
     var selectedGroups by remember { mutableStateOf(emptySet<Long>()) }
     var editing by remember { mutableStateOf<Long?>(null) }
     val busy = state.scanning || state.processing || state.importing
     val albums =
-        remember(state.catalog) {
-            state.catalog
+        remember(state.albumPhotos) {
+            state.albumPhotos
                 .groupBy { it.albumId.ifBlank { it.album } }
                 .entries
                 .sortedBy { it.value.first().album }
         }
-    val groups =
-        state.groups.filter { g ->
-            selectedAlbums.isEmpty() ||
-                g.photos.any { it.albumId.ifBlank { it.album } in selectedAlbums }
-        }
-    LaunchedEffect(state.groups.map { it.photos.map(Photo::id) }) { selectedGroups = emptySet() }
+    val groups = state.groups
+    LaunchedEffect(state.groups.map { it.id to it.photos.size }) { selectedGroups = emptySet() }
     LazyColumn(
         Modifier.fillMaxSize(),
         contentPadding = PaddingValues(top = 20.dp, bottom = 32.dp),
@@ -335,8 +332,52 @@ private fun ImportPage(
                     Text("Use photo locations")
                 }
             }
+        item {
+            if (state.manualSelection) {
+                Text(
+                    "Using your selected photos or folders. Automatic source filters do not remove anything from this selection.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                TextButton(
+                    onClick = {
+                        selectedAlbums = emptySet()
+                        model.allGroups()
+                    },
+                    enabled = !busy,
+                ) {
+                    Text("Back to automatic albums")
+                }
+            }
+            TextButton(onClick = { filtersOpen = !filtersOpen }) {
+                Text(if (filtersOpen) "Hide album filters" else "Album filters")
+            }
+            if (filtersOpen) {
+                Text(
+                    "Camera and personal folders are included. Add other sources below. These filters never limit cleanup.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                AlbumSource.entries
+                    .filter { it != AlbumSource.PERSONAL }
+                    .forEach { source ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "${source.label} (${state.sourceCounts[source] ?: 0})",
+                                Modifier.weight(1f),
+                            )
+                            Switch(
+                                checked = source in state.includedSources,
+                                onCheckedChange = {
+                                    selectedAlbums = emptySet()
+                                    model.includeSource(source, it)
+                                },
+                                enabled = !busy,
+                            )
+                        }
+                    }
+            }
+        }
         if (albumsOpen) {
-            item { Text("Albums", style = MaterialTheme.typography.titleLarge) }
+            item { Text("Folders on your phone", style = MaterialTheme.typography.titleLarge) }
             items(albums, key = { it.key }) { album ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(
@@ -358,7 +399,10 @@ private fun ImportPage(
             }
             item {
                 Button(
-                    onClick = { albumsOpen = false },
+                    onClick = {
+                        model.reviewAlbums(selectedAlbums)
+                        albumsOpen = false
+                    },
                     enabled = selectedAlbums.isNotEmpty() && !busy,
                 ) {
                     Text("Review split for selected albums")
@@ -367,25 +411,22 @@ private fun ImportPage(
         } else {
             item {
                 Text(
-                    "${state.catalog.size} accessible photos",
+                    "${if (state.manualSelection) groups.sumOf { it.photos.size } else state.albumPhotos.size} photos for albums",
                     style = MaterialTheme.typography.titleMedium,
                 )
                 Text(
                     "${groups.size} suggested groups · ${state.scope}",
                     style = MaterialTheme.typography.bodySmall,
                 )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Split at every day", Modifier.weight(1f))
-                    Switch(
-                        checked = state.daily,
-                        onCheckedChange = model::splitDaily,
-                        enabled = !busy,
-                    )
-                }
                 Text(
-                    "Dates use capture time when available, otherwise file dates. GPS is used only when present. Review the split below.",
+                    "Named folders stay together. Camera photos form broad trips and events, aiming for up to 50 suggestions.",
                     style = MaterialTheme.typography.bodySmall,
                 )
+                if (!state.manualSelection)
+                    Text(
+                        "${state.sourceCounts.values.sum() - state.albumPhotos.size} app and screenshot photos excluded from automatic albums. Cleanup still covers the whole gallery.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
             }
             if (groups.isNotEmpty())
                 item {

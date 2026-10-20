@@ -35,16 +35,20 @@ data class LibraryState(
     val fullAccess: Boolean = false,
     val hasAccess: Boolean = false,
     val locationAccess: Boolean = false,
-    val daily: Boolean = false,
+    val includedSources: Set<AlbumSource> = emptySet(),
+    val albumPhotos: List<Photo> = emptyList(),
+    val sourceCounts: Map<AlbumSource, Int> = emptyMap(),
+    val manualSelection: Boolean = false,
     val message: String? = null,
     val pending: Int = 0,
-    val scope: String = "Phone gallery",
+    val scope: String = "Camera & personal folders",
 )
 
 class LibraryViewModel(application: Application) : AndroidViewModel(application) {
     private val store = PhotoStore(application)
     private val work = WorkManager.getInstance(application)
-    private val mutableState = MutableStateFlow(LibraryState())
+    private val mutableState =
+        MutableStateFlow(LibraryState(includedSources = MediaAccess.includedSources(application)))
     val state = mutableState.asStateFlow()
     private val refreshLock = Mutex()
     private var proposalKey = ""
@@ -90,20 +94,36 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
                     Triple(store.photos(), store.catalog(), store.jobs())
                 }
             val current = mutableState.value
+            val eligibility =
+                withContext(Dispatchers.Default) {
+                    val gallery = snapshot.second.filter { it.source == "gallery" }
+                    gallery.filter { AlbumSources.allowed(it, current.includedSources) } to
+                        gallery.groupingBy(AlbumSources::classify).eachCount()
+                }
+            val albumPhotos = eligibility.first
             val pending = snapshot.second.count { it.status == "queued" }
             val candidates =
-                snapshot.second.filter { !it.imported && (scopeIds == null || it.id in scopeIds!!) }
+                (if (scopeIds == null) albumPhotos
+                    else snapshot.second.filter { it.id in scopeIds!! })
+                    .filter { !it.imported }
             val key =
                 candidates
-                    .map { listOf(it.id, it.taken, it.albumId, it.latitude, it.longitude) }
+                    .map {
+                        listOf(
+                            it.id,
+                            it.taken,
+                            it.album,
+                            it.albumId,
+                            it.relativePath,
+                            it.latitude,
+                            it.longitude,
+                        )
+                    }
                     .hashCode()
-                    .toString() + current.daily
+                    .toString()
             val groups =
                 if (key == proposalKey) current.groups
-                else
-                    withContext(Dispatchers.Default) {
-                        SmartGrouping.suggest(candidates, current.daily)
-                    }
+                else withContext(Dispatchers.Default) { SmartGrouping.suggest(candidates) }
             proposalKey = key
             val cleanup =
                 if (current.scanning || current.processing || pending > 0) emptyList()
@@ -112,6 +132,8 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
                 mutableState.value.copy(
                     photos = snapshot.first,
                     catalog = snapshot.second,
+                    albumPhotos = albumPhotos,
+                    sourceCounts = eligibility.second,
                     groups = groups,
                     cleanup = cleanup,
                     jobs = snapshot.third,
@@ -142,7 +164,12 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
             .apply()
         scopeIds = null
         mutableState.value =
-            mutableState.value.copy(scope = "Phone gallery", message = null, scanning = true)
+            mutableState.value.copy(
+                scope = "Camera & personal folders",
+                message = null,
+                scanning = true,
+                manualSelection = false,
+            )
         work.enqueueUniqueWork(
             SCAN_WORK,
             ExistingWorkPolicy.KEEP,
@@ -154,7 +181,13 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
 
     fun allGroups() {
         scopeIds = null
-        mutableState.value = mutableState.value.copy(scope = "Phone gallery")
+        proposalKey = ""
+        mutableState.value =
+            mutableState.value.copy(
+                scope = "Camera & personal folders",
+                manualSelection = false,
+                groups = emptyList(),
+            )
         viewModelScope.launch { refresh() }
     }
 
@@ -205,7 +238,9 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
             mutableState.value =
                 mutableState.value.copy(
                     importing = false,
+                    groups = emptyList(),
                     scope = "Gallery selection",
+                    manualSelection = true,
                     message =
                         if (failures > 0)
                             "$failures photos could not retain access. Use the album browser instead."
@@ -215,8 +250,39 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun splitDaily(value: Boolean) {
-        mutableState.value = mutableState.value.copy(daily = value)
+    fun includeSource(source: AlbumSource, included: Boolean) {
+        val sources =
+            mutableState.value.includedSources.let { if (included) it + source else it - source }
+        getApplication<Application>()
+            .getSharedPreferences("gallery_filters", 0)
+            .edit()
+            .putStringSet("included_sources", sources.map { it.name }.toSet())
+            .apply()
+        scopeIds = null
+        mutableState.value =
+            mutableState.value.copy(
+                includedSources = sources,
+                groups = emptyList(),
+                manualSelection = false,
+                scope = "Camera & personal folders",
+            )
+        proposalKey = ""
+        viewModelScope.launch { refresh() }
+    }
+
+    fun reviewAlbums(keys: Set<String>) {
+        scopeIds =
+            mutableState.value.catalog
+                .filter { it.albumId.ifBlank { it.album } in keys }
+                .map { it.id }
+                .toSet()
+        mutableState.value =
+            mutableState.value.copy(
+                manualSelection = true,
+                scope = "${keys.size} selected folders",
+                groups = emptyList(),
+            )
+        proposalKey = ""
         viewModelScope.launch { refresh() }
     }
 

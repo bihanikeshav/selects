@@ -5,8 +5,9 @@ Standalone, on-device photo organization and cleanup. No desktop server, account
 ## Gallery import and grouping
 
 - Scan the accessible on-device gallery, choose complete albums, or bulk-select in a native gallery app. Samsung Gallery is preferred when installed; other devices use their gallery chooser.
-- Suggest groups using album boundaries, capture dates, gaps between sessions, and embedded GPS when available. A 50 km change splits locations; missing GPS never invents a place or bridges distant anchors. Capture dates fall back to file dates. Displayed dates use the phone's timezone.
-- Confirm groups before adding references to the library. Select all groups, choose specific albums, split every day, merge groups, or rename them.
+- Camera and personal folders are eligible for automatic albums. Screenshots, messaging folders such as WhatsApp, social apps, and downloads/app-generated media are excluded by default. Persistent source switches let users include them. Classification uses folder names and MediaStore relative paths, never image contents. An explicit native-gallery or whole-folder selection is honored independently of automatic source filters.
+- Existing named personal folders stay together. Camera and Expert RAW share a timeline. Broad date/location periods are combined using neighboring date gaps and available GPS to target at most 50 overview suggestions, rather than splitting every night. Unknown capture dates stay separate. If the user already has more than 50 named folders, their existing folder boundaries are preserved. No location names are invented. Dates fall back to file dates and use the phone's timezone.
+- Confirm groups before adding references to the library. Select all groups, choose specific folders, merge groups, or rename them. Choosing a folder scopes the photos before grouping so a camera group cannot pull in unselected folders.
 - Originals stay in place. The database holds content URIs, metadata, fingerprints, and reviews. New scans do not generate copies or JPEG previews. The grid uses Android thumbnails, with a bounded decode fallback. Old development-build previews can still be displayed.
 - Keep/reject decisions survive rescans, source changes, and database upgrades. Size/modified stamps invalidate stale analysis; unchanged metadata and analysis skip image reads.
 
@@ -17,6 +18,8 @@ Embedded photo-location access is optional and does not request live location. I
 ## Cleanup and progress
 
 Gallery scans cache the previous catalog once, read metadata with at most four workers, and save checkpoints in transactions of 128 photos. Unchanged files reuse their metadata without opening originals. Progress updates do not reload the full catalog each time; album/group snapshots refresh at most every 10 seconds during work and immediately on completion. Pause/resume retains committed checkpoints.
+
+Normal scans read original metadata only for eligible album sources. Other sources retain lightweight MediaStore inventory rows for cleanup without opening their originals. Progress counts eligible photos, not excluded app media. Whole-gallery cleanup deliberately reads and analyzes every accessible source. Database version 3 backfills relative paths without invalidating healthy analysis or reviews.
 
 - Whole-gallery cleanup first refreshes the catalog, then analyzes orientation-correct previews bounded to 640 pixels in memory.
 - Exact duplicates require SHA-256 of unredacted originals. Only same-size candidates need file hashing. Hashes are cached until source stamps change.
