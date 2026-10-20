@@ -2,6 +2,7 @@ package app.selects.mobile
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import java.io.File
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
@@ -9,7 +10,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
-import java.io.File
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
@@ -17,16 +17,22 @@ class PhotoStoreTest {
     private lateinit var store: PhotoStore
     private lateinit var preview: File
 
-    @Before fun setUp() {
+    @Before
+    fun setUp() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.deleteDatabase("selects.db")
         store = PhotoStore(context)
         preview = File(context.filesDir, "test-preview.jpg").apply { writeText("preview") }
     }
 
-    @After fun tearDown() { store.close(); preview.delete() }
+    @After
+    fun tearDown() {
+        store.close()
+        preview.delete()
+    }
 
-    @Test fun repeatImportIsIdempotentAndHealthyRepairIsNoOp() {
+    @Test
+    fun repeatImportIsIdempotentAndHealthyRepairIsNoOp() {
         assertTrue(store.add("content://photos/1", "日本.jpg"))
         assertFalse(store.add("content://photos/1", "日本.jpg"))
         val photo = store.nextQueued()!!
@@ -37,7 +43,8 @@ class PhotoStoreTest {
         assertEquals("reject", store.photos().single().decision)
     }
 
-    @Test fun failuresAndMissingPreviewsRepairWithoutLosingDecisions() {
+    @Test
+    fun failuresAndMissingPreviewsRepairWithoutLosingDecisions() {
         store.add("content://photos/1", "photo.jpg")
         val id = store.nextQueued()!!.id
         store.decide(id, "keep")
@@ -46,11 +53,14 @@ class PhotoStoreTest {
         assertEquals(0, store.queueRepairs())
         store.complete(id, preview.path, Quality(80, .1, .01))
         preview.delete()
-        assertEquals(1, store.queueRepairs())
-        assertEquals("keep", store.nextQueued()!!.decision)
+        assertEquals(0, store.queueRepairs())
+        assertNull(store.nextQueued())
+        assertEquals("keep", store.photos().single().decision)
+        assertNull(store.photos().single().preview)
     }
 
-    @Test fun staleAnalysisIsQueuedOnce() {
+    @Test
+    fun staleAnalysisIsQueuedOnce() {
         store.add("content://photos/1", "photo.jpg")
         val id = store.nextQueued()!!.id
         store.complete(id, preview.path, Quality(80, .1, .01))
@@ -59,7 +69,8 @@ class PhotoStoreTest {
         assertEquals(0, store.queueRepairs())
     }
 
-    @Test fun reviewsAndPendingWorkSurviveReopeningTheDatabase() {
+    @Test
+    fun reviewsAndPendingWorkSurviveReopeningTheDatabase() {
         store.add("content://photos/1", "photo.jpg")
         val id = store.nextQueued()!!.id
         store.decide(id, "keep")

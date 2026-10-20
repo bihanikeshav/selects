@@ -1,5 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
+    <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION" />
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.GET_CONTENT" />
+            <data android:mimeType="image/*" />
+        </intent>
+    </queries>
     <application android:label="Selects" android:theme="@style/AppTheme"
         android:icon="@drawable/selects_mark" android:dataExtractionRules="@xml/data_extraction_rules"
         android:allowBackup="false" android:supportsRtl="true">

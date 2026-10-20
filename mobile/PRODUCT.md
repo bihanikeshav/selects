@@ -18,8 +18,8 @@ Follow the existing practical, calm Material-style product. Use native typograph
 
 ## Interaction principles
 
-Use the system picker and selected-photo access. Show real processing state and recoverable errors. Save reviews locally. Keep and reject are explicit, reversible actions. Reprocessing preserves decisions and skips healthy analysis. Use text as well as color for state, minimum native touch targets, readable type, and descriptions for photo previews.
+Support the whole accessible phone gallery, complete albums, and bulk selection in a native gallery app. Originals stay where they are; store URI references and compact analysis, and use Android's thumbnail cache for display. Explain full versus selected-photo access. Suggest groups using capture dates, album context, and embedded locations, then ask the person to confirm the split. Never invent locations. Offer whole-gallery cleanup review for exact duplicates, similar images, very low detail, and explicit rejects. Nothing is selected for deletion automatically. Protect kept photos and a representative of each duplicate group. Use Android's recoverable trash flow with final system confirmation. Show determinate scan and analysis progress with pause/resume. Preserve decisions and skip unchanged analysis.
 
 ## Limits
 
-Do not present technical scores as aesthetic understanding. No decorative onboarding, account requirement, or desktop connection step. The first development slice is image import, technical analysis, and persistent review.
+Do not present technical scores as aesthetic understanding. No decorative onboarding, account requirement, or desktop connection step. Cleanup flags are suggestions, not judgments about whether a photo matters. Location metadata is optional. A third-party gallery controls its own selection UI; the in-app album browser guarantees complete-album selection independently.

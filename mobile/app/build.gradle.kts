@@ -10,8 +10,8 @@ android {
         applicationId = "app.selects.mobile"
         minSdk = 28
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0-dev"
+        versionCode = 2
+        versionName = "0.2.0-dev"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildFeatures { compose = true }
@@ -33,6 +33,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.4")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.4")
     implementation("androidx.work:work-runtime-ktx:2.10.5")
+    implementation("androidx.exifinterface:exifinterface:1.4.1")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.16")
     testImplementation("androidx.test:core:1.7.0")
