@@ -73,10 +73,10 @@ SmartScreen to flag. It opens the web UI; AI models download from the app's firs
 
 ```bash
 # macOS / Linux
-curl -LsSf https://bihanikeshav.github.io/selects/install.sh | sh
+curl -LsSf https://selects.best/install.sh | sh
 
 # Windows (PowerShell)
-irm https://bihanikeshav.github.io/selects/install.ps1 | iex
+irm https://selects.best/install.ps1 | iex
 ```
 
 **Desktop bundle** — prefer a self-contained download? Grab the bundle for your OS from

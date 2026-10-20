@@ -1,6 +1,6 @@
 # selects one-line installer (Windows, PowerShell).
 #
-#   irm https://bihanikeshav.github.io/selects/install.ps1 | iex
+#   irm https://selects.best/install.ps1 | iex
 #
 # Installs through uv, so there is no downloaded .exe for SmartScreen to flag
 # and nothing to code-sign. uv brings its own managed Python, so you do not
